@@ -1,0 +1,25 @@
+# 忽略文件
+node_modules/
+dist/
+.env
+.DS_Store
+*.log
+pnpm-lock.yaml
+package-lock.json
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.pytest_cache/
+
+# Docker
+.docker/
+
+# IDE
+.vscode/
+.idea/
+
+# 临时文件
+*.tmp
+*.swp

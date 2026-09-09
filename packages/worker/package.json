@@ -1,0 +1,9 @@
+{
+  "name": "worker",
+  "version": "0.1.0",
+  "description": "AI Studio Python Worker",
+  "scripts": {
+    "dev": "bash -c 'source venv/bin/activate && python main.py'",
+    "start": "bash -c 'source venv/bin/activate && uvicorn main:app --host 0.0.0.0 --port 8001'"
+  }
+}

@@ -1,0 +1,86 @@
+version: '3.8'
+
+services:
+  # PostgreSQL 数据库（独立）
+  video-postgres:
+    image: postgres:16-alpine
+    container_name: video-flow-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: video_user
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: video_flow
+    volumes:
+      - video_postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"  # 避免和其他项目冲突
+    networks:
+      - video-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U video_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend API
+  video-backend:
+    build:
+      context: ./packages/backend
+      dockerfile: Dockerfile
+    container_name: video-flow-backend
+    restart: unless-stopped
+    depends_on:
+      video-postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://video_user:${DB_PASSWORD}@video-postgres:5432/video_flow
+      NODE_ENV: production
+      PORT: 3000
+      CORS_ORIGIN: ${CORS_ORIGIN}
+    ports:
+      - "3100:3000"  # 外部 3100，内部 3000
+    networks:
+      - video-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Worker
+  video-worker:
+    build:
+      context: ./packages/worker
+      dockerfile: Dockerfile
+    container_name: video-flow-worker
+    restart: unless-stopped
+    depends_on:
+      - video-backend
+    environment:
+      BACKEND_URL: http://video-backend:3000
+      VOLCENGINE_ACCESS_KEY: ${VOLCENGINE_ACCESS_KEY}
+      OSS_ACCESS_KEY_ID: ${OSS_ACCESS_KEY_ID}
+      OSS_ACCESS_KEY_SECRET: ${OSS_ACCESS_KEY_SECRET}
+      OSS_BUCKET: ${OSS_BUCKET}
+      OSS_REGION: ${OSS_REGION}
+      COMFYUI_ENABLED: "false"
+      COMFYUI_OUTPUT_DIR: /app/output
+    volumes:
+      - video_output:/app/output
+    ports:
+      - "8101:8001"
+    networks:
+      - video-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  video_postgres_data:
+  video_output:
+
+networks:
+  video-network:
+    driver: bridge

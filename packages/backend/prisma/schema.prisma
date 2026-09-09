@@ -1,0 +1,56 @@
+// MVP 版本 - 2 个表
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 任务表
+model Task {
+  id          String    @id @default(uuid()) @db.Uuid
+
+  // 创建者
+  createdBy   String    @map("created_by")
+
+  // 输入
+  prompt      String
+  imageUrl    String?   @map("image_url")
+
+  // 输出
+  videoUrl    String?   @map("video_url")
+
+  // 状态
+  status      String    @default("pending") // pending, running, completed, failed
+  errorMsg    String?   @map("error_msg")
+
+  // 费用
+  cost        Float?    @db.Real
+
+  // 时间
+  createdAt   DateTime  @default(now()) @map("created_at")
+  completedAt DateTime? @map("completed_at")
+
+  @@index([status])
+  @@index([createdBy])
+  @@map("tasks")
+}
+
+// 配置表（单条记录）
+model Config {
+  id                    String @id @default("default")
+
+  // 火山引擎
+  volcengineApiKey      String @map("volcengine_api_key")
+
+  // 阿里云 OSS
+  ossAccessKeyId        String @map("oss_access_key_id")
+  ossAccessKeySecret    String @map("oss_access_key_secret")
+  ossBucket             String @map("oss_bucket") @default("sweetyshell-ai-assets")
+  ossRegion             String @map("oss_region") @default("oss-cn-beijing")
+
+  @@map("config")
+}
