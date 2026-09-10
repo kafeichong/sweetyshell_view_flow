@@ -1,22 +1,38 @@
-import httpx
 import asyncio
+import httpx
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Dict, Any
-from config import get_settings
-from models import Job, JobStatus, FailureType
-from providers.seedance_adapter import SeedanceAdapter
-from oss_uploader import OssUploader
-from recovery import build_cost_audit, cost_status, format_cost, is_stale_job, should_resume_job
+from typing import Any, Dict, Optional
+
 from comfyui_client import ComfyUIClient
 from comfyui_executor import (
-    ComfyUIExecutionError,
     ComfyUIDryRunExecutor,
+    ComfyUIExecutionError,
     ComfyUIExecutionResult,
 )
+from config import get_settings
+from models import FailureType, Job, JobStatus
+from providers.seedance_adapter import ProviderSubmissionUncertainError, SeedanceAdapter
+from recovery import build_cost_audit, cost_status, format_cost, is_stale_job, should_resume_job
+from oss_uploader import OssUploader
 
 settings = get_settings()
+
+
+def _normalize_cost_status(cost_status: Optional[str]) -> str:
+    """Map runtime cost status to backend accepted enum values."""
+    if not cost_status or not isinstance(cost_status, str):
+        return "unavailable"
+
+    normalized = cost_status.lower().strip()
+    if normalized == "confirmed":
+        return "usage_calculated"
+
+    if normalized in {"estimated", "usage_calculated", "billed", "unavailable"}:
+        return normalized
+
+    return "unavailable"
 
 
 class JobExecutor:
@@ -26,7 +42,10 @@ class JobExecutor:
         # 缓存配置实例，减少重复解析环境变量带来的重复开销。
         self.backend_url = settings.backend_url
         # 重用异步 HTTP client，降低轮询任务执行时的连接建立成本。
-        self.client = httpx.AsyncClient(timeout=30.0)
+        # claim / recover / PATCH 已加 WorkerServiceGuard，统一在默认头上带服务令牌。
+        self.client = httpx.AsyncClient(
+            timeout=30.0, headers=self._worker_headers()
+        )
         # provider 适配器按能力名映射，新增供应商时只需扩展此字典。
         self.adapters = {
             "seedance": SeedanceAdapter()
@@ -52,60 +71,127 @@ class JobExecutor:
                 on_submitted=self._record_comfyui_submission,
             )
 
-    async def fetch_pending_jobs(self) -> list[Job]:
-        """从 Backend 拉取 pending 状态的任务"""
-        try:
-            response = await self.client.get(
-                f"{self.backend_url}/api/tasks",
-                params={"status": "pending", "limit": 10}
-            )
-            response.raise_for_status()
-            data = response.json()
+    @staticmethod
+    def _worker_headers() -> Dict[str, str]:
+        """Backend 的 Worker 私有接口要求 X-Worker-Token。"""
+        token = getattr(settings, "worker_service_token", "")
+        return {"X-Worker-Token": token} if token else {}
 
-            # Backend 直接返回数组，不是 {"jobs": [...]} 格式
-            if isinstance(data, list):
-                return [Job(**job) for job in data]
-            # 兼容旧格式
-            return [Job(**job) for job in data.get("jobs", [])]
-        except Exception as e:
-            print(f"Failed to fetch jobs: {e}")
-            return []
+    async def fetch_pending_jobs(self, limit: int = 10) -> list[Job]:
+        """通过原子 claim 拿 pending 任务，支持并发 worker 不重复领取。"""
+        claimed_jobs: list[Job] = []
+
+        for _ in range(limit):
+            try:
+                response = await self.client.post(
+                    f"{self.backend_url}/api/tasks/claim",
+                    json={},
+                )
+                response.raise_for_status()
+
+                payload = response.json()
+                if not payload:
+                    break
+
+                claimed_jobs.append(Job(**payload))
+            except Exception as e:
+                # 网络波动时直接中断该轮，等待下一轮轮询。
+                print(f"Failed to claim jobs: {e}")
+                break
+
+        return claimed_jobs
 
     async def fetch_inflight_jobs(self) -> list[Job]:
         """Fetch submitted/running jobs so polling survives worker restarts."""
         jobs: list[Job] = []
-        for status in (JobStatus.SUBMITTED.value, JobStatus.RUNNING.value):
-            try:
-                response = await self.client.get(
-                    f"{self.backend_url}/api/tasks",
-                    params={"status": status, "limit": 10},
-                )
-                response.raise_for_status()
-                data = response.json()
-                # Backend 直接返回数组
-                if isinstance(data, list):
-                    jobs.extend(Job(**job) for job in data)
-                else:
-                    # 兼容旧格式
-                    jobs.extend(Job(**job) for job in data.get("jobs", []))
-            except Exception as e:
-                print(f"Failed to fetch {status} jobs: {e}")
+
+        try:
+            response = await self.client.get(
+                f"{self.backend_url}/api/tasks/recover"
+            )
+            response.raise_for_status()
+
+            data = response.json()
+            if isinstance(data, list):
+                jobs.extend(Job(**job) for job in data)
+        except Exception as e:
+            print(f"Failed to fetch inflight jobs: {e}")
+            return []
+
         resumable: list[Job] = []
         for job in jobs:
             job_state = {
                 "status": job.status,
                 "provider_task_id": job.providerTaskId,
+                "submitted_at": job.submittedAt,
             }
-            # 只有有提交 ID 的 running/submitted 任务才可安全恢复；否则标记失败并隔离。
+
             if should_resume_job(job_state):
                 resumable.append(job)
                 continue
 
             if job.status in {JobStatus.SUBMITTED.value, JobStatus.RUNNING.value}:
+                if (
+                    job.attemptId
+                    and job.attemptStatus == "submitted"
+                    and not job.providerTaskId
+                ):
+                    persisted = await self.update_job_status(
+                        job.id,
+                        JobStatus.FAILED,
+                        attempt_id=job.attemptId,
+                        attempt_status="requires_review",
+                        failure_type=FailureType.UNKNOWN,
+                        failure_code="PERSISTENCE_UNKNOWN",
+                        failure_message="Provider submission may have happened, need review",
+                        task_status='requires_review',
+                    )
+                    if persisted:
+                        print(
+                            f"[{job.id}] In-flight job moved to requires_review: "
+                            "provider submission state is uncertain"
+                        )
+                    else:
+                        print(
+                            f"[{job.id}] In-flight job requires_review update failed "
+                            "and may be replayed"
+                        )
+                    continue
+
+                if (
+                    job.attemptId
+                    and job.attemptStatus == "pending"
+                    and not job.providerTaskId
+                ):
+                    # Worker 领取后、提交 Provider 前中断：尚未产生付费任务，
+                    # 安全做法是放回 pending，由下一轮以新 attempt 重新领取。
+                    requeued = await self.update_job_status(
+                        job.id,
+                        JobStatus.PENDING,
+                        attempt_id=job.attemptId,
+                        attempt_status="failed",
+                        failure_type=FailureType.UNKNOWN,
+                        failure_code="ABANDONED_BEFORE_SUBMIT",
+                        failure_message="Released before provider submission",
+                        task_status="pending",
+                    )
+                    if requeued:
+                        print(
+                            f"[{job.id}] Abandoned before provider submission; "
+                            "requeued for a new attempt"
+                        )
+                    else:
+                        self._comfyui_manual_intervention_job_ids.add(job.id)
+                        print(
+                            f"[{job.id}] Requeue failed; requires manual intervention"
+                        )
+                    continue
+
                 failed_persisted = await self.update_job_status(
                     job.id,
                     JobStatus.FAILED,
                     failure_type=FailureType.UNKNOWN,
+                    task_status='failed',
                 )
                 if failed_persisted:
                     print(
@@ -120,44 +206,91 @@ class JobExecutor:
                         "failed status could not be persisted, requires manual "
                         "intervention and remains quarantined"
                     )
+
         return resumable
 
     async def update_job_status(
         self,
         job_id: str,
         status: JobStatus,
+        *,
+        attempt_id: Optional[str] = None,
+        attempt_status: Optional[str] = None,
         provider_task_id: Optional[str] = None,
         failure_type: Optional[FailureType] = None,
+        failure_code: Optional[str] = None,
+        failure_message: Optional[str] = None,
         actual_cost: Optional[float] = None,
         cost_status_value: Optional[str] = None,
         provider_usage: Optional[Dict[str, Any]] = None,
         pricing_version: Optional[str] = None,
-        result: Optional[Dict[str, Any]] = None
+        task_status: Optional[str] = None,
+        video_url: Optional[str] = None,
     ):
-        """更新 Backend 中的任务状态 - 适配 MVP Task 表"""
-        # MVP Task 表只支持：status, videoUrl, errorMsg, cost, completedAt
+        """更新 Backend 中的任务状态。"""
         payload = {"status": status.value}
+
+        if task_status is not None:
+            payload["taskStatus"] = task_status
+
+        # 产物地址必须回写，否则 Task.video_url 永远为空。
+        if video_url is not None:
+            payload["videoUrl"] = video_url
 
         # 映射到 MVP 字段
         if actual_cost is not None:
             payload["cost"] = actual_cost
 
-        # 如果有结果 URL，映射到 videoUrl
-        if result and result.get("video_url"):
-            payload["videoUrl"] = result["video_url"]
-
-        # 失败时，设置错误信息
-        if failure_type and status == JobStatus.FAILED:
-            payload["errorMsg"] = f"{failure_type.value}: task failed"
-
         # 完成或失败时，设置完成时间
         if status in [JobStatus.COMPLETED, JobStatus.FAILED]:
-            payload["completedAt"] = datetime.utcnow().isoformat()
+            payload["completedAt"] = datetime.now(timezone.utc).isoformat()
+
+        if attempt_id:
+            payload["attemptId"] = attempt_id
+
+            if attempt_status:
+                payload["attemptStatus"] = attempt_status
+            elif status == JobStatus.SUBMITTED:
+                payload["attemptStatus"] = "submitted"
+            elif status == JobStatus.RUNNING:
+                payload["attemptStatus"] = "running"
+            elif status == JobStatus.COMPLETED:
+                payload["attemptStatus"] = "completed"
+            elif status == JobStatus.FAILED:
+                payload["attemptStatus"] = "failed"
+
+            if provider_task_id is not None:
+                payload["providerTaskId"] = provider_task_id
+
+            if provider_usage is not None:
+                payload["providerUsage"] = provider_usage
+
+            if cost_status_value is not None:
+                payload["costStatus"] = _normalize_cost_status(cost_status_value)
+
+            if pricing_version is not None:
+                payload["pricingVersion"] = pricing_version
+
+            if actual_cost is not None:
+                payload["actualCostCny"] = actual_cost
+
+            if failure_code is not None:
+                payload["failureCode"] = failure_code
+
+            if failure_message is not None:
+                payload["failureMessage"] = failure_message
 
         try:
+            worker_token = getattr(settings, "worker_service_token", "")
+            update_url = (
+                f"{self.backend_url}/api/v1/internal/attempts/tasks/{job_id}/status"
+                if worker_token
+                else f"{self.backend_url}/api/tasks/{job_id}"
+            )
             response = await self.client.patch(
-                f"{self.backend_url}/api/tasks/{job_id}",
-                json=payload
+                update_url,
+                json=payload,
+                headers={"X-Worker-Token": worker_token} if worker_token else None,
             )
             response.raise_for_status()
             return True
@@ -165,33 +298,51 @@ class JobExecutor:
             print(f"Failed to update job {job_id}: {e}")
             return False
 
+    async def resolve_asset_url(self, asset_id: str) -> str:
+        token = getattr(settings, "worker_service_token", "")
+        if not token:
+            raise RuntimeError("WORKER_SERVICE_TOKEN is required to resolve an Asset")
+        response = await self.client.get(
+            f"{self.backend_url}/api/v1/internal/attempts/assets/{asset_id}/download",
+            headers={"X-Worker-Token": token},
+        )
+        response.raise_for_status()
+        return response.json()["downloadUrl"]
+
     async def create_asset(
         self,
         job_id: str,
-        file_path: str,
+        object_key: str,
         local_path: str,
-        file_type: str = "video"
-    ):
-        """创建 Asset 记录"""
+        attempt_id: Optional[str] = None,
+        file_type: str = "video",
+    ) -> bool:
+        """登记产物 Asset；失败只记录日志，不阻断任务完成。"""
         # asset size 是回放/成本核算和排障的关键信息，先算好文件体积。
         file_size = os.path.getsize(local_path)
 
         payload = {
-            "job_id": job_id,
-            "file_path": file_path,
-            "local_path": local_path,
-            "file_size_bytes": file_size,
-            "file_type": file_type
+            "taskId": job_id,
+            "objectKey": object_key,
+            "bucket": self.oss_uploader.bucket_name,
+            "mediaType": file_type,
+            "mimeType": "video/mp4" if file_type == "video" else None,
+            "sizeBytes": file_size,
         }
+        if attempt_id:
+            payload["attemptId"] = attempt_id
 
         try:
             response = await self.client.post(
-                f"{self.backend_url}/api/assets",
-                json=payload
+                f"{self.backend_url}/api/v1/internal/attempts/assets",
+                json=payload,
+                headers={"X-Worker-Token": getattr(settings, "worker_service_token", "")},
             )
             response.raise_for_status()
+            return True
         except Exception as e:
             print(f"Failed to create asset for job {job_id}: {e}")
+            return False
 
     async def execute_job(self, job: Job):
         """执行单个任务"""
@@ -210,6 +361,7 @@ class JobExecutor:
                 )
                 print(f"[{job.id}] ComfyUI job is quarantined after submission persistence failure")
                 return
+
             # 开启 ComfyUI 时走本地 dry-run，不经过 provider 计费/重试链路。
             await self._execute_comfyui_job(job)
             return
@@ -223,16 +375,34 @@ class JobExecutor:
                 job.id,
                 JobStatus.FAILED,
                 failure_type=FailureType.UNKNOWN,
+                task_status='failed',
             )
             print(f"[{job.id}] Unknown provider: {provider}")
             return
 
+        attempt_id = job.attemptId
+
+        if job.status in {JobStatus.PENDING.value, JobStatus.SUBMITTED.value} and not attempt_id:
+            # 没有 attempt 信息时，先保底失败避免重复计费。
+            await self.update_job_status(
+                job.id,
+                JobStatus.FAILED,
+                failure_type=FailureType.UNKNOWN,
+                failure_code='MISSING_ATTEMPT',
+                failure_message='No attempt_id present for job claim',
+                task_status='requires_review',
+            )
+            print(f"[{job.id}] Missing attempt context, abort for safety")
+            return
+
         try:
+            uploaded_video_url: Optional[str] = None
             job_state = {
                 "status": job.status,
                 "provider_task_id": job.providerTaskId,
                 "submitted_at": job.submittedAt,
             }
+
             if should_resume_job(job_state):
                 if is_stale_job(
                     job_state,
@@ -241,32 +411,80 @@ class JobExecutor:
                     await self.update_job_status(
                         job.id,
                         JobStatus.FAILED,
+                        attempt_id=attempt_id,
                         failure_type=FailureType.TIMEOUT,
+                        task_status='failed',
                     )
                     print(f"[{job.id}] Timed out while recovering provider task")
                     return
+
                 provider_task_id = job.providerTaskId
                 print(f"[{job.id}] Resuming provider task: {provider_task_id}")
             else:
+                if attempt_id:
+                    # 先把 attempt 写成已提交，避免网络抖动时重复提交造成二次计费。
+                    submitted_recorded = await self.update_job_status(
+                        job.id,
+                        JobStatus.SUBMITTED,
+                        attempt_id=attempt_id,
+                        attempt_status="submitted",
+                    )
+
+                    if not submitted_recorded:
+                        await self.update_job_status(
+                            job.id,
+                            JobStatus.FAILED,
+                            attempt_id=attempt_id,
+                            attempt_status="requires_review",
+                            failure_type=FailureType.UNKNOWN,
+                            failure_code="REQUIRES_REVIEW",
+                            failure_message="provider submission state could not be persisted",
+                            task_status="requires_review",
+                        )
+                        return
+
                 # 2. 无可恢复上下文时，创建新任务并持久化 provider 端 task id。
-                result = await adapter.create_task(job.params)
+                provider_params = job.get_params()
+                asset_id = provider_params.get("image_asset_id")
+                if asset_id:
+                    provider_params["image_url"] = await self.resolve_asset_url(str(asset_id))
+                result = await adapter.create_task(provider_params)
                 provider_task_id = result["task_id"]
 
-                # 3. 更新状态为 submitted
-                await self.update_job_status(
+                persisted = await self.update_job_status(
                     job.id,
                     JobStatus.SUBMITTED,
-                    provider_task_id=provider_task_id
+                    attempt_id=attempt_id,
+                    attempt_status="submitted",
+                    provider_task_id=provider_task_id,
                 )
+                if not persisted:
+                    await self.update_job_status(
+                        job.id,
+                        JobStatus.FAILED,
+                        attempt_id=attempt_id,
+                        attempt_status="requires_review",
+                        failure_type=FailureType.UNKNOWN,
+                        failure_code="PAYLOAD_TIMEOUT",
+                        failure_message="provider accepted task but submission trace failed to persist",
+                        task_status="requires_review",
+                    )
+                    return
+
                 print(f"[{job.id}] Submitted to provider, task_id: {provider_task_id}")
 
                 # 4. 更新状态为 running
-                await self.update_job_status(job.id, JobStatus.RUNNING)
+                await self.update_job_status(
+                    job.id,
+                    JobStatus.RUNNING,
+                    attempt_id=attempt_id,
+                    attempt_status="running",
+                )
 
             # 5. 轮询直到完成
             task_status = await adapter.poll_until_complete(
                 provider_task_id,
-                interval=settings.task_status_check_interval
+                interval=settings.task_status_check_interval,
             )
             print(f"[{job.id}] Task completed: {task_status.result_url}")
 
@@ -283,17 +501,19 @@ class JobExecutor:
                 # 7. 上传到 OSS
                 object_key = f"videos/{datetime.now().strftime('%Y/%m/%d')}/{filename}"
                 oss_url = self.oss_uploader.upload(str(local_path), object_key)
+                uploaded_video_url = oss_url
                 print(f"[{job.id}] Uploaded to OSS: {oss_url}")
 
-                # 8. 创建 Asset 记录
+                # 8. 创建 Asset 记录（用 objectKey，不用会过期的签名 URL）
                 await self.create_asset(
                     job.id,
-                    oss_url,  # file_path: OSS 公网访问 URL
-                    str(local_path),  # local_path: 本地下载路径
-                    file_type="video"
+                    object_key,
+                    str(local_path),
+                    attempt_id=attempt_id,
+                    file_type="video",
                 )
 
-            # 8. 只有 Provider 返回 usage 且确认可计费时，才输出实际费用；否则标记 unavailable。
+            # 9. 只有 Provider 返回 usage 且确认可计费时，才输出实际费用；否则标记 unavailable。
             actual_cost = (
                 adapter.calculate_actual_cost(task_status.usage)
                 if cost_status(task_status.usage) == "confirmed"
@@ -308,10 +528,14 @@ class JobExecutor:
             await self.update_job_status(
                 job.id,
                 JobStatus.COMPLETED,
+                attempt_id=attempt_id,
+                attempt_status="completed",
                 actual_cost=cost_audit["actual_cost"],
                 cost_status_value=cost_audit["cost_status"],
                 provider_usage=cost_audit["provider_usage"],
                 pricing_version=cost_audit["pricing_version"],
+                video_url=uploaded_video_url,
+                task_status="completed",
             )
             print(
                 f"[{job.id}] Completed successfully "
@@ -323,44 +547,45 @@ class JobExecutor:
             error_msg = str(e)
             failure_type = adapter.classify_failure(error_msg)
 
-            # 判断是否可重试
-            retryable_failures = [
-                FailureType.RATE_LIMIT,
-                FailureType.NETWORK_ERROR,
-                FailureType.TIMEOUT
-            ]
-
-            if failure_type in retryable_failures and job.retryCount < job.maxRetries:
-                # 可重试：指数退避（2^(retryCount+1) 分钟）减少雪崩风险。
-                retry_delay_minutes = 2 ** (job.retryCount + 1)
-                next_retry_at = datetime.utcnow() + timedelta(minutes=retry_delay_minutes)
-
-                # 回写 pending + retry 次数 + next_retry_at，由轮询器重新拾取。
-                payload = {
-                    "status": JobStatus.PENDING.value,
-                    "failure_type": failure_type.value,
-                    "retry_count": job.retryCount + 1,
-                    "next_retry_at": next_retry_at.isoformat()
-                }
-
-                try:
-                    response = await self.client.patch(
-                        f"{self.backend_url}/api/tasks/{job.id}",
-                        json=payload
-                    )
-                    response.raise_for_status()
-                    print(f"[{job.id}] Scheduled retry #{job.retryCount + 1} at {next_retry_at} (delay: {retry_delay_minutes}min, reason: {failure_type.value})")
-                except Exception as update_error:
-                    print(f"Failed to schedule retry for job {job.id}: {update_error}")
-            else:
-                # 不可重试或已达最大重试次数：标记为 failed
+            if isinstance(e, ProviderSubmissionUncertainError):
                 await self.update_job_status(
                     job.id,
                     JobStatus.FAILED,
-                    failure_type=failure_type
+                    attempt_id=attempt_id,
+                    attempt_status="requires_review",
+                    failure_type=FailureType.UNKNOWN,
+                    failure_code="SUBMISSION_UNCERTAIN",
+                    failure_message=error_msg,
+                    task_status="requires_review",
                 )
-                reason = "max retries exceeded" if job.retryCount >= job.maxRetries else "non-retryable failure"
-                print(f"[{job.id}] Failed: {error_msg} (type: {failure_type}, reason: {reason})")
+                print(f"[{job.id}] Provider submission outcome is uncertain; manual review required")
+                return
+
+            # 自动重试已移除：当前 Backend 与 schema 都没有 retry_count /
+            # next_retry_at 字段，原实现发送的 snake_case 载荷会被 Prisma 拒绝，
+            # 重试请求实际全部 500。在补齐可持久化的重试计数前，统一落 failed，
+            # 避免"看似重试、实际永久失败"的误导状态。
+            retryable_failures = [
+                FailureType.RATE_LIMIT,
+                FailureType.NETWORK_ERROR,
+                FailureType.TIMEOUT,
+            ]
+
+            await self.update_job_status(
+                job.id,
+                JobStatus.FAILED,
+                attempt_id=attempt_id,
+                attempt_status="failed",
+                failure_type=failure_type,
+                failure_code=(
+                    "RETRY_NOT_PERSISTED"
+                    if failure_type in retryable_failures
+                    else "UNRETRYABLE_FAILURE"
+                ),
+                failure_message=error_msg,
+                task_status='failed',
+            )
+            print(f"[{job.id}] Failed: {error_msg} (type: {failure_type})")
 
     async def _execute_comfyui_job(self, job: Job):
         """Execute the explicitly enabled local ComfyUI dry-run path.
@@ -384,11 +609,13 @@ class JobExecutor:
                 await self.update_job_status(
                     job.id,
                     JobStatus.COMPLETED,
+                    attempt_id=job.attemptId,
                     provider_task_id=result.prompt_id,
                     actual_cost=result.actual_cost,
                     cost_status_value=result.cost_status,
                     provider_usage=result.provider_usage,
                     pricing_version=result.pricing_version,
+                    task_status="completed",
                 )
                 print(
                     f"[{job.id}] ComfyUI dry-run completed "
@@ -399,6 +626,7 @@ class JobExecutor:
             await self.update_job_status(
                 job.id,
                 JobStatus.FAILED,
+                attempt_id=job.attemptId,
                 provider_task_id=result.prompt_id,
                 failure_type=FailureType.UNKNOWN,
                 cost_status_value=result.cost_status,
@@ -408,6 +636,7 @@ class JobExecutor:
             await self.update_job_status(
                 job.id,
                 JobStatus.FAILED,
+                attempt_id=job.attemptId,
                 failure_type=FailureType.UNKNOWN,
                 cost_status_value="unavailable",
             )
@@ -419,6 +648,8 @@ class JobExecutor:
         persisted = await self.update_job_status(
             job.id,
             JobStatus.SUBMITTED,
+            attempt_id=job.attemptId,
+            attempt_status="submitted",
             provider_task_id=prompt_id,
         )
         if not persisted:
@@ -436,13 +667,18 @@ class JobExecutor:
 
         while True:
             try:
-                jobs = await self.fetch_pending_jobs()
-                jobs.extend(await self.fetch_inflight_jobs())
+                # 先处理 in-flight 恢复任务，再 claim 新任务。顺序反了会把本轮
+                # 刚 claim、尚未生成 provider_task_id 的任务误判成"在途异常任务"。
+                jobs = await self.fetch_inflight_jobs()
+                jobs.extend(await self.fetch_pending_jobs())
 
-                if jobs:
-                    print(f"Found {len(jobs)} pending jobs")
+                # 同一 task 可能同时来自两个来源，按 id 去重，避免并发重复提交。
+                unique_jobs = list({job.id: job for job in jobs}.values())
+
+                if unique_jobs:
+                    print(f"Found {len(unique_jobs)} jobs to execute")
                     # 使用 gather 并发执行，单任务失败不应阻塞队列中的其他任务。
-                    await asyncio.gather(*[self.execute_job(job) for job in jobs])
+                    await asyncio.gather(*[self.execute_job(job) for job in unique_jobs])
 
                 await asyncio.sleep(settings.job_poll_interval)
 

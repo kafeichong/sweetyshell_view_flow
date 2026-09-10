@@ -1,0 +1,76 @@
+jest.mock('@nestjs/common', () => ({
+  Injectable: () => (target: unknown) => target,
+}));
+
+import { AssetsService, AssetRole } from './assets.service';
+
+const mockAsset = {
+  create: jest.fn(),
+  findMany: jest.fn(),
+};
+
+const prisma: any = {
+  asset: mockAsset,
+};
+
+describe('AssetsService contract', () => {
+  let service: AssetsService;
+
+  beforeEach(() => {
+    service = new AssetsService(prisma);
+    mockAsset.create.mockReset();
+    mockAsset.findMany.mockReset();
+  });
+
+  it('registerInput should persist objectKey as immutable identity', async () => {
+    mockAsset.create.mockResolvedValue({ id: 'asset-1' });
+
+    await service.registerInput({
+      taskId: 'task-1',
+      objectKey: 'inputs/task-1/image.png',
+      bucket: 'sweetyshell-ai-assets',
+    });
+
+    expect(mockAsset.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          role: AssetRole.INPUT,
+          objectKey: 'inputs/task-1/image.png',
+          bucket: 'sweetyshell-ai-assets',
+        }),
+      }),
+    );
+  });
+
+  it('registerOutput should persist role and objectKey', async () => {
+    mockAsset.create.mockResolvedValue({ id: 'asset-2' });
+
+    await service.registerOutput({
+      taskId: 'task-1',
+      objectKey: 'outputs/task-1/video.mp4',
+      bucket: 'sweetyshell-ai-assets',
+      mediaType: 'video/mp4',
+    });
+
+    expect(mockAsset.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          role: AssetRole.OUTPUT,
+          objectKey: 'outputs/task-1/video.mp4',
+          mediaType: 'video/mp4',
+        }),
+      }),
+    );
+  });
+
+  it('findByTask should query task assets in stable order', async () => {
+    mockAsset.findMany.mockResolvedValue([]);
+
+    await service.findByTask('task-1');
+
+    expect(mockAsset.findMany).toHaveBeenCalledWith({
+      where: { taskId: 'task-1' },
+      orderBy: { createdAt: 'asc' },
+    });
+  });
+});

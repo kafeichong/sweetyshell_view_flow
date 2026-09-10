@@ -1,4 +1,4 @@
-// MVP 版本 - 2 个表
+// MVP 版本 - 5+ 表
 
 generator client {
   provider = "prisma-client-js"
@@ -9,48 +9,175 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum TaskStatus {
+  draft
+  pending
+  queued
+  in_progress
+  requires_review
+  completed
+  failed
+  cancelled
+}
+
+enum AttemptStatus {
+  pending
+  submitted
+  running
+  requires_review
+  completed
+  failed
+  cancelled
+}
+
+enum ExecutionMode {
+  preview
+  production
+  comfyui
+}
+
+enum CostStatus {
+  estimated
+  usage_calculated
+  billed
+  unavailable
+}
+
 // 任务表
 model Task {
-  id          String    @id @default(uuid()) @db.Uuid
+  id String @id @default(uuid()) @db.Uuid
 
-  // 创建者
-  createdBy   String    @map("created_by")
+  // 创建者（兼容旧接口）
+  createdBy String @map("created_by")
+
+  // 新身份域字段（可空，新链路逐步切入）
+  actorId         String?     @map("actor_id")
+  clientRequestId String?     @map("client_request_id")
+  capability      String?     @map("capability")
+  workflowName    String?     @map("workflow_name")
+  workflowVersion String?     @map("workflow_version")
+  workflowHash    String?     @map("workflow_hash")
+  requestSnapshot Json?       @map("request_snapshot")
+  taskStatus      TaskStatus? @map("task_status")
 
   // 输入
-  prompt      String
-  imageUrl    String?   @map("image_url")
+  prompt   String
+  imageUrl String? @map("image_url")
 
   // 输出
-  videoUrl    String?   @map("video_url")
+  videoUrl String? @map("video_url")
 
   // 状态
-  status      String    @default("pending") // pending, running, completed, failed
-  errorMsg    String?   @map("error_msg")
+  status   String  @default("pending") // pending, running, completed, failed
+  errorMsg String? @map("error_msg")
 
   // 费用
-  cost        Float?    @db.Real
+  cost Float? @db.Real
 
   // 时间
   createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
   completedAt DateTime? @map("completed_at")
 
+  // Worker claim lease（用于并发领取和恢复）
+  leaseOwner     String?   @map("lease_owner")
+  leaseExpiresAt DateTime? @map("lease_expires_at")
+
+  // 关联
+  executionAttempts ExecutionAttempt[]
+  assets            Asset[]
+
+  @@unique([actorId, clientRequestId])
   @@index([status])
   @@index([createdBy])
+  @@index([actorId])
+  @@index([status, leaseExpiresAt])
   @@map("tasks")
+}
+
+// 执行尝试
+model ExecutionAttempt {
+  id                     String        @id @default(uuid()) @db.Uuid
+  taskId                 String        @map("task_id") @db.Uuid
+  task                   Task          @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  attemptNo              Int           @map("attempt_no")
+  mode                   ExecutionMode @map("mode")
+  provider               String
+  model                  String?
+  providerTaskId         String?       @map("provider_task_id")
+  status                 AttemptStatus @default(pending) @map("status")
+  providerUsage          Json?         @map("provider_usage")
+  costStatus             CostStatus    @default(unavailable) @map("cost_status")
+  estimatedCostCny       Float?        @map("estimated_cost_cny")
+  usageCalculatedCostCny Float?        @map("usage_calculated_cost_cny")
+  billedCostCny          Float?        @map("billed_cost_cny")
+  pricingVersion         String?       @map("pricing_version")
+  failureType            String?       @map("failure_type")
+  failureCode            String?       @map("failure_code")
+  failureMessage         String?       @map("failure_message")
+  submittedAt            DateTime?     @map("submitted_at")
+  startedAt              DateTime?     @map("started_at")
+  finishedAt             DateTime?     @map("finished_at")
+  createdAt              DateTime      @default(now()) @map("created_at")
+  updatedAt              DateTime      @updatedAt @map("updated_at")
+
+  assets Asset[]
+
+  @@unique([taskId, attemptNo])
+  @@unique([providerTaskId])
+  @@index([status])
+  @@map("execution_attempts")
+}
+
+// 素材表
+model Asset {
+  id               String            @id @default(uuid()) @db.Uuid
+  ownerId          String?           @map("owner_id")
+  taskId           String?           @map("task_id") @db.Uuid
+  task             Task?             @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  attemptId        String?           @map("attempt_id") @db.Uuid
+  attempt          ExecutionAttempt? @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  role             String
+  mediaType        String?           @map("media_type")
+  bucket           String?
+  objectKey        String            @map("object_key")
+  mimeType         String?           @map("mime_type")
+  sizeBytes        BigInt?           @map("size_bytes")
+  fileHash         String?           @map("file_hash")
+  inspectionStatus String?           @map("inspection_status")
+  createdAt        DateTime          @default(now()) @map("created_at")
+
+  @@map("assets")
+}
+
+// 授权凭证
+model ActorCredential {
+  id              String    @id @default(uuid()) @db.Uuid
+  actorId         String    @unique @map("actor_id")
+  name            String
+  tokenHash       String    @map("token_hash")
+  status          String    @default("active")
+  dailyLimitCny   Float?    @map("daily_limit_cny")
+  monthlyLimitCny Float?    @map("monthly_limit_cny")
+  lastUsedAt      DateTime? @map("last_used_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@map("actor_credentials")
 }
 
 // 配置表（单条记录）
 model Config {
-  id                    String @id @default("default")
+  id String @id @default("default")
 
   // 火山引擎
-  volcengineApiKey      String @map("volcengine_api_key")
+  volcengineApiKey String @map("volcengine_api_key")
 
   // 阿里云 OSS
-  ossAccessKeyId        String @map("oss_access_key_id")
-  ossAccessKeySecret    String @map("oss_access_key_secret")
-  ossBucket             String @map("oss_bucket") @default("sweetyshell-ai-assets")
-  ossRegion             String @map("oss_region") @default("oss-cn-beijing")
+  ossAccessKeyId     String @map("oss_access_key_id")
+  ossAccessKeySecret String @map("oss_access_key_secret")
+  ossBucket          String @default("sweetyshell-ai-assets") @map("oss_bucket")
+  ossRegion          String @default("oss-cn-beijing") @map("oss_region")
 
   @@map("config")
 }

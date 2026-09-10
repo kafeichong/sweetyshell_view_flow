@@ -28,10 +28,10 @@ def _new_executor() -> Any:
     return executor.JobExecutor()
 
 
-class MVPBackendContractTests(unittest.IsolatedAsyncioTestCase):
-    """锁定旧 MVP 回写合同：只写 Task 支持字段。"""
+class WorkerBackendContractTests(unittest.IsolatedAsyncioTestCase):
+    """锁定新版 Worker 回写合同：任务状态与执行尝试字段。"""
 
-    async def test_update_job_status_keeps_to_legacy_fields(self):
+    async def test_update_job_status_writes_attempt_contract(self):
         calls = []
 
         # 当前终端环境注入了 SOCKS 代理，避免影响 httpx 测试客户端初始化
@@ -61,10 +61,10 @@ class MVPBackendContractTests(unittest.IsolatedAsyncioTestCase):
         result = await executor.update_job_status(
             "job-completed-1",
             JobStatus.COMPLETED,
+            attempt_id="attempt-1",
             provider_task_id="provider-abc",
             actual_cost=0.58,
             cost_status_value="confirmed",
-            result={"video_url": "https://oss.local/videos/job-completed-1.mp4"},
         )
         await executor.client.aclose()
 
@@ -76,15 +76,17 @@ class MVPBackendContractTests(unittest.IsolatedAsyncioTestCase):
         assert request.url.path == "/api/tasks/job-completed-1"
         assert request.method == "PATCH"
         assert payload["status"] == "completed"
-        assert payload["videoUrl"] == "https://oss.local/videos/job-completed-1.mp4"
         assert payload["cost"] == 0.58
+        assert payload["attemptId"] == "attempt-1"
+        assert payload["attemptStatus"] == "completed"
+        assert payload["actualCostCny"] == 0.58
+        assert payload["costStatus"] == "usage_calculated"
         assert "completedAt" in payload
+        assert payload["providerTaskId"] == "provider-abc"
         assert "errorMsg" not in payload
-        assert "provider_task_id" not in payload
-        assert "cost_status" not in payload
         assert "provider_usage" not in payload
 
-    async def test_failed_update_maps_to_legacy_error_msg_without_new_fields(self):
+    async def test_failed_update_writes_attempt_reason_fields(self):
         calls = []
 
         for key in [
@@ -113,7 +115,9 @@ class MVPBackendContractTests(unittest.IsolatedAsyncioTestCase):
         result = await executor.update_job_status(
             "job-failed-1",
             JobStatus.FAILED,
+            attempt_id="attempt-1",
             failure_type=FailureType.CONTENT_POLICY,
+            failure_message="policy reject",
         )
         await executor.client.aclose()
 
@@ -121,7 +125,51 @@ class MVPBackendContractTests(unittest.IsolatedAsyncioTestCase):
 
         payload = json.loads(calls[0].content)
         assert payload["status"] == "failed"
-        assert payload["errorMsg"] == "content_policy: task failed"
-        assert "videoUrl" not in payload
-        assert "provider_usage" not in payload
+        assert payload["attemptId"] == "attempt-1"
+        assert payload["attemptStatus"] == "failed"
+        assert payload["failureMessage"] == "policy reject"
+        assert "errorMsg" not in payload
         assert "completedAt" in payload
+
+    async def test_update_without_attempt_id_does_not_write_attempt_fields(self):
+        calls = []
+
+        for key in [
+            "http_proxy",
+            "https_proxy",
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "all_proxy",
+            "ALL_PROXY",
+        ]:
+            os.environ.pop(key, None)
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            calls.append(request)
+            return httpx.Response(200, json={"ok": True})
+
+        executor = _new_executor()
+        await executor.client.aclose()
+        executor.client = httpx.AsyncClient(
+            transport=httpx.MockTransport(handler),
+            base_url="https://backend.local",
+        )
+        executor.backend_url = "https://backend.local"
+
+        result = await executor.update_job_status(
+            "job-without-attempt",
+            JobStatus.RUNNING,
+            provider_task_id="provider-should-not-leak",
+            actual_cost=0.58,
+            cost_status_value="confirmed",
+        )
+        await executor.client.aclose()
+
+        assert result is True
+        payload = json.loads(calls[0].content)
+        assert payload["status"] == "running"
+        assert payload["cost"] == 0.58
+        assert "attemptStatus" not in payload
+        assert "providerTaskId" not in payload
+        assert "actualCostCny" not in payload
+        assert "costStatus" not in payload

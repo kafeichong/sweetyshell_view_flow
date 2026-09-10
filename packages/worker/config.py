@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     # Backend API
     # 指向视频任务主控服务（NestJS），全部执行状态都通过这个入口读写。
     backend_url: str = "http://localhost:3000"
+    worker_service_token: str = ""
 
     # ComfyUI
     # 可选路径：开启后走本地 ComfyUI 的 dry-run 验证流程。

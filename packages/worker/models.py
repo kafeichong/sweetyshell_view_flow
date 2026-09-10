@@ -50,7 +50,16 @@ class Job(BaseModel):
     capability: str = "IMAGE_TO_VIDEO"  # 默认图生视频
     providerProfile: str = Field(default="seedance", alias="provider_profile")
     params: Optional[Dict[str, Any]] = None
+    # v1 创建的任务把完整入参放在 request_snapshot 里（requestSnapshot.params），
+    # 必须读出来，否则 image_asset_id / ratio / duration 会被静默丢弃。
+    requestSnapshot: Optional[Dict[str, Any]] = Field(default=None, alias="request_snapshot")
     providerTaskId: Optional[str] = Field(default=None, alias="provider_task_id")
+    attemptId: Optional[str] = Field(default=None, alias="attempt_id")
+    attemptNo: Optional[int] = Field(default=None, alias="attempt_no")
+    attemptStatus: Optional[str] = Field(default=None, alias="attempt_status")
+    attemptProvider: Optional[str] = Field(default=None, alias="attempt_provider")
+    attemptModel: Optional[str] = Field(default=None, alias="attempt_model")
+    attemptSubmittedAt: Optional[str] = Field(default=None, alias="attempt_submitted_at")
     failureType: Optional[str] = Field(default=None, alias="failure_type")
     retryCount: int = Field(default=0, alias="retry_count")
     maxRetries: int = Field(default=3, alias="max_retries")
@@ -65,15 +74,26 @@ class Job(BaseModel):
         populate_by_name = True
 
     def get_params(self) -> Dict[str, Any]:
-        """根据 prompt 和 imageUrl 构建 params"""
-        if self.params:
-            return self.params
+        """构建 Provider 参数。
 
-        # 从 MVP 字段构建 params
-        params = {
-            "prompt": self.prompt,
-        }
-        if self.imageUrl:
+        v1 创建的任务把完整入参放在 requestSnapshot.params 中，优先使用它；
+        旧接口创建的任务退回 prompt / imageUrl 两个 MVP 字段。
+        """
+        if self.params:
+            return dict(self.params)
+
+        snapshot_params = (
+            self.requestSnapshot.get("params")
+            if isinstance(self.requestSnapshot, dict)
+            else None
+        )
+        params: Dict[str, Any] = (
+            dict(snapshot_params) if isinstance(snapshot_params, dict) else {}
+        )
+
+        # MVP 字段作为兜底，不覆盖 v1 显式传入的同名参数。
+        params.setdefault("prompt", self.prompt)
+        if self.imageUrl and not params.get("image_url"):
             params["image_url"] = self.imageUrl
 
         return params

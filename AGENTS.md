@@ -1,12 +1,14 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-This repository is a two-package workspace:
+This repository is a three-package workspace:
 
-- `packages/backend/`：NestJS API 服务（源码在 `packages/backend/src`），数据库模型在 `packages/backend/prisma/schema.prisma`。
+- `packages/backend/`：NestJS API 服务（源码在 `packages/backend/src`），数据库模型在 `packages/backend/prisma/schema.prisma`。v1 对外接口在 `src/v1/`，Worker 私有接口在 `src/v1/internal/`。
 - `packages/worker/`：Python FastAPI Worker（服务入口 `main.py`，任务执行器 `executor.py`，配置 `config.py`，适配器在 `packages/worker/providers/`，测试在 `packages/worker/tests/`）。
+- `packages/comfyui-video-flow-client/`：ComfyUI 自定义节点（同事本机安装，只访问后端 HTTPS，不持有 Ark/OSS 密钥）。
 - 根目录不包含统一入口脚本；请按子包分别处理依赖与运行环境。
 - 开发时请忽略并避免提交环境产物：`venv/`、`__pycache__/`、`.pyc`、下载缓存目录等临时文件。
+- ComfyUI workflow JSON 属于仓库外部资产：缺失时相关测试会显式 `skip` 而不是失败。
 
 ## Build, Test, and Development Commands
 - Backend（NestJS）：
@@ -31,12 +33,17 @@ This repository is a two-package workspace:
 - Worker 测试框架为 `pytest`（见 `requirements.txt`），测试文件遵循 `test_*.py`。
 - 推荐命令：
   - `cd packages/worker && pytest`
-  - `cd packages/worker && pytest packages/worker/tests/test_*.py`（按模块分组）。
-- Backend 当前仓库未发现现成的后端测试脚本；如新增请放在标准的 `__tests__` / `*.spec.ts` 结构，并在提交说明中注明覆盖范围。
+  - `cd packages/worker && pytest tests/test_*.py`（按模块分组）。
+- Backend 测试框架为 Jest + ts-jest，测试文件为 `packages/backend/src/**/*.spec.ts`。
+- 推荐命令：
+  - `cd packages/backend && npm run build && npx jest`
+  - 注：部分 spec 会用 `jest.mock('@nestjs/common')` 替换装饰器，这类测试不覆盖真实 Guard/管道装配，涉及鉴权的改动请另做集成验证。
+- 提交前请确保 `packages/worker` 的 `pytest` 与 `packages/backend` 的 `build + jest` 均为绿色。
 
 ## Commit & Pull Request Guidelines
-- 当前路径下未发现 `.git` 元数据，无法直接读取到该仓库已有提交消息规范；建议暂按统一约定提交，例如 `feat: ...`、`fix: ...`、`chore: ...`。
+- 提交信息建议统一约定，例如 `feat: ...`、`fix: ...`、`chore: ...`。
 - PR 建议包含：变更说明、影响范围、影响的文件清单、运行验证命令（至少列出对应包的 `build/test/dev` 命令），以及环境变量或密钥变更说明。
+- 涉及数据库改动时必须附带 migration 文件，并说明迁移与回滚方式。
 
 ## Security & Configuration Tips
 - 所有外部调用密钥（如 Provider/API、OSS、数据库）必须通过环境变量注入，不要写入代码和提交中。

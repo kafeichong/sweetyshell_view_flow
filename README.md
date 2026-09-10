@@ -46,6 +46,21 @@ docker compose exec video-backend npx prisma migrate deploy
 
 ### 3. 测试 API
 
+#### v1 Preview 接入
+
+`/api/v1` 只接受 Video Flow actor token。Token 不应写入仓库，也不应下发 Ark 或 OSS 密钥。
+
+```bash
+curl -X POST http://localhost:3100/api/v1/tasks \
+  -H "Authorization: Bearer $VIDEO_FLOW_TOKEN" \
+  -H "Idempotency-Key: preview-demo-001" \
+  -H "X-Video-Flow-Protocol: 1" \
+  -H "Content-Type: application/json" \
+  -d '{"capability":"IMAGE_TO_VIDEO","profile":"seedance","mode":"preview","params":{"prompt":"产品从水面浮现"}}'
+```
+
+ComfyUI 客户端安装说明见 `packages/comfyui-video-flow-client/README.md`。Production 入口尚未开放。
+
 ```bash
 # 创建任务
 curl -X POST http://localhost:3100/api/tasks \

@@ -19,10 +19,18 @@ ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW_PATH = ROOT / "workflows" / "seedance-text-to-video-dry-run.comfy.json"
 API_WORKFLOW_PATH = ROOT / "workflows" / "seedance-text-to-video-dry-run.api.json"
 
+# 该导出文件是仓库外部资产；缺失时显式跳过，而不是把"资产缺失"伪装成代码回归。
+requires_api_workflow = unittest.skipUnless(
+    API_WORKFLOW_PATH.is_file(),
+    f"reviewed ComfyUI workflow export is missing: {API_WORKFLOW_PATH}",
+)
+
 
 def make_job(**overrides):
     payload = {
         "id": "job-1",
+        "created_by": "alice",
+        "prompt": "产品缓慢旋转",
         "workflow_hash": "hash-1",
         "workflow_name": "seedance-text-to-video-dry-run",
         "capability": "TEXT_TO_VIDEO",
@@ -71,6 +79,7 @@ def completed_history():
     }
 
 
+@requires_api_workflow
 class ComfyUIDryRunExecutorTests(unittest.TestCase):
     def run_async(self, awaitable):
         return asyncio.run(awaitable)
@@ -272,7 +281,7 @@ class ComfyUIDryRunExecutorTests(unittest.TestCase):
 
 
 class JobExecutorSelectionTests(unittest.TestCase):
-    def test_completed_comfyui_output_maps_to_asset_payload_without_cost(self):
+    def test_comfyui_output_is_registered_as_asset_with_object_key(self):
         import executor as executor_module
 
         with tempfile.TemporaryDirectory() as directory:
@@ -283,88 +292,133 @@ class JobExecutorSelectionTests(unittest.TestCase):
             job_executor = executor_module.JobExecutor.__new__(executor_module.JobExecutor)
             job_executor.backend_url = "http://backend.test"
             job_executor.client = client
+            job_executor.oss_uploader = type(
+                "Uploader", (), {"bucket_name": "test-bucket"}
+            )()
 
-            result = self.run_async(
-                ComfyUIDryRunExecutor(
-                    FakeComfyUIClient([completed_history()]),
-                    API_WORKFLOW_PATH,
-                    directory,
-                    poll_interval=0,
-                ).execute(make_job())
-            )
-            asset = result.outputs[0]
-            self.run_async(job_executor.create_asset(
+            registered = self.run_async(job_executor.create_asset(
                 "job-1",
-                asset["filename"],
-                asset["local_path"],
-                asset["type"],
+                "videos/2026/09/10/clip.mp4",
+                str(output),
+                attempt_id="attempt-1",
+                file_type="video",
             ))
 
+            self.assertTrue(registered)
+            url = client.post.await_args.args[0]
             payload = client.post.await_args.kwargs["json"]
-            self.assertEqual(payload["job_id"], "job-1")
-            self.assertEqual(payload["file_path"], "clip.mp4")
-            self.assertEqual(payload["local_path"], str(output.resolve()))
-            self.assertEqual(payload["file_type"], "output")
-            self.assertEqual(payload["file_size_bytes"], len(b"local video"))
-            self.assertIsNone(result.actual_cost)
-            self.assertEqual(result.cost_status, "unavailable")
-            self.assertIsNone(result.provider_usage)
-            self.assertIsNone(result.pricing_version)
+            # 旧实现调用的是并不存在的 /api/assets，产物没有任何 Asset 记录。
+            self.assertTrue(url.endswith("/api/v1/internal/attempts/assets"), url)
+            self.assertEqual(payload["taskId"], "job-1")
+            self.assertEqual(payload["attemptId"], "attempt-1")
+            self.assertEqual(payload["objectKey"], "videos/2026/09/10/clip.mp4")
+            self.assertEqual(payload["bucket"], "test-bucket")
+            self.assertEqual(payload["mediaType"], "video")
+            self.assertEqual(payload["sizeBytes"], len(b"local video"))
 
     def test_inflight_job_without_provider_id_is_marked_failed_not_filtered(self):
         import executor as executor_module
 
-        response_by_status = {
-            status: type("Response", (), {
-                "raise_for_status": lambda self: None,
-                "json": lambda self, status=status: {
-                    "jobs": [{
-                        "id": f"job-{status}",
-                        "workflow_hash": "hash-1",
-                        "capability": "TEXT_TO_VIDEO",
-                        "provider_profile": "seedance-main",
-                        "params": {},
-                        "status": status,
-                        "created_at": "2026-09-01T10:00:00+00:00",
-                    }]
-                },
-            })()
-            for status in ("submitted", "running")
-        }
-
-        async def get_jobs(url, params):
-            return response_by_status[params["status"]]
+        response = type("Response", (), {
+            "raise_for_status": lambda self: None,
+            "json": lambda self: [{
+                "id": "job-no-attempt",
+                "createdBy": "alice",
+                "prompt": "test",
+                "status": "running",
+                "created_at": "2026-09-01T10:00:00+00:00",
+            }],
+        })()
 
         job_executor = executor_module.JobExecutor.__new__(executor_module.JobExecutor)
         job_executor.backend_url = "http://backend.test"
         job_executor.client = AsyncMock()
-        job_executor.client.get.side_effect = get_jobs
+        job_executor.client.get.return_value = response
         job_executor.update_job_status = AsyncMock(return_value=True)
 
         jobs = self.run_async(job_executor.fetch_inflight_jobs())
 
         self.assertEqual(jobs, [])
-        self.assertEqual(job_executor.update_job_status.await_count, 2)
-        for call in job_executor.update_job_status.await_args_list:
-            self.assertEqual(call.args[1], JobStatus.FAILED)
-            self.assertEqual(call.kwargs["failure_type"], executor_module.FailureType.UNKNOWN)
+        job_executor.update_job_status.assert_awaited_once()
+        call = job_executor.update_job_status.await_args
+        self.assertEqual(call.args[1], JobStatus.FAILED)
+        self.assertEqual(call.kwargs["failure_type"], executor_module.FailureType.UNKNOWN)
+        self.assertEqual(call.kwargs["task_status"], "failed")
+
+    def test_claimed_but_unsubmitted_job_is_requeued_not_failed(self):
+        """领取后、提交 Provider 前中断的任务必须回到 pending，而不是被判 failed。"""
+        import executor as executor_module
+
+        response = type("Response", (), {
+            "raise_for_status": lambda self: None,
+            "json": lambda self: [{
+                "id": "job-claimed",
+                "createdBy": "alice",
+                "prompt": "test",
+                "status": "submitted",
+                "attemptId": "attempt-1",
+                "attemptStatus": "pending",
+                "created_at": "2026-09-01T10:00:00+00:00",
+            }],
+        })()
+
+        job_executor = executor_module.JobExecutor.__new__(executor_module.JobExecutor)
+        job_executor.backend_url = "http://backend.test"
+        job_executor.client = AsyncMock()
+        job_executor.client.get.return_value = response
+        job_executor.update_job_status = AsyncMock(return_value=True)
+
+        jobs = self.run_async(job_executor.fetch_inflight_jobs())
+
+        self.assertEqual(jobs, [])
+        call = job_executor.update_job_status.await_args
+        self.assertEqual(call.args[1], JobStatus.PENDING)
+        self.assertEqual(call.kwargs["task_status"], "pending")
+        self.assertEqual(call.kwargs["failure_code"], "ABANDONED_BEFORE_SUBMIT")
+
+    def test_submitted_attempt_without_provider_id_requires_review(self):
+        """提交结果不确定时必须进入 requires_review，禁止自动重跑造成二次计费。"""
+        import executor as executor_module
+
+        response = type("Response", (), {
+            "raise_for_status": lambda self: None,
+            "json": lambda self: [{
+                "id": "job-uncertain",
+                "createdBy": "alice",
+                "prompt": "test",
+                "status": "submitted",
+                "attemptId": "attempt-1",
+                "attemptStatus": "submitted",
+                "created_at": "2026-09-01T10:00:00+00:00",
+            }],
+        })()
+
+        job_executor = executor_module.JobExecutor.__new__(executor_module.JobExecutor)
+        job_executor.backend_url = "http://backend.test"
+        job_executor.client = AsyncMock()
+        job_executor.client.get.return_value = response
+        job_executor.update_job_status = AsyncMock(return_value=True)
+
+        jobs = self.run_async(job_executor.fetch_inflight_jobs())
+
+        self.assertEqual(jobs, [])
+        call = job_executor.update_job_status.await_args
+        self.assertEqual(call.args[1], JobStatus.FAILED)
+        self.assertEqual(call.kwargs["task_status"], "requires_review")
+        self.assertEqual(call.kwargs["failure_code"], "PERSISTENCE_UNKNOWN")
 
     def test_inflight_patch_failure_records_manual_intervention_and_stays_excluded(self):
         import executor as executor_module
 
         response = type("Response", (), {
             "raise_for_status": lambda self: None,
-            "json": lambda self: {
-                "jobs": [{
-                    "id": "job-missing-id",
-                    "workflow_hash": "hash-1",
-                    "capability": "TEXT_TO_VIDEO",
-                    "provider_profile": "seedance-main",
-                    "params": {},
-                    "status": "running",
-                    "created_at": "2026-09-01T10:00:00+00:00",
-                }]
-            },
+            "json": lambda self: [{
+                "id": "job-missing-id",
+                "createdBy": "alice",
+                "prompt": "test",
+                "status": "running",
+                "created_at": "2026-09-01T10:00:00+00:00",
+            }],
         })()
 
         job_executor = executor_module.JobExecutor.__new__(executor_module.JobExecutor)
@@ -377,7 +431,7 @@ class JobExecutorSelectionTests(unittest.TestCase):
         jobs = self.run_async(job_executor.fetch_inflight_jobs())
 
         self.assertEqual(jobs, [])
-        self.assertEqual(job_executor.update_job_status.await_count, 2)
+        job_executor.update_job_status.assert_awaited_once()
         self.assertIn(
             "job-missing-id",
             job_executor._comfyui_manual_intervention_job_ids,

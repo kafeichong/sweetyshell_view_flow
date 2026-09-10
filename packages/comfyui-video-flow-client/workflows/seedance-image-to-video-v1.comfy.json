@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "nodes": [
+    {"id": 1, "type": "VideoFlowConfig", "inputs": {"backend_url": "http://localhost:3100", "token": "", "protocol_version": "1"}},
+    {"id": 2, "type": "VideoFlowSeedancePreview", "inputs": {"config": [1, 0], "prompt": "", "image": null}},
+    {"id": 3, "type": "VideoFlowWaitTask", "inputs": {"config": [1, 0], "task_id": [2, 0]}}
+  ],
+  "links": []
+}

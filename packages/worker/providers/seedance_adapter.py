@@ -8,6 +8,10 @@ from models import ProviderTaskStatus, FailureType
 settings = get_settings()
 
 
+class ProviderSubmissionUncertainError(Exception):
+    """Provider submission outcome is unknown and must not be retried automatically."""
+
+
 class SeedanceAdapter:
     """火山方舟 Ark API 适配器 - 视频生成任务"""
 
@@ -140,7 +144,9 @@ class SeedanceAdapter:
                 raise Exception(f"HTTP {status_code}: {error_text}")
 
         except httpx.RequestError as e:
-            raise Exception(f"Network error: {str(e)}")
+            raise ProviderSubmissionUncertainError(
+                f"Provider submission outcome unknown: {str(e)}"
+            ) from e
 
     async def get_task_status(self, task_id: str) -> ProviderTaskStatus:
         """

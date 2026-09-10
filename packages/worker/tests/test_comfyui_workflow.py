@@ -15,6 +15,14 @@ from comfyui_workflow import (  # noqa: E402
     validate_dry_run_workflow,
 )
 
+WORKFLOWS_DIR = Path(__file__).resolve().parents[3] / "workflows"
+# 这些测试校验的是 ComfyUI 导出的 workflow JSON（仓库外部资产）。
+# 文件缺失时显式跳过，而不是把"资产缺失"伪装成代码回归。
+requires_reviewed_workflows = unittest.skipUnless(
+    WORKFLOWS_DIR.is_dir(),
+    f"reviewed ComfyUI workflow exports are missing under {WORKFLOWS_DIR}",
+)
+
 
 WORKFLOW_PATH = Path(__file__).resolve().parents[3] / "workflows" / "seedance-text-to-video-dry-run.comfy.json"
 API_WORKFLOW_PATH = Path(__file__).resolve().parents[3] / "workflows" / "seedance-text-to-video-dry-run.api.json"
@@ -41,10 +49,12 @@ FIRST_LAST_FRAME_API_WORKFLOW_PATH = (
 
 
 class ComfyUIWorkflowTests(unittest.TestCase):
+    @requires_reviewed_workflows
     def test_repository_workflow_is_accepted_as_dry_run(self):
         workflow = load_workflow(WORKFLOW_PATH)
         validate_dry_run_workflow(workflow)
 
+    @requires_reviewed_workflows
     def test_repository_api_workflow_is_accepted_as_dry_run(self):
         workflow = load_workflow(API_WORKFLOW_PATH)
         validate_dry_run_workflow(workflow)
@@ -52,6 +62,7 @@ class ComfyUIWorkflowTests(unittest.TestCase):
         self.assertEqual(workflow["1"]["class_type"], "SeedanceArkPromptBuilder")
         self.assertIn("inputs", workflow["1"])
 
+    @requires_reviewed_workflows
     def test_first_last_frame_structured_workflows_are_accepted(self):
         # UI-format graph validates as a dry run and exposes the structured builder.
         ui_workflow = load_workflow(FIRST_LAST_FRAME_WORKFLOW_PATH)
@@ -75,6 +86,7 @@ class ComfyUIWorkflowTests(unittest.TestCase):
         self.assertIn("negative", builder_inputs)
         self.assertIn("shots", builder_inputs)
 
+    @requires_reviewed_workflows
     def test_first_last_frame_workflow_rejects_invalid_safety_flags_and_duplicate_hard_nodes(self):
         api_workflow = load_workflow(FIRST_LAST_FRAME_API_WORKFLOW_PATH)
         api_workflow["1"]["inputs"]["mode"] = "live"
@@ -87,6 +99,7 @@ class ComfyUIWorkflowTests(unittest.TestCase):
         with self.assertRaisesRegex(ComfyUIWorkflowError, "duplicate node type"):
             validate_api_workflow(dup_workflow)
 
+    @requires_reviewed_workflows
     def test_authorized_portrait_workflows_are_safe_and_use_a_blank_trusted_asset_slot(self):
         ui_workflow = load_workflow(AUTHORIZED_PORTRAIT_WORKFLOW_PATH)
         validate_dry_run_workflow(ui_workflow)
@@ -114,6 +127,7 @@ class ComfyUIWorkflowTests(unittest.TestCase):
         self.assertEqual(request_inputs["reference_image_url"], "")
         self.assertEqual(request_inputs["reference_video_url"], "")
 
+    @requires_reviewed_workflows
     def test_api_execution_policy_link_requires_existing_policy_node(self):
         for link in (("missing", 0), ("1", 0)):
             with self.subTest(link=link):
@@ -144,6 +158,7 @@ class ComfyUIWorkflowTests(unittest.TestCase):
             with self.assertRaises(ComfyUIWorkflowError):
                 load_workflow(array)
 
+    @requires_reviewed_workflows
     def test_invalid_safety_flags_are_rejected(self):
         workflow = load_workflow(WORKFLOW_PATH)
         policy = next(node for node in workflow["nodes"] if node["type"] == "SeedanceArkExecutionPolicy")
@@ -157,6 +172,7 @@ class ComfyUIWorkflowTests(unittest.TestCase):
         with self.assertRaises(ComfyUIWorkflowError):
             validate_dry_run_workflow(workflow)
 
+    @requires_reviewed_workflows
     def test_create_task_cannot_add_overridable_safety_values(self):
         workflow = load_workflow(WORKFLOW_PATH)
         create_task = next(node for node in workflow["nodes"] if node["type"] == "SeedanceArkCreateTask")
@@ -164,6 +180,7 @@ class ComfyUIWorkflowTests(unittest.TestCase):
         with self.assertRaises(ComfyUIWorkflowError):
             validate_dry_run_workflow(workflow)
 
+    @requires_reviewed_workflows
     def test_missing_required_node_is_rejected(self):
         workflow = load_workflow(WORKFLOW_PATH)
         workflow["nodes"] = [node for node in workflow["nodes"] if node["type"] != "SeedanceArkCreateTask"]

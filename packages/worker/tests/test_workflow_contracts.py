@@ -21,8 +21,18 @@ from providers.seedance_adapter import SeedanceAdapter  # noqa: E402
 from recovery import cost_status, format_cost, is_stale_job, should_resume_job  # noqa: E402
 from comfyui_workflow import validate_dry_run_workflow  # noqa: E402
 
+WORKFLOWS_DIR = Path(__file__).resolve().parents[3] / "workflows"
+# 这些测试校验的是 ComfyUI 导出的 workflow JSON（仓库外部资产）。
+# 文件缺失时显式跳过，而不是把"资产缺失"伪装成代码回归。
+requires_reviewed_workflows = unittest.skipUnless(
+    WORKFLOWS_DIR.is_dir(),
+    f"reviewed ComfyUI workflow exports are missing under {WORKFLOWS_DIR}",
+)
+
+
 
 class WorkflowContractTests(unittest.TestCase):
+    @requires_reviewed_workflows
     def test_reference_edit_ui_and_api_workflows_share_the_safe_node_contract(self):
         workflow_root = Path(__file__).resolve().parents[3] / "workflows"
         ui = json.loads(
@@ -173,6 +183,7 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertEqual(cost_status({}), "unavailable")
         self.assertEqual(cost_status({"total_tokens": 1000}), "confirmed")
 
+    @requires_reviewed_workflows
     def test_native_text_to_video_workflow_uses_valid_empty_media_json(self):
         workflow_path = (
             Path(__file__).resolve().parents[3]
@@ -191,6 +202,7 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertEqual(json.loads(media_json), {})
         self.assertEqual(request_builder["widgets_values"][8], 1)
 
+    @requires_reviewed_workflows
     def test_native_image_to_video_workflow_uses_first_frame_upload_chain(self):
         workflow_path = (
             Path(__file__).resolve().parents[3]
@@ -221,6 +233,7 @@ class WorkflowContractTests(unittest.TestCase):
         upload_node_id = next(node["id"] for node in workflow["nodes"] if node["type"] == "SeedanceArkUploadImage")
         self.assertEqual(upload_link[1], upload_node_id)
 
+    @requires_reviewed_workflows
     def test_native_image_to_video_workflow_is_accepted_as_dry_run(self):
         workflow_path = (
             Path(__file__).resolve().parents[3]
@@ -230,6 +243,7 @@ class WorkflowContractTests(unittest.TestCase):
         workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
         validate_dry_run_workflow(workflow)
 
+    @requires_reviewed_workflows
     def test_native_text_to_video_workflow_keeps_create_task_in_dry_run(self):
         workflow_path = (
             Path(__file__).resolve().parents[3]
@@ -244,6 +258,7 @@ class WorkflowContractTests(unittest.TestCase):
 
         self.assertEqual(create_task["widgets_values"], [])
 
+    @requires_reviewed_workflows
     def test_native_workflow_reserves_values_for_linked_inputs_on_comfyui_034(self):
         workflow_path = (
             Path(__file__).resolve().parents[3]

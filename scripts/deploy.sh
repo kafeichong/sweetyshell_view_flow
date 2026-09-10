@@ -46,7 +46,7 @@ docker compose down || true
 
 # 构建镜像
 echo "🔨 构建 Docker 镜像..."
-docker compose build
+docker compose build --progress=plain
 
 # 启动服务
 echo "▶️  启动服务..."
