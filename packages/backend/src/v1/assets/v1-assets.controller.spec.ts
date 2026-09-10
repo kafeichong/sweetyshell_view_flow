@@ -9,6 +9,7 @@ jest.mock('@nestjs/common', () => ({
   Param: () => () => {},
   NotFoundException: class NotFoundException extends Error { status = 404; },
 }));
+jest.mock('ali-oss', () => class OSS {});
 
 import { V1AssetsController } from './v1-assets.controller';
 

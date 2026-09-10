@@ -148,7 +148,6 @@ export class TasksService {
 
     if (providerTaskId) {
       attemptPayload.providerTaskId = providerTaskId;
-      taskPayload.providerTaskId = providerTaskId;
     }
 
     if (failureType !== undefined) {

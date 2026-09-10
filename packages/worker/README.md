@@ -22,6 +22,14 @@ cp .env.example .env
 python main.py
 ```
 
+开发/测试环境额外安装：
+
+```bash
+pip install -r requirements-dev.txt
+```
+
+生产 Docker 镜像只安装 `requirements.txt`，不包含 pytest；Docker 构建默认使用阿里云 PyPI 镜像加速 ARM64 依赖下载。
+
 ## 架构
 
 - `main.py` - FastAPI 应用入口和健康检查接口

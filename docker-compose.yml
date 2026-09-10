@@ -35,9 +35,12 @@ services:
       NODE_ENV: production
       PORT: 3000
       CORS_ORIGIN: ${CORS_ORIGIN}
+      VIDEO_FLOW_ADMIN_TOKEN: ${VIDEO_FLOW_ADMIN_TOKEN}
       VIDEO_FLOW_WORKER_TOKEN: ${VIDEO_FLOW_WORKER_TOKEN}
-      # 未配置时 /api/v1/assets/* 安全返回 503（fail-closed）
-      OSS_PRESIGN_ENDPOINT: ${OSS_PRESIGN_ENDPOINT}
+      OSS_ACCESS_KEY_ID: ${OSS_ACCESS_KEY_ID}
+      OSS_ACCESS_KEY_SECRET: ${OSS_ACCESS_KEY_SECRET}
+      OSS_BUCKET: ${OSS_BUCKET}
+      OSS_REGION: ${OSS_REGION}
     ports:
       - "3100:3000"  # 外部 3100，内部 3000
     networks:
