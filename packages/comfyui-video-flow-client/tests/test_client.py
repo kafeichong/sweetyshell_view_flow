@@ -1,4 +1,5 @@
 import httpx
+import json
 import sys
 from pathlib import Path
 
@@ -27,7 +28,7 @@ def test_create_task_sends_preview_contract_without_exposing_token():
     assert result == {"id": "task-1"}
     assert requests[0].headers["authorization"] == "Bearer secret-token"
     assert requests[0].headers["idempotency-key"] == "key-1"
-    assert requests[0].json()["mode"] == "preview"
+    assert json.loads(requests[0].content)["mode"] == "preview"
     assert "secret-token" not in str(result)
 
 

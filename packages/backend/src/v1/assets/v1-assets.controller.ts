@@ -1,4 +1,4 @@
-import { Body, Controller, Get, NotFoundException, Param, Post, ServiceUnavailableException, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, NotFoundException, Param, Post, ServiceUnavailableException, UseGuards } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { ApiCredentialGuard } from '../../auth/api-credential.guard';
 import { CurrentActor } from '../../auth/current-actor.decorator';
@@ -18,6 +18,13 @@ export class V1AssetsController {
     @CurrentActor() actor: { actorId: string },
     @Body() body: { filename: string; mimeType: string; sizeBytes: number },
   ) {
+    const allowedMimeTypes = new Set(['image/png', 'image/jpeg', 'image/webp']);
+    if (!body?.filename?.trim() || !allowedMimeTypes.has(body.mimeType)) {
+      throw new BadRequestException('filename and supported image mimeType are required');
+    }
+    if (!Number.isInteger(body.sizeBytes) || body.sizeBytes <= 0 || body.sizeBytes > 20 * 1024 * 1024) {
+      throw new BadRequestException('sizeBytes must be between 1 and 20971520');
+    }
     if (!this.presign.isConfigured()) {
       throw new ServiceUnavailableException('OSS presign service is not configured');
     }

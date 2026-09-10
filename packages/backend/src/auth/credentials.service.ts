@@ -38,4 +38,12 @@ export class CredentialsService {
 
     return { actorId: credential.actorId, credentialId: credential.id };
   }
+
+  async revoke(actorId: string) {
+    return this.prisma.actorCredential.update({
+      where: { actorId },
+      data: { status: 'revoked' },
+      select: { actorId: true, status: true, updatedAt: true },
+    });
+  }
 }

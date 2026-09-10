@@ -8,6 +8,7 @@ import { AuthModule } from './auth/auth.module';
 import { V1TasksModule } from './v1/tasks/v1-tasks.module';
 import { V1AssetsModule } from './v1/assets/v1-assets.module';
 import { V1WorkerModule } from './v1/internal/v1-worker.module';
+import { V1AdminModule } from './v1/admin/v1-admin.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { V1WorkerModule } from './v1/internal/v1-worker.module';
     V1TasksModule,
     V1AssetsModule,
     V1WorkerModule,
+    V1AdminModule,
   ],
   providers: [PrismaService],
 })

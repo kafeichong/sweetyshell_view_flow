@@ -3,21 +3,25 @@ from io import BytesIO
 import numpy as np
 from PIL import Image
 
-from .client import VideoFlowClient
-from .config import VideoFlowConfig
+try:
+    from .client import VideoFlowClient
+    from .config import VideoFlowConfig
+except ImportError:  # Support ComfyUI's direct module loader.
+    from client import VideoFlowClient
+    from config import VideoFlowConfig
 
 
 class VideoFlowConfigNode:
     @classmethod
     def INPUT_TYPES(cls):
-        return {"required": {"backend_url": ("STRING", {"default": "http://localhost:3100"}), "token": ("STRING", {"default": "", "multiline": False}), "protocol_version": ("STRING", {"default": "1"})}}
+        return {"required": {"backend_url": ("STRING", {"default": "http://localhost:3100"}), "protocol_version": ("STRING", {"default": "1"})}}
 
     RETURN_TYPES = ("VIDEO_FLOW_CONFIG",)
     FUNCTION = "configure"
     CATEGORY = "Video Flow"
 
-    def configure(self, backend_url, token, protocol_version):
-        return (VideoFlowConfig(backend_url.rstrip("/"), token, protocol_version),)
+    def configure(self, backend_url, protocol_version):
+        return (VideoFlowConfig(backend_url.rstrip("/"), VideoFlowConfig.from_env().token, protocol_version),)
 
 
 class VideoFlowSeedancePreview:

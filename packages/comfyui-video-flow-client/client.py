@@ -2,7 +2,10 @@ from typing import Any, BinaryIO
 import hashlib
 import httpx
 
-from .config import VideoFlowConfig
+try:
+    from .config import VideoFlowConfig
+except ImportError:  # ComfyUI loads custom node modules directly from the folder.
+    from config import VideoFlowConfig
 
 
 class VideoFlowClient:

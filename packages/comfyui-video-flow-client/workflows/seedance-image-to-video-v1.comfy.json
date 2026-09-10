@@ -1,9 +1,30 @@
 {
-  "version": 1,
-  "nodes": [
-    {"id": 1, "type": "VideoFlowConfig", "inputs": {"backend_url": "http://localhost:3100", "token": "", "protocol_version": "1"}},
-    {"id": 2, "type": "VideoFlowSeedancePreview", "inputs": {"config": [1, 0], "prompt": "", "image": null}},
-    {"id": 3, "type": "VideoFlowWaitTask", "inputs": {"config": [1, 0], "task_id": [2, 0]}}
-  ],
-  "links": []
+  "1": {
+    "class_type": "VideoFlowConfig",
+    "inputs": {
+      "backend_url": "http://localhost:3100",
+      "protocol_version": "1"
+    }
+  },
+  "2": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "reference.png"
+    }
+  },
+  "3": {
+    "class_type": "VideoFlowSeedancePreview",
+    "inputs": {
+      "config": ["1", 0],
+      "prompt": "产品从水面浮现，镜头平滑推进",
+      "image": ["2", 0]
+    }
+  },
+  "4": {
+    "class_type": "VideoFlowWaitTask",
+    "inputs": {
+      "config": ["1", 0],
+      "task_id": ["3", 0]
+    }
+  }
 }
