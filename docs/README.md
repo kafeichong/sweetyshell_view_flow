@@ -16,6 +16,8 @@
 | 创意同事怎么用？ | [runbooks/creative-user-guide.md](./runbooks/creative-user-guide.md) |
 | 历史上都分析过什么？ | [archive/README.md](./archive/README.md) |
 
+本轮 Creative MVP T00–T01 的实施与验证快照见：[2026-09-11-creative-mvp-T00-T01-summary.md](./archive/2026-09-11-creative-mvp-T00-T01-summary.md)。
+
 **只有两份文档描述"当前事实"和"当前计划"：`PROJECT_STATUS.md` 与 `ROADMAP.md`。其余文档一律是参考材料或历史记录，不得作为现状依据。**
 
 ---
