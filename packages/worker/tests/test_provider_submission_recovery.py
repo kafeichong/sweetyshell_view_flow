@@ -26,6 +26,62 @@ def approved_execution_plan():
 
 
 class ProviderSubmissionRecoveryTests(unittest.TestCase):
+    def test_backend_write_failure_persists_quarantine_and_never_recreates(self):
+        import executor as executor_module
+
+        adapter = SimpleNamespace(
+            default_model="test-model",
+            create_task=AsyncMock(return_value={"task_id": "provider-write-failed"}),
+        )
+        job = Job(
+            id="job-write-failure",
+            status="submitted",
+            created_by="alice",
+            prompt="product",
+            created_at="2026-09-10T00:00:00+00:00",
+            provider_profile="seedance-main",
+            attempt_id="attempt-write-failure",
+            execution_plan=approved_execution_plan(),
+        )
+        settings = SimpleNamespace(
+            comfyui_enabled=False,
+            running_job_timeout_minutes=10,
+            task_status_check_interval=0,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            job_executor = executor_module.JobExecutor.__new__(executor_module.JobExecutor)
+            job_executor.output_dir = Path(directory)
+            job_executor.adapters = {"seedance": adapter}
+            job_executor.resolve_asset_url = AsyncMock(return_value="https://oss.test/input")
+            # claim marker succeeds, providerTaskId回写失败，requires_review回写 succeeds
+            job_executor.update_job_status = AsyncMock(side_effect=[True, False, True])
+
+            with patch.object(executor_module, "settings", settings):
+                asyncio.run(job_executor.execute_job(job))
+
+            marker = Path(directory) / ".video-flow-journal" / "SUBMISSIONS_BLOCKED"
+            self.assertTrue(marker.exists())
+            self.assertEqual(
+                job_executor.update_job_status.await_args_list[-1].kwargs["failure_code"],
+                "PAYLOAD_TIMEOUT",
+            )
+
+            # 模拟重启：新执行器只依赖磁盘阻断标记，不依赖内存状态。
+            restarted = executor_module.JobExecutor.__new__(executor_module.JobExecutor)
+            restarted.output_dir = Path(directory)
+            restarted._submission_blocked = restarted._submission_block_marker().exists()
+            restarted.adapters = {"seedance": adapter}
+            restarted.resolve_asset_url = AsyncMock(return_value="https://oss.test/input")
+            restarted.update_job_status = AsyncMock(return_value=True)
+            asyncio.run(restarted.execute_job(job))
+
+            adapter.create_task.assert_awaited_once()
+            self.assertEqual(
+                restarted.update_job_status.await_args.kwargs["failure_code"],
+                "SUBMISSION_JOURNAL_BLOCKED",
+            )
+
     def test_journal_failure_quarantines_submission_and_blocks_followup(self):
         import executor as executor_module
 

@@ -598,6 +598,7 @@ class JobExecutor:
                     submitted_at=datetime.now(timezone.utc),
                 )
                 if not persisted:
+                    self._mark_submission_blocked()
                     await self.update_job_status(
                         job.id,
                         JobStatus.FAILED,
