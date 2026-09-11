@@ -21,7 +21,8 @@ describe('TasksService contract', () => {
   let service: TasksService;
 
   beforeEach(() => {
-    service = new TasksService(prisma as never);
+    const mockBudgetService = {} as any;
+    service = new TasksService(prisma as never, mockBudgetService);
     prisma.task.create.mockReset();
     prisma.task.findMany.mockReset();
     prisma.task.findUnique.mockReset();

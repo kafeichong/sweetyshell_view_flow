@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
+import { TaskBudgetService } from './task-budget.service';
+import { Prisma } from '@prisma/client';
 
 type AttemptUpdatePayload = {
   status?: string;
@@ -25,7 +27,10 @@ type AttemptUpdatePayload = {
 
 @Injectable()
 export class TasksService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private budget: TaskBudgetService,
+  ) {}
 
   async create(data: {
     createdBy: string;
@@ -299,5 +304,70 @@ export class TasksService {
     }
 
     return 'unavailable';
+  }
+
+  async checkAndReserve(
+    actorId: string,
+    estimatedCny: string,
+    taskData: {
+      actorId: string;
+      clientRequestId: string;
+      capability: string;
+      workflowName: string;
+      requestSnapshot: object;
+      prompt: string;
+      imageUrl?: string;
+    },
+  ): Promise<
+    | { canProceed: true; task: any }
+    | { canProceed: false; reason: string }
+  > {
+    return this.prisma.$transaction(async (tx) => {
+      const budgetCheck = await this.budget.checkBudgetAvailability(
+        tx,
+        actorId,
+        estimatedCny,
+      );
+
+      if (!budgetCheck.canProceed) {
+        return { canProceed: false, reason: budgetCheck.reason || 'BUDGET_CHECK_FAILED' };
+      }
+
+      const task = await tx.task.create({
+        data: {
+          createdBy: taskData.actorId,
+          actorId: taskData.actorId,
+          clientRequestId: taskData.clientRequestId,
+          capability: taskData.capability,
+          workflowName: taskData.workflowName,
+          requestSnapshot: taskData.requestSnapshot,
+          prompt: taskData.prompt,
+          imageUrl: taskData.imageUrl,
+          status: 'pending',
+          taskStatus: 'pending',
+        },
+      });
+
+      const executionPlan = {
+        version: 'mvp-v1',
+        model: 'seedance-v1',
+        duration: 5,
+        ratio: '16:9',
+        resolution: '720p',
+        generate_audio: false,
+        watermark: true,
+        pricingVersion: '2026-09-mvp',
+        reserveCny: estimatedCny,
+      };
+
+      await this.budget.reserveInTransaction(
+        tx,
+        task.id,
+        actorId,
+        executionPlan,
+      );
+
+      return { canProceed: true, task };
+    });
   }
 }
