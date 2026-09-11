@@ -43,6 +43,9 @@ class Job(BaseModel):
     cost: Optional[float] = None
     createdAt: str = Field(alias="created_at")
     completedAt: Optional[str] = Field(default=None, alias="completed_at")
+    taskStatus: Optional[str] = Field(default=None, alias="task_status")
+    deliveryStatus: Optional[str] = Field(default=None, alias="delivery_status")
+    executionPlan: Optional[Dict[str, Any]] = Field(default=None, alias="execution_plan")
 
     # 旧字段（兼容性，全部可选，有默认值）
     workflowHash: Optional[str] = Field(default="simple-video-gen", alias="workflow_hash")

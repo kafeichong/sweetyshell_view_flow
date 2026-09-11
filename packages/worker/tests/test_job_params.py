@@ -56,3 +56,23 @@ def test_snapshot_params_win_over_legacy_image_url():
     )
 
     assert job.get_params()["image_url"] == "https://example.com/v1.png"
+
+
+def test_recovery_job_preserves_backend_execution_and_delivery_contract():
+    job = _job(
+        taskStatus="in_progress",
+        deliveryStatus="archiving",
+        executionPlan={
+            "version": "mvp-v1",
+            "model": "doubao-seedance-2-5-260628",
+            "duration": 5,
+            "ratio": "16:9",
+        },
+        providerTaskId="provider-1",
+        attemptId="attempt-1",
+    )
+
+    assert job.taskStatus == "in_progress"
+    assert job.deliveryStatus == "archiving"
+    assert job.executionPlan["model"] == "doubao-seedance-2-5-260628"
+    assert job.providerTaskId == "provider-1"
