@@ -449,6 +449,20 @@ class JobExecutor:
                 provider_task_id = job.providerTaskId
                 print(f"[{job.id}] Resuming provider task: {provider_task_id}")
             else:
+                if job.status == JobStatus.SUBMITTED.value and not job.providerTaskId:
+                    await self.update_job_status(
+                        job.id,
+                        JobStatus.FAILED,
+                        attempt_id=attempt_id,
+                        attempt_status="requires_review",
+                        failure_type=FailureType.UNKNOWN,
+                        failure_code="SUBMISSION_STATE_UNKNOWN",
+                        failure_message="submitted task has no provider task id; manual verification required",
+                        task_status="requires_review",
+                    )
+                    print(f"[{job.id}] Submitted state has no provider task id; refusing new create")
+                    return
+
                 provider_params = job.get_params()
                 effective_model = str(
                     provider_params.get("model")

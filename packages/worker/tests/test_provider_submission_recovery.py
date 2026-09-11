@@ -135,7 +135,7 @@ class ProviderSubmissionRecoveryTests(unittest.TestCase):
 
         job = Job(
             id="job-new-1",
-            status="submitted",
+            status="pending",
             created_by="alice",
             prompt="a product video",
             created_at="2026-09-10T00:00:00+00:00",
@@ -204,6 +204,33 @@ class ProviderSubmissionRecoveryTests(unittest.TestCase):
         kwargs = job_executor.update_job_status.await_args_list[-1].kwargs
         self.assertEqual(kwargs["attempt_status"], "requires_review")
         self.assertEqual(kwargs["failure_code"], "SUBMISSION_UNCERTAIN")
+        self.assertEqual(kwargs["task_status"], "requires_review")
+
+    def test_submitted_without_provider_id_is_reviewed_without_new_create(self):
+        import executor as executor_module
+
+        adapter = SimpleNamespace(create_task=AsyncMock())
+        job_executor = executor_module.JobExecutor.__new__(executor_module.JobExecutor)
+        job_executor.adapters = {"seedance": adapter}
+        job_executor.update_job_status = AsyncMock(return_value=True)
+
+        job = Job(
+            id="job-submitted-missing-id",
+            status="submitted",
+            created_by="alice",
+            prompt="a product video",
+            created_at="2026-09-10T00:00:00+00:00",
+            provider_profile="seedance-main",
+            attempt_id="attempt-missing-id",
+        )
+
+        settings = SimpleNamespace(comfyui_enabled=False)
+        with patch.object(executor_module, "settings", settings):
+            asyncio.run(job_executor.execute_job(job))
+
+        adapter.create_task.assert_not_awaited()
+        kwargs = job_executor.update_job_status.await_args.kwargs
+        self.assertEqual(kwargs["attempt_status"], "requires_review")
         self.assertEqual(kwargs["task_status"], "requires_review")
 
 
