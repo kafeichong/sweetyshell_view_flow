@@ -10,12 +10,14 @@
 
 脚本会把已有 `video_flow_client` 备份到 `<ComfyUI>/.video-flow-backups/`（避免旧版本被当作节点重复加载）、复制节点、使用 ComfyUI 自己的 Python 安装依赖，并把 token 保存到 `~/.video-flow/token`（权限 `600`）。完成后重启 ComfyUI。
 
-公司生产环境使用以下 Backend URL；本地开发未设置时仍默认为 `http://localhost:3100`：
+公司生产环境使用以下 Backend URL；本地开发未设置时仍默认为 `http://localhost:3100`。不要把 `127.0.0.1:19091` 填到这里，它只属于同机 Fake Provider 合同测试：
 
 ```bash
 export VIDEO_FLOW_BACKEND_URL=https://ai.sweetyshell.com
 export VIDEO_FLOW_PROTOCOL_VERSION=1
 ```
+
+客户端电脑不保存 Ark/OSS 密钥。Production 出片还必须先上传并完成校验参考图，再使用服务端返回的 `assetId`；不能把本地路径或任意 Provider URL 作为 Production 输入。
 
 配置 Backend URL 和协议版本后，客户端按以下优先级读取 actor token：
 

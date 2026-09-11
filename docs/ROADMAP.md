@@ -131,6 +131,8 @@
 
 **恢复：** `GET /api/tasks/recover` 保持 Worker Guard，展平 providerTaskId / attemptId / attemptStatus / attemptModel / providerUsage / pricingVersion / executionPlan / deliveryStatus。正常恢复不创建新 Provider 任务；归档失败通过受控的人工恢复动作重新进入 archiving，不回 pending。
 
+**地址归属：** 创意人员电脑上的 ComfyUI 客户端只访问公司 Backend HTTPS；公司服务器上的 Worker 访问 Ark HTTPS。`http://127.0.0.1:19091/api/v3` 仅用于 Fake Provider 与测试进程在同一台主机的合同测试；Docker 内的 Worker 访问另一个 Fake Provider 容器时必须使用 `http://fake-provider:19091/api/v3`，不能使用容器自身的 loopback。
+
 ### T00：建立不会误付费的测试入口
 
 **修改：** `packages/backend/jest.config.js`、`packages/backend/package.json`、`.github/workflows/ci.yml`。
@@ -162,13 +164,13 @@ test('refuses a non-contract database before connecting', () => {
 **新增：** `packages/backend/src/tasks/production-spec.ts`、`production-spec.spec.ts`；schema 中新增 executionPlan / deliveryStatus，migration `packages/backend/prisma/migrations/202609110001_mvp_execution_plan/migration.sql`。
 **接口：** `normalizeProductionParams(params, spec)` 返回只含批准字段的生成参数；`findOwnedUploadedInput(assetId, actorId)` 返回 role=input、所属 actor 且上传校验完成的 Asset，否则 null。Worker `Job.get_params()` 以 executionPlan 的计费字段覆盖客户端输入，素材 URL 只由服务端资产签名产生。
 
-- [ ] 定义 `ProductionSpec` 的必填字段：version、model、duration、ratio、resolution、generate_audio、watermark、pricingVersion、预算金额/计算依据。真实值由上线确认；测试使用明确标为假的规格。
-- [ ] 从 `VIDEO_FLOW_PRODUCTION_SPEC_JSON` 解析配置；配置不完整仅关闭 Production，Preview/查询不受影响。拒绝非白名单字段及与批准规格不一致的 model/duration 等，不能静默忽略高成本参数。
-- [ ] 先按 actor+key 查重并比对原始请求，再为新意图执行规格/素材校验。新任务保存原请求、批准 executionPlan、输入 assetId/hash 与稳定客户端元数据。
-- [ ] Worker 适配器补 resolution 转发；不能因 Worker 当前默认模型变更而改变旧任务。旧 pending 没有批准执行快照时不能直接进入付费路径。
-- [ ] migration 仅加可空字段，不篡改历史任务；生成 Prisma client 并做隔离库升级/旧数据读取测试。
-- [ ] 修复现有空库 migration 顺序缺口：不得修改已经在生产登记的 migration 内容或名称；先查询生产 `_prisma_migrations`，再通过向前兼容的基线/初始化方案，使全新空库 `prisma migrate deploy` 可成功，并保留现有库无重复建表的升级路径。该项未通过前，T00 合同库只允许 `prisma db push`，不能宣称 migration 链已验证。
-- [ ] 新增 `packages/backend/test/production-input.contract-spec.ts`，覆盖本人输入成功、他人 Asset 403、output Asset 拒绝、未完成上传拒绝、自由 URL/多媒体/越界时长拒绝、请求重放不重写 executionPlan。
+- [x] 定义 `ProductionSpec` 的必填字段：version、model、duration、ratio、resolution、generate_audio、watermark、pricingVersion、预算金额/计算依据。真实值由上线确认；测试使用明确标为假的规格。
+- [x] 从 `VIDEO_FLOW_PRODUCTION_SPEC_JSON` 解析配置；配置不完整仅关闭 Production，Preview/查询不受影响。拒绝非白名单字段及与批准规格不一致的 model/duration 等，不能静默忽略高成本参数。
+- [x] 先按 actor+key 查重并比对原始请求，再为新意图执行规格/素材校验。新任务保存原请求、批准 executionPlan、输入 assetId/hash 与稳定客户端元数据。
+- [x] Worker 适配器补 resolution 转发；不能因 Worker 当前默认模型变更而改变旧任务。旧 pending 没有批准执行快照时不能直接进入付费路径。
+- [x] migration 仅加可空字段，不篡改历史任务；生成 Prisma client 并做隔离库升级/旧数据读取测试。
+- [x] 修复现有空库 migration 顺序缺口：不得修改已经在生产登记的 migration 内容或名称；先查询生产 `_prisma_migrations`，再通过向前兼容的基线/初始化方案，使全新空库 `prisma migrate deploy` 可成功，并保留现有库无重复建表的升级路径。该项未通过前，T00 合同库只允许 `prisma db push`，不能宣称 migration 链已验证。
+- [x] 新增 `packages/backend/test/production-input.contract-spec.ts`，覆盖本人输入成功、他人 Asset 403、output Asset 拒绝、未完成上传拒绝、自由 URL/多媒体/越界时长拒绝、请求重放不重写 executionPlan。
 
 代表性用例（`production-spec.spec.ts`，spec 是测试专用 fixture，不是有效云模型配置）：
 
@@ -467,6 +469,7 @@ def test_review_task_is_actionable_without_metrics_platform():
 - [ ] Worker restart 用真正退出/启动测试进程验证；用读取数据库持久化 providerTaskId 作为中断触发点，不依赖固定 sleep 猜时机。
 - [ ] 安装测试覆盖新增 Python 模块与前端资源、两个模板、备份位于 custom_nodes 之外；不改同事其他自定义节点。
 - [ ] CI 分开显示单元、合同、预期外部 workflow skip；跨包合同不得使用真实 Provider 凭证，漏跑应失败而不是跳过。
+- [ ] Worker 与 Fake Provider 都运行在 Docker 时，显式验证 `http://fake-provider:19091/api/v3` 的服务名寻址；仅宿主机合同脚本使用 `http://127.0.0.1:19091/api/v3`。
 - [ ] 两份手册写明正常使用、generation_version 的付费含义、超时恢复、费用未知、报障 taskId、管理员查询/恢复/暂停、迁移备份回滚。
 - [ ] 三包测试、构建、隔离合同和实际 ComfyUI 假服务工作流都通过后才交给 T12；此时只写“待真实验收”。
 

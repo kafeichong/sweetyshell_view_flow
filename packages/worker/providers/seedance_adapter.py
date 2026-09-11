@@ -104,6 +104,9 @@ class SeedanceAdapter:
             "watermark": params.get("watermark", False)
         }
 
+        if params.get("resolution"):
+            payload["resolution"] = params["resolution"]
+
         # 可选参数
         if params.get("seed") is not None:
             payload["seed"] = params["seed"]

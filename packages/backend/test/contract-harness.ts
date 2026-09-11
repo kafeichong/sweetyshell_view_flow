@@ -33,10 +33,15 @@ export function assertContractEnvironment(env: ContractEnvironment): void {
 export type ContractHarness = {
   appUrl: string;
   prisma: PrismaClient;
+  actorId: string;
   actorToken: string;
   workerToken: string;
   adminToken: string;
   close(): Promise<void>;
+};
+
+export type ContractHarnessOptions = {
+  productionSpec?: Record<string, unknown>;
 };
 
 async function reserveLoopbackPort(): Promise<number> {
@@ -88,7 +93,9 @@ async function stopChild(child: ChildProcess): Promise<void> {
   });
 }
 
-export async function createContractHarness(): Promise<ContractHarness> {
+export async function createContractHarness(
+  options: ContractHarnessOptions = {},
+): Promise<ContractHarness> {
   assertContractEnvironment(process.env);
 
   const workerToken = `contract-worker-${randomUUID()}`;
@@ -115,7 +122,10 @@ export async function createContractHarness(): Promise<ContractHarness> {
       PORT: String(port),
       VIDEO_FLOW_ADMIN_TOKEN: adminToken,
       VIDEO_FLOW_WORKER_TOKEN: workerToken,
-      VIDEO_FLOW_PRODUCTION_ACTORS: '',
+      VIDEO_FLOW_PRODUCTION_ACTORS: options.productionSpec ? actorId : '',
+      VIDEO_FLOW_PRODUCTION_SPEC_JSON: options.productionSpec
+        ? JSON.stringify(options.productionSpec)
+        : '',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -136,11 +146,15 @@ export async function createContractHarness(): Promise<ContractHarness> {
   return {
     appUrl,
     prisma,
+    actorId,
     actorToken,
     workerToken,
     adminToken,
     async close() {
       await prisma.task.deleteMany({ where: { actorId } });
+      await prisma.asset.deleteMany({
+        where: { objectKey: { startsWith: `contract/${actorId}/` } },
+      });
       await prisma.actorCredential.deleteMany({ where: { actorId } });
       await prisma.$disconnect();
       await stopChild(child);

@@ -53,6 +53,7 @@ class Job(BaseModel):
     # v1 创建的任务把完整入参放在 request_snapshot 里（requestSnapshot.params），
     # 必须读出来，否则 image_asset_id / ratio / duration 会被静默丢弃。
     requestSnapshot: Optional[Dict[str, Any]] = Field(default=None, alias="request_snapshot")
+    executionPlan: Optional[Dict[str, Any]] = Field(default=None, alias="execution_plan")
     providerTaskId: Optional[str] = Field(default=None, alias="provider_task_id")
     attemptId: Optional[str] = Field(default=None, alias="attempt_id")
     attemptNo: Optional[int] = Field(default=None, alias="attempt_no")
@@ -79,6 +80,19 @@ class Job(BaseModel):
         v1 创建的任务把完整入参放在 requestSnapshot.params 中，优先使用它；
         旧接口创建的任务退回 prompt / imageUrl 两个 MVP 字段。
         """
+        if isinstance(self.executionPlan, dict):
+            plan = self.executionPlan
+            return {
+                "prompt": plan["prompt"],
+                "image_asset_id": plan["imageAssetId"],
+                "model": plan["model"],
+                "duration": plan["duration"],
+                "ratio": plan["ratio"],
+                "resolution": plan["resolution"],
+                "generate_audio": plan["generateAudio"],
+                "watermark": plan["watermark"],
+            }
+
         if self.params:
             return dict(self.params)
 

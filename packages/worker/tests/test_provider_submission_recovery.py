@@ -9,7 +9,58 @@ from unittest.mock import AsyncMock, patch
 from models import Job, ProviderTaskStatus
 
 
+def approved_execution_plan():
+    return {
+        "specVersion": "test-v1",
+        "pricingVersion": "test-price-v1",
+        "reserveCny": "2.000000",
+        "model": "doubao-seedance-2-5-260628",
+        "prompt": "a product video",
+        "imageAssetId": "asset-test-1",
+        "duration": 5,
+        "ratio": "16:9",
+        "resolution": "1080p",
+        "generateAudio": False,
+        "watermark": True,
+    }
+
+
 class ProviderSubmissionRecoveryTests(unittest.TestCase):
+    def test_new_submission_without_execution_plan_is_quarantined_before_provider(self):
+        import executor as executor_module
+
+        adapter = SimpleNamespace(
+            default_model="should-not-be-used",
+            create_task=AsyncMock(return_value={"task_id": "must-not-exist"}),
+        )
+        job_executor = executor_module.JobExecutor.__new__(executor_module.JobExecutor)
+        job_executor.adapters = {"seedance": adapter}
+        job_executor.update_job_status = AsyncMock(return_value=True)
+
+        job = Job(
+            id="job-no-plan-1",
+            status="submitted",
+            created_by="alice",
+            prompt="legacy unapproved request",
+            created_at="2026-09-10T00:00:00+00:00",
+            provider_profile="seedance-main",
+            attempt_id="attempt-no-plan-1",
+        )
+
+        settings = SimpleNamespace(
+            comfyui_enabled=False,
+            running_job_timeout_minutes=10,
+            task_status_check_interval=0,
+        )
+        with patch.object(executor_module, "settings", settings):
+            asyncio.run(job_executor.execute_job(job))
+
+        adapter.create_task.assert_not_awaited()
+        update = job_executor.update_job_status.await_args
+        self.assertEqual(update.kwargs["attempt_status"], "requires_review")
+        self.assertEqual(update.kwargs["failure_code"], "MISSING_EXECUTION_PLAN")
+        self.assertEqual(update.kwargs["task_status"], "requires_review")
+
     def test_completed_task_persists_object_key_instead_of_expiring_signed_url(self):
         import executor as executor_module
 
@@ -39,12 +90,16 @@ class ProviderSubmissionRecoveryTests(unittest.TestCase):
             created_at="2026-09-10T00:00:00+00:00",
             provider_profile="seedance-main",
             attempt_id="attempt-output-1",
+            execution_plan=approved_execution_plan(),
         )
         with tempfile.TemporaryDirectory() as directory:
             job_executor = executor_module.JobExecutor.__new__(executor_module.JobExecutor)
             job_executor.adapters = {"seedance": adapter}
             job_executor.update_job_status = AsyncMock(return_value=True)
             job_executor.create_asset = AsyncMock(return_value=True)
+            job_executor.resolve_asset_url = AsyncMock(
+                return_value="https://oss.test/input-signed-url"
+            )
             job_executor.output_dir = Path(directory)
             job_executor.oss_uploader = SimpleNamespace(
                 upload=lambda _path, _key: "https://oss.test/signed-expiring-url",
@@ -79,6 +134,9 @@ class ProviderSubmissionRecoveryTests(unittest.TestCase):
         job_executor = executor_module.JobExecutor.__new__(executor_module.JobExecutor)
         job_executor.adapters = {"seedance": adapter}
         job_executor.update_job_status = AsyncMock(return_value=True)
+        job_executor.resolve_asset_url = AsyncMock(
+            return_value="https://oss.test/input-signed-url"
+        )
         job_executor.output_dir = Path("/tmp/video-worker-output")
 
         job = Job(
@@ -131,6 +189,9 @@ class ProviderSubmissionRecoveryTests(unittest.TestCase):
         job_executor = executor_module.JobExecutor.__new__(executor_module.JobExecutor)
         job_executor.adapters = {"seedance": adapter}
         job_executor.update_job_status = AsyncMock(return_value=True)
+        job_executor.resolve_asset_url = AsyncMock(
+            return_value="https://oss.test/input-signed-url"
+        )
         job_executor.output_dir = Path("/tmp/video-worker-output")
 
         job = Job(
@@ -142,6 +203,7 @@ class ProviderSubmissionRecoveryTests(unittest.TestCase):
             provider_profile="seedance-main",
             attempt_id="attempt-new-1",
             request_snapshot={"params": {"prompt": "a product video"}},
+            execution_plan=approved_execution_plan(),
         )
 
         settings = SimpleNamespace(
@@ -181,6 +243,9 @@ class ProviderSubmissionRecoveryTests(unittest.TestCase):
         job_executor = executor_module.JobExecutor.__new__(executor_module.JobExecutor)
         job_executor.adapters = {"seedance": adapter}
         job_executor.update_job_status = AsyncMock(return_value=True)
+        job_executor.resolve_asset_url = AsyncMock(
+            return_value="https://oss.test/input-signed-url"
+        )
 
         job = Job(
             id="job-uncertain-1",
@@ -190,6 +255,7 @@ class ProviderSubmissionRecoveryTests(unittest.TestCase):
             created_at="2026-09-10T00:00:00+00:00",
             provider_profile="seedance-main",
             attempt_id="attempt-uncertain-1",
+            execution_plan=approved_execution_plan(),
         )
 
         settings = SimpleNamespace(

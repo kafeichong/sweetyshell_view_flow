@@ -52,6 +52,7 @@ export class TasksService {
     capability: string;
     workflowName: string;
     requestSnapshot: object;
+    executionPlan: object;
     prompt: string;
     imageUrl?: string;
   }) {
@@ -63,6 +64,8 @@ export class TasksService {
         capability: data.capability,
         workflowName: data.workflowName,
         requestSnapshot: data.requestSnapshot,
+        executionPlan: data.executionPlan,
+        deliveryStatus: 'not_started',
         prompt: data.prompt,
         imageUrl: data.imageUrl,
         status: 'pending',

@@ -9,7 +9,7 @@ describe('contract test isolation', () => {
       assertContractEnvironment({
         VIDEO_FLOW_TEST_MODE: '1',
         DATABASE_URL: 'postgresql://test:test@127.0.0.1/video_flow',
-        VIDEO_FLOW_PROVIDER_BASE_URL: 'http://127.0.0.1:19091',
+        VIDEO_FLOW_PROVIDER_BASE_URL: 'http://127.0.0.1:19091/api/v3',
       }),
     ).toThrow('CONTRACT_DATABASE_REQUIRED');
   });
@@ -20,7 +20,7 @@ describe('contract test isolation', () => {
         VIDEO_FLOW_TEST_MODE: '1',
         DATABASE_URL:
           'postgresql://test:test@127.0.0.1/video_flow_contract',
-        VIDEO_FLOW_PROVIDER_BASE_URL: 'http://127.0.0.1:19091',
+        VIDEO_FLOW_PROVIDER_BASE_URL: 'http://127.0.0.1:19091/api/v3',
         VOLCENGINE_ACCESS_KEY: 'ark-real-looking-key',
       }),
     ).toThrow('REAL_PROVIDER_CREDENTIAL_FORBIDDEN');

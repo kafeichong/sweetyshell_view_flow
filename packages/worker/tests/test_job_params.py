@@ -56,3 +56,39 @@ def test_snapshot_params_win_over_legacy_image_url():
     )
 
     assert job.get_params()["image_url"] == "https://example.com/v1.png"
+
+
+def test_execution_plan_freezes_provider_parameters():
+    job = _job(
+        requestSnapshot={
+            "params": {
+                "prompt": "client prompt",
+                "image_asset_id": "untrusted-asset",
+                "duration": 60,
+                "ratio": "9:16",
+            }
+        },
+        executionPlan={
+            "specVersion": "test-v1",
+            "pricingVersion": "test-price-v1",
+            "model": "test-model",
+            "prompt": "approved prompt",
+            "imageAssetId": "approved-asset",
+            "duration": 5,
+            "ratio": "16:9",
+            "resolution": "test-resolution",
+            "generateAudio": False,
+            "watermark": True,
+        },
+    )
+
+    assert job.get_params() == {
+        "prompt": "approved prompt",
+        "image_asset_id": "approved-asset",
+        "model": "test-model",
+        "duration": 5,
+        "ratio": "16:9",
+        "resolution": "test-resolution",
+        "generate_audio": False,
+        "watermark": True,
+    }

@@ -116,6 +116,21 @@ describe('AssetsService contract', () => {
     });
   });
 
+  it('findOwnedUploadedInput requires actor ownership and input role', async () => {
+    mockAsset.findFirst.mockResolvedValue({ id: 'asset-1' });
+
+    await service.findOwnedUploadedInput('asset-1', 'actor-a');
+
+    expect(mockAsset.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'asset-1',
+        ownerId: 'actor-a',
+        role: AssetRole.INPUT,
+        inspectionStatus: { in: ['uploaded', 'verified'] },
+      },
+    });
+  });
+
   it('findLatestOwnedOutputForTask only returns delivered output owned by actor', async () => {
     mockAsset.findFirst.mockResolvedValue({ id: 'asset-output' });
 

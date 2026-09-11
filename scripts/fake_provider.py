@@ -49,6 +49,7 @@ def create_app(state: FakeProviderState | None = None) -> FastAPI:
         return task
 
     @app.get("/__test__/stats")
+    @app.get("/api/v3/__test__/stats")
     async def stats():
         return {
             "createCount": provider.create_count,

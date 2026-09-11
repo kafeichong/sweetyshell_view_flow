@@ -9,15 +9,21 @@ import {
   NotFoundException,
   Param,
   Post,
+  ServiceUnavailableException,
   UseGuards,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { ApiCredentialGuard } from '../../auth/api-credential.guard';
 import { CurrentActor } from '../../auth/current-actor.decorator';
 import { TasksService } from '../../tasks/tasks.service';
+import { AssetsService } from '../../assets/assets.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { buildPreviewPlan, validateTaskRequest } from './preview-plan';
 import { isProductionAllowed } from './production-policy';
+import {
+  loadProductionSpec,
+  normalizeProductionParams,
+} from '../../tasks/production-spec';
 
 /**
  * 稳定序列化：递归按键名排序。
@@ -45,7 +51,10 @@ export function stableStringify(value: unknown): string {
 @Controller('v1/tasks')
 @UseGuards(ApiCredentialGuard)
 export class V1TasksController {
-  constructor(private readonly tasks: TasksService) {}
+  constructor(
+    private readonly tasks: TasksService,
+    private readonly assets?: AssetsService,
+  ) {}
 
   @Post()
   async create(
@@ -64,18 +73,6 @@ export class V1TasksController {
       throw new BadRequestException('mode must be "preview" or "production"');
     }
 
-    // Production 按身份白名单开放，默认对所有人关闭。
-    if (mode === 'production' && !isProductionAllowed(actor.actorId)) {
-      throw new ForbiddenException(
-        'Production mode is not enabled for this actor',
-      );
-    }
-
-    // Preview 和 Production 共用同一套请求校验：校验失败必须在这里抛错，
-    // 而不是变成一条等待 Worker 执行的付费任务。
-    const validated = validateTaskRequest(body ?? {});
-    const previewPlan = mode === 'preview' ? buildPreviewPlan(body ?? {}) : null;
-
     const requestSnapshot = stableStringify(body);
     const existing = await this.tasks.findByActorRequest(
       actor.actorId,
@@ -85,7 +82,49 @@ export class V1TasksController {
       if (stableStringify(existing.requestSnapshot) !== requestSnapshot) {
         throw new ConflictException('Idempotency-Key payload mismatch');
       }
-      return previewPlan ? { ...existing, preview: previewPlan } : existing;
+      return mode === 'preview'
+        ? { ...existing, preview: buildPreviewPlan(body ?? {}) }
+        : existing;
+    }
+
+    // Production 按身份白名单开放，默认对所有人关闭。查重在前，保证已经
+    // 创建的同一意图可安全找回，而不会因之后关闭白名单而被迫重新生成。
+    if (mode === 'production' && !isProductionAllowed(actor.actorId)) {
+      throw new ForbiddenException(
+        'Production mode is not enabled for this actor',
+      );
+    }
+
+    const validated = validateTaskRequest(body ?? {});
+    const previewPlan = mode === 'preview' ? buildPreviewPlan(body ?? {}) : null;
+
+    let executionPlan: ReturnType<typeof normalizeProductionParams> | null = null;
+    if (mode === 'production') {
+      if (validated.capability !== 'IMAGE_TO_VIDEO' || validated.profile !== 'seedance') {
+        throw new BadRequestException('PRODUCTION_PROFILE_NOT_ALLOWED');
+      }
+      const spec = loadProductionSpec();
+      if (!spec || !this.assets) {
+        throw new ServiceUnavailableException('PRODUCTION_SPEC_UNAVAILABLE');
+      }
+      try {
+        executionPlan = normalizeProductionParams(validated.params, spec);
+      } catch (error) {
+        throw new BadRequestException(
+          error instanceof Error ? error.message : 'INVALID_PRODUCTION_REQUEST',
+        );
+      }
+      const inputAsset = await this.assets.findOwnedUploadedInput(
+        executionPlan.imageAssetId,
+        actor.actorId,
+      );
+      if (!inputAsset) {
+        throw new ForbiddenException('PRODUCTION_INPUT_NOT_OWNED');
+      }
+      executionPlan = {
+        ...executionPlan,
+        inputFileHash: inputAsset.fileHash ?? null,
+      };
     }
 
     try {
@@ -97,11 +136,8 @@ export class V1TasksController {
           capability: validated.capability,
           workflowName: validated.profile,
           requestSnapshot: body,
+          executionPlan: executionPlan!,
           prompt: validated.prompt,
-          imageUrl:
-            typeof validated.params.image_url === 'string'
-              ? validated.params.image_url
-              : undefined,
         });
       }
 

@@ -449,6 +449,23 @@ class JobExecutor:
                 provider_task_id = job.providerTaskId
                 print(f"[{job.id}] Resuming provider task: {provider_task_id}")
             else:
+                if not isinstance(job.executionPlan, dict):
+                    # 新的付费提交必须来自 Backend 固化且批准的执行快照。
+                    # 已经有 providerTaskId 的历史任务仍允许走上面的恢复分支，
+                    # 避免为补快照而二次创建 Provider 任务。
+                    await self.update_job_status(
+                        job.id,
+                        JobStatus.FAILED,
+                        attempt_id=attempt_id,
+                        attempt_status="requires_review",
+                        failure_type=FailureType.UNKNOWN,
+                        failure_code="MISSING_EXECUTION_PLAN",
+                        failure_message="No approved execution_plan for provider submission",
+                        task_status="requires_review",
+                    )
+                    print(f"[{job.id}] Missing approved execution plan, abort for safety")
+                    return
+
                 provider_params = job.get_params()
                 effective_model = str(
                     provider_params.get("model")
