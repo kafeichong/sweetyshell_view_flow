@@ -11,6 +11,8 @@ jest.mock('@nestjs/common', () => ({
   ConflictException: class ConflictException extends Error { status = 409; },
   BadRequestException: class BadRequestException extends Error { status = 400; },
   ForbiddenException: class ForbiddenException extends Error { status = 403; },
+  HttpException: class HttpException extends Error { constructor(message: string, public status: number) { super(message); } },
+  HttpStatus: { SERVICE_UNAVAILABLE: 503, TOO_MANY_REQUESTS: 429 },
 }));
 
 import { V1TasksController } from './v1-tasks.controller';
@@ -22,12 +24,16 @@ describe('V1TasksController idempotency', () => {
     createPreview: jest.fn(),
     findOneForActor: jest.fn(),
   };
+  const budget = {
+    createTaskWithReservation: jest.fn(),
+  };
 
   beforeEach(() => {
     tasks.findByActorRequest.mockReset();
     tasks.createV1.mockReset();
     tasks.createPreview.mockReset();
     tasks.findOneForActor.mockReset();
+    budget.createTaskWithReservation.mockReset();
     delete process.env.VIDEO_FLOW_PRODUCTION_ACTORS;
   });
 
@@ -117,8 +123,9 @@ describe('V1TasksController idempotency', () => {
     process.env.VIDEO_FLOW_PRODUCTION_ACTORS = 'actor-allowed, other-actor';
     tasks.findByActorRequest.mockResolvedValue(null);
     tasks.createV1.mockResolvedValue({ id: 'task-real', status: 'pending' });
+    budget.createTaskWithReservation.mockResolvedValue({ id: 'task-real', status: 'pending' });
 
-    const result = await new V1TasksController(tasks as never).create(
+    const result = await new V1TasksController(tasks as never, budget as never).create(
       { actorId: 'actor-allowed' },
       'request-real-1',
       {
@@ -129,7 +136,8 @@ describe('V1TasksController idempotency', () => {
       },
     );
 
-    expect(tasks.createV1).toHaveBeenCalledTimes(1);
+    expect(budget.createTaskWithReservation).toHaveBeenCalledTimes(1);
+    expect(tasks.createV1).not.toHaveBeenCalled();
     expect(tasks.createPreview).not.toHaveBeenCalled();
     expect(result).toMatchObject({ id: 'task-real', status: 'pending' });
     expect((result as Record<string, unknown>).preview).toBeUndefined();

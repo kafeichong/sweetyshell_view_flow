@@ -71,6 +71,10 @@ model Task {
   status   String  @default("pending") // pending, running, completed, failed
   errorMsg String? @map("error_msg")
 
+  // T02: 执行计划和交付状态
+  executionPlan  Json?   @map("execution_plan")
+  deliveryStatus String? @map("delivery_status")
+
   // 费用
   cost Float? @db.Real
 
@@ -86,6 +90,7 @@ model Task {
   // 关联
   executionAttempts ExecutionAttempt[]
   assets            Asset[]
+  budgetReservation TaskBudgetReservation?
 
   @@unique([actorId, clientRequestId])
   @@index([status])
@@ -158,13 +163,44 @@ model ActorCredential {
   name            String
   tokenHash       String    @map("token_hash")
   status          String    @default("active")
-  dailyLimitCny   Float?    @map("daily_limit_cny")
-  monthlyLimitCny Float?    @map("monthly_limit_cny")
+  dailyLimitCny   Decimal?  @map("daily_limit_cny") @db.Decimal(18, 6)
+  monthlyLimitCny Decimal?  @map("monthly_limit_cny") @db.Decimal(18, 6)
   lastUsedAt      DateTime? @map("last_used_at")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
   @@map("actor_credentials")
+}
+
+// T02: 任务预算预占表
+model TaskBudgetReservation {
+  id              String   @id @default(uuid()) @db.Uuid
+  taskId          String   @unique @map("task_id") @db.Uuid
+  task            Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  actorId         String   @map("actor_id")
+  reservedCny     Decimal  @map("reserved_cny") @db.Decimal(18, 6)
+  settledCny      Decimal? @map("settled_cny") @db.Decimal(18, 6)
+  state           String   @default("reserved")
+  dayKey          String   @map("day_key")
+  monthKey        String   @map("month_key")
+  pricingVersion  String   @map("pricing_version")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([actorId, dayKey])
+  @@index([actorId, monthKey])
+  @@index([state])
+  @@map("task_budget_reservations")
+}
+
+// T02: 生产准入开关（单例）
+model ProductionGate {
+  id        String   @id @default("production")
+  paused    Boolean  @default(true)
+  reason    String?
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("production_gates")
 }
 
 // 配置表（单条记录）

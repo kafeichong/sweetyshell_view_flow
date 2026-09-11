@@ -8,6 +8,8 @@ import {
   Headers,
   NotFoundException,
   Param,
+  HttpException,
+  HttpStatus,
   Post,
   UseGuards,
 } from '@nestjs/common';
@@ -15,6 +17,7 @@ import { Prisma } from '@prisma/client';
 import { ApiCredentialGuard } from '../../auth/api-credential.guard';
 import { CurrentActor } from '../../auth/current-actor.decorator';
 import { TasksService } from '../../tasks/tasks.service';
+import { TaskBudgetService } from '../../tasks/task-budget.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { buildPreviewPlan, validateTaskRequest } from './preview-plan';
 import { isProductionAllowed } from './production-policy';
@@ -45,7 +48,10 @@ export function stableStringify(value: unknown): string {
 @Controller('v1/tasks')
 @UseGuards(ApiCredentialGuard)
 export class V1TasksController {
-  constructor(private readonly tasks: TasksService) {}
+  constructor(
+    private readonly tasks: TasksService,
+    private readonly budget?: TaskBudgetService,
+  ) {}
 
   @Post()
   async create(
@@ -91,18 +97,61 @@ export class V1TasksController {
     try {
       if (!previewPlan) {
         // Production：创建可被 Worker 领取的真实任务（status='pending'）。
-        return await this.tasks.createV1({
-          actorId: actor.actorId,
-          clientRequestId: idempotencyKey,
-          capability: validated.capability,
-          workflowName: validated.profile,
-          requestSnapshot: body,
-          prompt: validated.prompt,
-          imageUrl:
-            typeof validated.params.image_url === 'string'
-              ? validated.params.image_url
-              : undefined,
-        });
+        // T02: 预算检查和预占
+        const estimatedCny = '60.000000'; // MVP: 固定预估值，后续增强
+
+        const executionPlan = {
+          version: 'mvp-v1',
+          model: 'doubao-seedance-2-5-260628',
+          duration: 5,
+          ratio: '16:9',
+          resolution: '720p',
+          generate_audio: false,
+          watermark: true,
+          pricingVersion: 'mvp-fixed-60-cny',
+          reserveCny: estimatedCny,
+        };
+
+        try {
+          if (!this.budget) {
+            throw new Error('Budget service is not configured');
+          }
+          return await this.budget.createTaskWithReservation({
+            actorId: actor.actorId,
+            clientRequestId: idempotencyKey,
+            estimatedCny,
+            executionPlan,
+            task: {
+              createdBy: actor.actorId,
+              capability: validated.capability,
+              workflowName: validated.profile,
+              requestSnapshot: body,
+              prompt: validated.prompt,
+              imageUrl:
+                typeof validated.params.image_url === 'string'
+                  ? validated.params.image_url
+                  : undefined,
+              status: 'pending',
+            },
+          });
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : '';
+          const reasonMap: Record<string, string> = {
+            NO_CREDENTIAL: 'Credential not found',
+            CREDENTIAL_INACTIVE: 'Credential is inactive',
+            NO_LIMITS_CONFIGURED: 'Budget limits not configured',
+            DAILY_LIMIT_EXCEEDED: 'Daily budget limit exceeded',
+            MONTHLY_LIMIT_EXCEEDED: 'Monthly budget limit exceeded',
+            PRODUCTION_PAUSED: 'Production is paused',
+          };
+          if (reasonMap[reason]) {
+            const status = reason === 'PRODUCTION_PAUSED'
+              ? HttpStatus.SERVICE_UNAVAILABLE
+              : HttpStatus.TOO_MANY_REQUESTS;
+            throw new HttpException(reasonMap[reason], status);
+          }
+          throw error;
+        }
       }
 
       const task = await this.tasks.createPreview({
