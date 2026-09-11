@@ -15,6 +15,9 @@ describe('TaskClaimService contract', () => {
       findFirst: jest.fn(),
       create: jest.fn(),
     },
+    productionGate: {
+      findUnique: jest.fn(),
+    },
     $transaction: jest.fn(),
   };
 
@@ -28,6 +31,8 @@ describe('TaskClaimService contract', () => {
     prisma.executionAttempt.findFirst.mockReset();
     prisma.executionAttempt.create.mockReset();
     prisma.$transaction.mockReset();
+    prisma.productionGate.findUnique.mockReset();
+    prisma.productionGate.findUnique.mockResolvedValue({ paused: false });
   });
 
   it('claimNext 返回已写入 attempt 的任务', async () => {
@@ -61,6 +66,8 @@ describe('TaskClaimService contract', () => {
       where: {
         status: 'pending',
         OR: [{ taskStatus: null }, { taskStatus: 'pending' }],
+        executionPlan: { not: expect.anything() },
+        budgetReservation: { isNot: null },
       },
       orderBy: { createdAt: 'asc' },
     });
@@ -69,6 +76,8 @@ describe('TaskClaimService contract', () => {
         id: candidate.id,
         status: 'pending',
         OR: [{ taskStatus: null }, { taskStatus: 'pending' }],
+        executionPlan: { not: expect.anything() },
+        budgetReservation: { isNot: null },
       },
       data: {
         status: 'submitted',
@@ -109,6 +118,16 @@ describe('TaskClaimService contract', () => {
     expect(result).toBeNull();
   });
 
+  it('ProductionGate 暂停时不领取新任务', async () => {
+    prisma.$transaction.mockImplementation(async (cb: any) => cb(prisma));
+    prisma.productionGate.findUnique.mockResolvedValue({ paused: true });
+
+    const result = await service.claimNext('worker-1', 'production');
+
+    expect(result).toBeNull();
+    expect(prisma.task.findFirst).not.toHaveBeenCalled();
+  });
+
   it('findRecoverable 会携带最新 attempt 字段', async () => {
     prisma.task.findMany.mockResolvedValue([
       {
@@ -123,8 +142,13 @@ describe('TaskClaimService contract', () => {
             provider: 'seedance',
             model: 'doubao-seedance-2-5',
             submittedAt: new Date('2026-09-10T00:00:00.000Z'),
+            providerTaskId: 'provider-r1',
+            providerUsage: { frames: 120 },
+            pricingVersion: 'mvp-v1',
           },
         ],
+        executionPlan: { version: 'mvp-v1' },
+        deliveryStatus: 'not_started',
       },
     ] as any);
 
@@ -152,6 +176,11 @@ describe('TaskClaimService contract', () => {
       attemptProvider: 'seedance',
       attemptModel: 'doubao-seedance-2-5',
       attemptSubmittedAt: '2026-09-10T00:00:00.000Z',
+      providerTaskId: 'provider-r1',
+      providerUsage: { frames: 120 },
+      pricingVersion: 'mvp-v1',
+      executionPlan: { version: 'mvp-v1' },
+      deliveryStatus: 'not_started',
     });
   });
 });

@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
+import { Prisma } from '@prisma/client';
 
 type ClaimMode = 'preview' | 'production' | 'comfyui';
 const CLAIM_LEASE_MS = 5 * 60 * 1000;
@@ -23,8 +24,22 @@ export class TaskClaimService {
     // 以事务完成状态抢占，避免同一 pending 任务被多个 worker 同时领取。
     for (let retry = 0; retry < 3; retry += 1) {
       const claimed = await this.prisma.$transaction(async (tx: any) => {
+        if (this.normalizeMode(mode) === 'production' && tx.productionGate?.findUnique) {
+          const gate = await tx.productionGate.findUnique({ where: { id: 'production' } });
+          if (gate?.paused !== false) {
+            return null;
+          }
+        }
+
+        const claimFilter = this.normalizeMode(mode) === 'production'
+          ? {
+              ...CLAIMABLE_TASK_WHERE,
+              executionPlan: { not: Prisma.JsonNull },
+              budgetReservation: { isNot: null },
+            }
+          : CLAIMABLE_TASK_WHERE;
         const candidate = await tx.task.findFirst({
-          where: { ...CLAIMABLE_TASK_WHERE },
+          where: claimFilter,
           orderBy: { createdAt: 'asc' },
         });
 
@@ -42,7 +57,7 @@ export class TaskClaimService {
         const updateResult = await tx.task.updateMany({
           where: {
             id: candidate.id,
-            ...CLAIMABLE_TASK_WHERE,
+            ...claimFilter,
           },
           data: {
             ...claimedStatus,
@@ -115,6 +130,11 @@ export class TaskClaimService {
         attemptNo: null,
         attemptStatus: null,
         attemptSubmittedAt: null,
+        providerTaskId: null,
+        providerUsage: null,
+        pricingVersion: null,
+        executionPlan: task.executionPlan ?? null,
+        deliveryStatus: task.deliveryStatus ?? null,
       };
     }
 
@@ -126,6 +146,11 @@ export class TaskClaimService {
       attemptProvider: attempt.provider,
       attemptModel: attempt.model,
       attemptSubmittedAt: attempt.submittedAt ? attempt.submittedAt.toISOString() : null,
+      providerTaskId: attempt.providerTaskId ?? null,
+      providerUsage: attempt.providerUsage ?? null,
+      pricingVersion: attempt.pricingVersion ?? null,
+      executionPlan: task.executionPlan ?? null,
+      deliveryStatus: task.deliveryStatus ?? null,
     };
   }
 
