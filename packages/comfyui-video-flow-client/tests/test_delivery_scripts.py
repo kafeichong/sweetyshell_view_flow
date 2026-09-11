@@ -46,6 +46,31 @@ def test_installer_copies_client_and_protects_token(tmp_path):
     assert stat.S_IMODE(installed_token.stat().st_mode) == 0o600
 
 
+def test_installer_keeps_previous_version_outside_custom_nodes(tmp_path):
+    comfy_root = tmp_path / "ComfyUI"
+    python_path = comfy_root / ".venv/bin/python"
+    python_path.parent.mkdir(parents=True)
+    _write_executable(python_path, "#!/bin/sh\nexit 0\n")
+    target = comfy_root / "custom_nodes/video_flow_client"
+    target.mkdir(parents=True)
+    (target / "old-version.txt").write_text("old", encoding="utf-8")
+
+    subprocess.run(
+        [str(CLIENT_DIR / "install.sh"), str(comfy_root)],
+        check=True,
+        env={**os.environ, "HOME": str(tmp_path)},
+        text=True,
+        capture_output=True,
+    )
+
+    assert not list((comfy_root / "custom_nodes").glob("video_flow_client.backup.*"))
+    backups = list(
+        (comfy_root / ".video-flow-backups").glob("video_flow_client.*")
+    )
+    assert len(backups) == 1
+    assert (backups[0] / "old-version.txt").read_text(encoding="utf-8") == "old"
+
+
 def test_admin_credential_script_never_prints_issued_token(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()

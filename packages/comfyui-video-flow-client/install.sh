@@ -8,6 +8,7 @@ PYTHON_BIN="$COMFYUI_ROOT/.venv/bin/python"
 CUSTOM_NODES_DIR="$COMFYUI_ROOT/custom_nodes"
 TARGET_DIR="$CUSTOM_NODES_DIR/video_flow_client"
 TEMP_DIR="$CUSTOM_NODES_DIR/.video_flow_client.new.$$"
+BACKUP_ROOT="$COMFYUI_ROOT/.video-flow-backups"
 
 test -x "$PYTHON_BIN" || { echo "error: ComfyUI Python 不存在: $PYTHON_BIN" >&2; exit 1; }
 test -d "$CUSTOM_NODES_DIR" || { echo "error: custom_nodes 不存在: $CUSTOM_NODES_DIR" >&2; exit 1; }
@@ -30,7 +31,8 @@ fi
 "$PYTHON_BIN" -m pip install -r "$TEMP_DIR/requirements.txt"
 
 if test -e "$TARGET_DIR" || test -L "$TARGET_DIR"; then
-  BACKUP_DIR="$CUSTOM_NODES_DIR/video_flow_client.backup.$(date +%Y%m%d%H%M%S)"
+  mkdir -p "$BACKUP_ROOT"
+  BACKUP_DIR="$BACKUP_ROOT/video_flow_client.$(date +%Y%m%d%H%M%S)"
   mv "$TARGET_DIR" "$BACKUP_DIR"
   echo "原节点已备份到: $BACKUP_DIR"
 fi

@@ -8,7 +8,7 @@
 ./install.sh /path/to/ComfyUI /path/to/actor-token
 ```
 
-脚本会备份已有 `video_flow_client`、复制节点、使用 ComfyUI 自己的 Python 安装依赖，并把 token 保存到 `~/.video-flow/token`（权限 `600`）。完成后重启 ComfyUI。
+脚本会把已有 `video_flow_client` 备份到 `<ComfyUI>/.video-flow-backups/`（避免旧版本被当作节点重复加载）、复制节点、使用 ComfyUI 自己的 Python 安装依赖，并把 token 保存到 `~/.video-flow/token`（权限 `600`）。完成后重启 ComfyUI。
 
 公司生产环境使用以下 Backend URL；本地开发未设置时仍默认为 `http://localhost:3100`：
 
