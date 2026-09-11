@@ -41,6 +41,32 @@ def test_stable_idempotency_key_is_repeatable():
     assert key_a == key_b
 
 
+def test_stable_idempotency_key_changes_with_generation_parameters():
+    base = VideoFlowClient.stable_idempotency_key(
+        "prompt",
+        b"image",
+        profile="seedance",
+        duration=5,
+        ratio="16:9",
+    )
+    changed_duration = VideoFlowClient.stable_idempotency_key(
+        "prompt",
+        b"image",
+        profile="seedance",
+        duration=10,
+        ratio="16:9",
+    )
+    changed_ratio = VideoFlowClient.stable_idempotency_key(
+        "prompt",
+        b"image",
+        profile="seedance",
+        duration=5,
+        ratio="9:16",
+    )
+
+    assert len({base, changed_duration, changed_ratio}) == 3
+
+
 def test_create_task_scopes_same_base_idempotency_key_by_mode():
     requests = []
 
@@ -189,3 +215,37 @@ def test_client_initializes_when_comfyui_uses_a_socks_proxy(monkeypatch):
 
     client = VideoFlowClient(VideoFlowConfig("https://backend.test", "secret-token"))
     client.client.close()
+
+
+def test_download_task_result_uses_fresh_result_url_and_writes_output(tmp_path):
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        if request.url.path.endswith("/api/v1/assets/tasks/task-1/result"):
+            return httpx.Response(
+                200,
+                json={
+                    "taskId": "task-1",
+                    "assetId": "asset-1",
+                    "objectKey": "videos/2026/09/11/final.mp4",
+                    "downloadUrl": "https://oss.test/fresh-signed-url",
+                },
+            )
+        if request.url.host == "oss.test":
+            return httpx.Response(200, content=b"video-bytes")
+        return httpx.Response(404)
+
+    client = VideoFlowClient(
+        VideoFlowConfig("https://backend.test", "secret-token"),
+        httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    result = client.download_task_result("task-1", tmp_path)
+
+    output = Path(result["localPath"])
+    assert output.parent == tmp_path
+    assert output.name == "task-1-final.mp4"
+    assert output.read_bytes() == b"video-bytes"
+    assert requests[0].headers["authorization"] == "Bearer secret-token"
+    assert "authorization" not in requests[1].headers

@@ -1,5 +1,8 @@
 from typing import Any, BinaryIO
 import hashlib
+import json
+import re
+from pathlib import Path
 import httpx
 
 try:
@@ -114,9 +117,65 @@ class VideoFlowClient:
         response.raise_for_status()
         return response.json()["downloadUrl"]
 
+    def get_task_result(self, task_id: str) -> dict[str, Any]:
+        response = self.client.get(
+            f"{self.config.backend_url}/api/v1/assets/tasks/{task_id}/result",
+            headers=self._headers(),
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def download_task_result(
+        self,
+        task_id: str,
+        output_dir: str | Path,
+    ) -> dict[str, Any]:
+        result = self.get_task_result(task_id)
+        output_root = Path(output_dir).expanduser()
+        output_root.mkdir(parents=True, exist_ok=True)
+
+        source_name = Path(str(result.get("objectKey") or "result.mp4")).name
+        safe_task_id = re.sub(r"[^a-zA-Z0-9._-]", "_", task_id)
+        safe_name = re.sub(r"[^a-zA-Z0-9._-]", "_", source_name) or "result.mp4"
+        destination = output_root / f"{safe_task_id}-{safe_name}"
+        temporary = destination.with_suffix(destination.suffix + ".part")
+
+        # OSS 签名 URL 是独立下载地址，不携带 Video Flow actor token。
+        try:
+            with self.client.stream("GET", str(result["downloadUrl"])) as response:
+                response.raise_for_status()
+                with temporary.open("wb") as output:
+                    for chunk in response.iter_bytes():
+                        output.write(chunk)
+            temporary.replace(destination)
+        finally:
+            if temporary.exists():
+                temporary.unlink()
+
+        return {**result, "localPath": str(destination)}
+
     @staticmethod
-    def stable_idempotency_key(prompt: str, image_bytes: bytes) -> str:
-        return hashlib.sha256(prompt.encode() + b"\0" + image_bytes).hexdigest()
+    def stable_idempotency_key(
+        prompt: str,
+        image_bytes: bytes,
+        *,
+        profile: str = "seedance",
+        duration: int | None = None,
+        ratio: str | None = None,
+    ) -> str:
+        generation = json.dumps(
+            {
+                "duration": duration,
+                "profile": profile,
+                "ratio": ratio,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode()
+        return hashlib.sha256(
+            generation + b"\0" + prompt.encode() + b"\0" + image_bytes
+        ).hexdigest()
 
     @staticmethod
     def mode_scoped_idempotency_key(idempotency_key: str, mode: str) -> str:

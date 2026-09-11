@@ -537,7 +537,9 @@ class JobExecutor:
                 # 7. 上传到 OSS
                 object_key = f"videos/{datetime.now().strftime('%Y/%m/%d')}/{filename}"
                 oss_url = self.oss_uploader.upload(str(local_path), object_key)
-                uploaded_video_url = oss_url
+                # Task 永久保存 objectKey；客户端下载时由 Backend 临时签发 URL。
+                # 把 OSS 签名 URL 写入数据库会在数天后失效，不能作为产物身份。
+                uploaded_video_url = object_key
                 print(f"[{job.id}] Uploaded to OSS: {oss_url}")
 
                 # 8. 创建 Asset 记录（用 objectKey，不用会过期的签名 URL）

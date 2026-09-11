@@ -115,4 +115,20 @@ describe('AssetsService contract', () => {
       },
     });
   });
+
+  it('findLatestOwnedOutputForTask only returns delivered output owned by actor', async () => {
+    mockAsset.findFirst.mockResolvedValue({ id: 'asset-output' });
+
+    await service.findLatestOwnedOutputForTask('task-1', 'actor-a');
+
+    expect(mockAsset.findFirst).toHaveBeenCalledWith({
+      where: {
+        taskId: 'task-1',
+        ownerId: 'actor-a',
+        role: AssetRole.OUTPUT,
+        inspectionStatus: { in: ['uploaded', 'verified'] },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  });
 });

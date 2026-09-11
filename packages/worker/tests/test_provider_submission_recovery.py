@@ -1,4 +1,5 @@
 import asyncio
+import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
@@ -9,6 +10,59 @@ from models import Job, ProviderTaskStatus
 
 
 class ProviderSubmissionRecoveryTests(unittest.TestCase):
+    def test_completed_task_persists_object_key_instead_of_expiring_signed_url(self):
+        import executor as executor_module
+
+        async def download_video(_url, output_path):
+            Path(output_path).write_bytes(b"video")
+
+        adapter = SimpleNamespace(
+            default_model="doubao-seedance-2-5-260628",
+            create_task=AsyncMock(return_value={"task_id": "provider-task-output"}),
+            poll_until_complete=AsyncMock(
+                return_value=ProviderTaskStatus(
+                    id="provider-task-output",
+                    status="completed",
+                    result_url="https://provider.test/video.mp4",
+                )
+            ),
+            download_video=AsyncMock(side_effect=download_video),
+            calculate_actual_cost=lambda _usage: None,
+            pricing_version="seedance-token-v1",
+            classify_failure=lambda _message: executor_module.FailureType.UNKNOWN,
+        )
+        job = Job(
+            id="job-output-1",
+            status="pending",
+            created_by="actor-a",
+            prompt="a product video",
+            created_at="2026-09-10T00:00:00+00:00",
+            provider_profile="seedance-main",
+            attempt_id="attempt-output-1",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            job_executor = executor_module.JobExecutor.__new__(executor_module.JobExecutor)
+            job_executor.adapters = {"seedance": adapter}
+            job_executor.update_job_status = AsyncMock(return_value=True)
+            job_executor.create_asset = AsyncMock(return_value=True)
+            job_executor.output_dir = Path(directory)
+            job_executor.oss_uploader = SimpleNamespace(
+                upload=lambda _path, _key: "https://oss.test/signed-expiring-url",
+            )
+            settings = SimpleNamespace(
+                comfyui_enabled=False,
+                running_job_timeout_minutes=10,
+                task_status_check_interval=0,
+            )
+
+            with patch.object(executor_module, "settings", settings):
+                asyncio.run(job_executor.execute_job(job))
+
+        terminal = job_executor.update_job_status.await_args_list[-1]
+        self.assertTrue(terminal.kwargs["video_url"].startswith("videos/"))
+        self.assertFalse(terminal.kwargs["video_url"].startswith("https://"))
+        job_executor.create_asset.assert_awaited_once()
+
     def test_existing_provider_task_id_only_polls_without_creating_again(self):
         import executor as executor_module
 

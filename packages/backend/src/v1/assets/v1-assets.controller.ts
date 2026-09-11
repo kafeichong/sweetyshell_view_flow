@@ -5,6 +5,7 @@ import { ApiCredentialGuard } from '../../auth/api-credential.guard';
 import { CurrentActor } from '../../auth/current-actor.decorator';
 import { AssetsService } from '../../assets/assets.service';
 import { AssetPresignService } from '../../assets/asset-presign.service';
+import { TasksService } from '../../tasks/tasks.service';
 
 @Controller('v1/assets')
 @UseGuards(ApiCredentialGuard)
@@ -12,7 +13,34 @@ export class V1AssetsController {
   constructor(
     private readonly assets: AssetsService,
     private readonly presign: AssetPresignService,
+    private readonly tasks?: TasksService,
   ) {}
+
+  @Get('tasks/:taskId/result')
+  async taskResult(
+    @CurrentActor() actor: { actorId: string },
+    @Param('taskId') taskId: string,
+  ) {
+    const task = await this.tasks?.findOneForActor(taskId, actor.actorId);
+    if (!task) {
+      throw new NotFoundException('Task result not found');
+    }
+    const asset = await this.assets.findLatestOwnedOutputForTask(
+      taskId,
+      actor.actorId,
+    );
+    if (!asset) {
+      throw new NotFoundException('Task result not found');
+    }
+    return {
+      taskId,
+      assetId: asset.id,
+      objectKey: asset.objectKey,
+      mimeType: asset.mimeType,
+      sizeBytes: asset.sizeBytes === null ? null : Number(asset.sizeBytes),
+      ...this.presign.createDownloadUrl(asset.objectKey),
+    };
+  }
 
   @Post('upload-ticket')
   async createUploadTicket(

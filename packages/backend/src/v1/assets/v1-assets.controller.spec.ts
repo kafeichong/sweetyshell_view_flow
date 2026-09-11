@@ -17,6 +17,69 @@ import { V1AssetsController } from './v1-assets.controller';
 import { Prisma } from '@prisma/client';
 
 describe('V1AssetsController ownership', () => {
+  it('returns the latest owned output with a fresh download URL', async () => {
+    const assets = {
+      findLatestOwnedOutputForTask: jest.fn().mockResolvedValue({
+        id: 'asset-output',
+        objectKey: 'videos/2026/09/11/output.mp4',
+        mimeType: 'video/mp4',
+        sizeBytes: BigInt(12),
+      }),
+    };
+    const presign = {
+      createDownloadUrl: jest.fn().mockReturnValue({
+        downloadUrl: 'https://oss.test/signed',
+        expiresIn: 300,
+      }),
+    };
+    const tasks = {
+      findOneForActor: jest.fn().mockResolvedValue({ id: 'task-1' }),
+    };
+    const controller = new V1AssetsController(
+      assets as never,
+      presign as never,
+      tasks as never,
+    );
+
+    const result = await controller.taskResult(
+      { actorId: 'actor-a' },
+      'task-1',
+    );
+
+    expect(tasks.findOneForActor).toHaveBeenCalledWith('task-1', 'actor-a');
+    expect(assets.findLatestOwnedOutputForTask).toHaveBeenCalledWith(
+      'task-1',
+      'actor-a',
+    );
+    expect(result).toEqual({
+      taskId: 'task-1',
+      assetId: 'asset-output',
+      objectKey: 'videos/2026/09/11/output.mp4',
+      mimeType: 'video/mp4',
+      sizeBytes: 12,
+      downloadUrl: 'https://oss.test/signed',
+      expiresIn: 300,
+    });
+    expect(() => JSON.stringify(result)).not.toThrow();
+  });
+
+  it('does not expose another actor task result', async () => {
+    const assets = { findLatestOwnedOutputForTask: jest.fn() };
+    const presign = { createDownloadUrl: jest.fn() };
+    const tasks = { findOneForActor: jest.fn().mockResolvedValue(null) };
+    const controller = new V1AssetsController(
+      assets as never,
+      presign as never,
+      tasks as never,
+    );
+
+    await expect(
+      controller.taskResult({ actorId: 'actor-a' }, 'task-other'),
+    ).rejects.toMatchObject({ status: 404 });
+    expect(assets.findLatestOwnedOutputForTask).not.toHaveBeenCalled();
+    expect(presign.createDownloadUrl).not.toHaveBeenCalled();
+  });
+
   it('does not create a download URL for an asset owned by another actor', async () => {
     const assets = { findOwnedUploaded: jest.fn().mockResolvedValue(null), registerInput: jest.fn() };
     const presign = { isConfigured: jest.fn().mockReturnValue(true), createDownloadUrl: jest.fn() };

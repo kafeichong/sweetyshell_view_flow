@@ -28,7 +28,7 @@ export class V1WorkerController {
   }
 
   @Post('assets')
-  registerAsset(
+  async registerAsset(
     @Body()
     body: {
       taskId: string;
@@ -42,7 +42,13 @@ export class V1WorkerController {
   ) {
     // Worker 生成产物后登记 Asset；此前 Worker 调用的 /api/assets 并不存在，
     // 导致产物完全没有素材记录。
+    const task = await this.tasks.findOne(body.taskId);
+    const ownerId = task?.actorId ?? task?.createdBy;
+    if (!task || !ownerId) {
+      throw new NotFoundException('Task not found');
+    }
     return this.assets.registerOutput({
+      ownerId,
       taskId: body.taskId,
       attemptId: body.attemptId,
       objectKey: body.objectKey,
@@ -50,6 +56,7 @@ export class V1WorkerController {
       mediaType: body.mediaType ?? 'video',
       mimeType: body.mimeType,
       sizeBytes: body.sizeBytes,
+      inspectionStatus: 'uploaded',
     });
   }
 
