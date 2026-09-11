@@ -15,6 +15,8 @@
 ```bash
 export VIDEO_FLOW_BACKEND_URL=https://ai.sweetyshell.com
 export VIDEO_FLOW_PROTOCOL_VERSION=1
+# 可选：提交回执目录，默认 ~/.video-flow/receipts
+export VIDEO_FLOW_RECEIPT_DIR=~/.video-flow/receipts
 ```
 
 客户端电脑不保存 Ark/OSS 密钥。Production 出片还必须先上传并完成校验参考图，再使用服务端返回的 `assetId`；不能把本地路径或任意 Provider URL 作为 Production 输入。
@@ -36,6 +38,8 @@ chmod 600 ~/.video-flow/token
 如需使用其他位置，设置 `VIDEO_FLOW_TOKEN_FILE=/absolute/path/to/token`。不要把 token 文件放进 custom node 目录、Workflow JSON 或版本控制。
 
 客户端默认只提交 `mode=preview`。Production 必须由调用方显式指定 `mode=production`，并且 actor 必须在服务端 `VIDEO_FLOW_PRODUCTION_ACTORS` 白名单中；Preview 与 Production 使用不同的模式作用域幂等键，避免 Preview 后正式提交因请求体变化返回 `409`。
+
+Production 节点的 `generation_version` 默认是 `1`。相同版本会复用同一份本地提交回执和幂等键；只有明确把版本改为 `2` 等新值，才表示主动生成新一版。POST 超时后保留原回执，重试不会自动升级版本。
 
 安装后可使用以下节点：
 

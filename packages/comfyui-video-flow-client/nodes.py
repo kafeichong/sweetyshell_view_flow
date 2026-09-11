@@ -7,9 +7,11 @@ from PIL import Image
 try:
     from .client import VideoFlowClient
     from .config import VideoFlowConfig
+    from .receipts import ReceiptStore
 except ImportError:  # Support ComfyUI's direct module loader.
     from client import VideoFlowClient
     from config import VideoFlowConfig
+    from receipts import ReceiptStore
 
 
 class VideoFlowConfigNode:
@@ -60,6 +62,7 @@ class VideoFlowSeedanceProduction:
                 "image": ("IMAGE",),
                 "duration": ("INT", {"default": 5, "min": 1, "max": 60}),
                 "ratio": (["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"],),
+                "generation_version": ("INT", {"default": 1, "min": 1, "max": 9999}),
             }
         }
 
@@ -68,7 +71,7 @@ class VideoFlowSeedanceProduction:
     FUNCTION = "submit"
     CATEGORY = "Video Flow"
 
-    def submit(self, config, prompt, image, duration, ratio):
+    def submit(self, config, prompt, image, duration, ratio, generation_version=1):
         client = VideoFlowClient(config)
         pixels = np.clip(image[0].cpu().numpy() * 255, 0, 255).astype(np.uint8)
         buffer = BytesIO()
@@ -79,13 +82,22 @@ class VideoFlowSeedanceProduction:
             filename="reference.png",
             mime_type="image/png",
         )
-        task = client.create_task(
+        intent_key = client.stable_idempotency_key(
+            prompt,
+            image_bytes,
+            profile="seedance",
+            duration=duration,
+            ratio=ratio,
+            generation_version=generation_version,
+        )
+        task = client.create_task_with_receipt(
             idempotency_key=client.stable_idempotency_key(
                 prompt,
                 image_bytes,
                 profile="seedance",
                 duration=duration,
                 ratio=ratio,
+                generation_version=generation_version,
             ),
             mode="production",
             payload={
@@ -98,6 +110,8 @@ class VideoFlowSeedanceProduction:
                     "ratio": ratio,
                 },
             },
+            intent_key=intent_key,
+            receipt_store=ReceiptStore(config.receipt_dir),
         )
         return (str(task["id"]),)
 

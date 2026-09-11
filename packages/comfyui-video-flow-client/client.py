@@ -7,8 +7,10 @@ import httpx
 
 try:
     from .config import VideoFlowConfig
+    from .receipts import ReceiptStore
 except ImportError:  # ComfyUI loads custom node modules directly from the folder.
     from config import VideoFlowConfig
+    from receipts import ReceiptStore
 
 
 class VideoFlowClient:
@@ -101,6 +103,52 @@ class VideoFlowClient:
         response.raise_for_status()
         return response.json()
 
+    def create_task_with_receipt(
+        self,
+        *,
+        intent_key: str,
+        idempotency_key: str,
+        payload: dict[str, Any],
+        mode: str = "preview",
+        receipt_store: ReceiptStore,
+    ) -> dict[str, Any]:
+        """Create a task while preserving the exact retry intent on disk."""
+        existing = receipt_store.load(intent_key)
+        if existing and existing.get("taskId"):
+            return self.get_task(str(existing["taskId"]))
+
+        scoped_key = self.mode_scoped_idempotency_key(idempotency_key, mode)
+        request_body = {**payload, "mode": mode}
+        receipt_store.save(
+            intent_key,
+            {
+                "idempotencyKey": scoped_key,
+                "mode": mode,
+                "body": request_body,
+                "taskId": None,
+            },
+        )
+        try:
+            result = self.create_task(
+                idempotency_key=idempotency_key,
+                payload=payload,
+                mode=mode,
+            )
+        except Exception:
+            # 保留 taskId=null 的原始意图，调用方可安全使用同一 key 重试。
+            raise
+
+        receipt_store.save(
+            intent_key,
+            {
+                "idempotencyKey": scoped_key,
+                "mode": mode,
+                "body": request_body,
+                "taskId": result.get("id"),
+            },
+        )
+        return result
+
     def get_task(self, task_id: str) -> dict[str, Any]:
         response = self.client.get(
             f"{self.config.backend_url}/api/v1/tasks/{task_id}",
@@ -162,12 +210,16 @@ class VideoFlowClient:
         profile: str = "seedance",
         duration: int | None = None,
         ratio: str | None = None,
+        generation_version: int = 1,
+        spec_version: str = "",
     ) -> str:
         generation = json.dumps(
             {
                 "duration": duration,
                 "profile": profile,
                 "ratio": ratio,
+                "generation_version": generation_version,
+                "spec_version": spec_version,
             },
             ensure_ascii=False,
             separators=(",", ":"),
