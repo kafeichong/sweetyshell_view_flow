@@ -4,6 +4,22 @@
 
 安装：将目录复制到 ComfyUI 的 `custom_nodes/`，在该目录安装 `requirements.txt`，重启 ComfyUI。
 
-配置：在 `VideoFlowConfig` 中填写 Backend URL 和协议版本，并在 ComfyUI 进程环境变量中设置 `VIDEO_FLOW_TOKEN`。Token 不进入 Workflow JSON。第一版只支持 `Seedance Preview` 单图/文本请求，Production 不由客户端直接提交。
+配置 Backend URL 和协议版本后，客户端按以下优先级读取 actor token：
+
+1. ComfyUI 进程环境变量 `VIDEO_FLOW_TOKEN`。
+2. `VIDEO_FLOW_TOKEN_FILE` 指向的普通文件。
+3. 默认文件 `~/.video-flow/token`。
+
+ComfyUI Desktop 不方便注入进程环境变量时，可以把 token 单独写入默认文件，并限制为当前用户可读：
+
+```bash
+mkdir -p ~/.video-flow
+chmod 700 ~/.video-flow
+chmod 600 ~/.video-flow/token
+```
+
+如需使用其他位置，设置 `VIDEO_FLOW_TOKEN_FILE=/absolute/path/to/token`。不要把 token 文件放进 custom node 目录、Workflow JSON 或版本控制。
+
+客户端默认只提交 `mode=preview`。Production 必须由调用方显式指定 `mode=production`，并且 actor 必须在服务端 `VIDEO_FLOW_PRODUCTION_ACTORS` 白名单中；Preview 与 Production 使用不同的模式作用域幂等键，避免 Preview 后正式提交因请求体变化返回 `409`。
 
 服务端未配置真实 OSS 签名器时，上传票据接口会返回 `503`，这是预期的安全失败。
