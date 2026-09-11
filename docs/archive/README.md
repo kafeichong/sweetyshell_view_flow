@@ -67,6 +67,12 @@
 | --- | --- | --- |
 | `2026-09-11-creative-mvp-T00-T01-summary.md` | T00/T01 开发提交、迁移兼容方案、地址边界和隔离验证结果的过程快照；后续任务完成后不再回写 | `PROJECT_STATUS.md` + `ROADMAP.md` |
 
+### 2026-09-11 —— Creative MVP T04–T07 实施与验证
+
+| 文件 | 归档原因 | 当前依据 |
+| --- | --- | --- |
+| `2026-09-11-creative-mvp-T04-T07-summary.md` | T04 提交安全、T07 客户端回执、版本幂等和测试证据快照；后续任务完成后不再回写 | `PROJECT_STATUS.md` + `ROADMAP.md` |
+
 ### plans —— 历史实施计划
 
 | 文件 | 归档原因 | 遗留事项去向 |

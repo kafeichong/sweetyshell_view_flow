@@ -18,6 +18,8 @@
 
 本轮 Creative MVP T00–T01 的实施与验证快照见：[2026-09-11-creative-mvp-T00-T01-summary.md](./archive/2026-09-11-creative-mvp-T00-T01-summary.md)。
 
+最新 T04–T07 实施与验证快照见：[2026-09-11-creative-mvp-T04-T07-summary.md](./archive/2026-09-11-creative-mvp-T04-T07-summary.md)。
+
 **只有两份文档描述"当前事实"和"当前计划"：`PROJECT_STATUS.md` 与 `ROADMAP.md`。其余文档一律是参考材料或历史记录，不得作为现状依据。**
 
 ---
