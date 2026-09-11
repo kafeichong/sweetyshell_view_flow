@@ -32,7 +32,7 @@ jobs:
           python-version: "3.13"
           cache: pip
           cache-dependency-path: packages/worker/requirements.txt
-      - run: pip install -r requirements.txt
+      - run: pip install -r requirements.txt pytest
       - run: python -m pytest -q
 
   comfyui-client:
