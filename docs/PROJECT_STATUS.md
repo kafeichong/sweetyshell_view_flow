@@ -68,6 +68,14 @@
 
 ## 3. 已经具备的能力（附证据）
 
+### 3.0 当前开发分支进度（尚未部署）
+
+- `feat/creative-mvp` 隔离 worktree 已完成 ROADMAP T00：新增真实编译 Backend + PostgreSQL 的合同测试入口、仅 loopback 的假 Provider、Provider 测试环境 fail-closed 校验，并修正 `start:prod` 指向实际构建入口 `dist/src/main`。
+- ROADMAP T01 已在本分支实现：Production 只接受固定规格和本人已上传的 input Asset，Task 保存 `executionPlan` / `deliveryStatus`，Worker 新提交缺少批准快照时转 `requires_review`，已有 Provider ID 的恢复路径不因此重建任务。证据：`packages/backend/src/tasks/production-spec.ts`、`packages/backend/src/v1/tasks/v1-tasks.controller.ts`、`packages/worker/executor.py`。
+- 2026-09-11 只读查询生产 `_prisma_migrations` 确认四个旧 migration 均已登记，实际顺序为 init → execution domain → attempt model → asset hash index。未修改这些旧 migration；新增 `20260910190000_prepare_assets_for_hash_index` 与 `20260911000030_repair_asset_foreign_keys` 后，隔离测试已分别验证全新空库和模拟现有库都能执行 `prisma migrate deploy`，旧 Task 的新增字段保持 null。验证入口：`scripts/run_mvp_contract.sh`。
+- 2026-09-11 T01 提交前复验：Backend build + 75/75；Worker 86 通过 / 26 预期跳过；ComfyUI 客户端 19/19；合同测试 10/10、Fake Provider 2/2。合同脚本同时验证空库 migration、模拟现有库升级，以及 Fake Provider 隔离地址。
+- 上述仅是开发分支离线证据，未推送、未部署、未开放 Production、未创建真实 Provider 任务。
+
 ### 3.1 Backend
 
 | 能力 | 证据 |

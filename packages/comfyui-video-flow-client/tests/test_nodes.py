@@ -15,7 +15,7 @@ class _Pixels:
         return self.value
 
 
-def test_production_node_explicitly_submits_production(monkeypatch):
+def test_production_node_explicitly_submits_production(monkeypatch, tmp_path):
     calls = {}
 
     class FakeClient:
@@ -30,7 +30,7 @@ def test_production_node_explicitly_submits_production(monkeypatch):
             calls["key_params"] = kwargs
             return "base-key"
 
-        def create_task(self, **kwargs):
+        def create_task_with_receipt(self, **kwargs):
             calls["create"] = kwargs
             return {"id": "task-production"}
 
@@ -38,7 +38,7 @@ def test_production_node_explicitly_submits_production(monkeypatch):
     image = [_Pixels(nodes.np.zeros((2, 2, 3), dtype=nodes.np.float32))]
 
     result = nodes.VideoFlowSeedanceProduction().submit(
-        VideoFlowConfig("https://backend.test", "token"),
+        VideoFlowConfig("https://backend.test", "token", receipt_dir=str(tmp_path)),
         "prompt",
         image,
         10,
@@ -52,6 +52,7 @@ def test_production_node_explicitly_submits_production(monkeypatch):
         "profile": "seedance",
         "duration": 10,
         "ratio": "9:16",
+        "generation_version": 1,
     }
 
 

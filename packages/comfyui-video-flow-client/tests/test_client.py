@@ -7,6 +7,59 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from client import VideoFlowClient
 from config import VideoFlowConfig
+from receipts import ReceiptStore
+
+
+def test_create_task_with_receipt_reuses_key_after_timeout(tmp_path):
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        raise httpx.ReadTimeout("connection dropped")
+
+    client = VideoFlowClient(
+        VideoFlowConfig("https://backend.test", "secret-token"),
+        httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    store = ReceiptStore(tmp_path)
+    payload = {"capability": "TEXT_TO_VIDEO", "profile": "seedance", "params": {"prompt": "p"}}
+
+    for _ in range(2):
+        try:
+            client.create_task_with_receipt(
+                intent_key="intent-timeout",
+                idempotency_key="stable-key",
+                payload=payload,
+                mode="production",
+                receipt_store=store,
+            )
+        except httpx.ReadTimeout:
+            pass
+
+    assert len(requests) == 2
+    assert requests[0].headers["idempotency-key"] == requests[1].headers["idempotency-key"]
+    receipt = store.load("intent-timeout")
+    assert receipt["taskId"] is None
+    assert receipt["idempotencyKey"] == requests[0].headers["idempotency-key"]
+
+
+def test_create_task_with_receipt_records_task_id(tmp_path):
+    client = VideoFlowClient(
+        VideoFlowConfig("https://backend.test", "secret-token"),
+        httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(201, json={"id": "task-1"}))),
+    )
+    store = ReceiptStore(tmp_path)
+
+    result = client.create_task_with_receipt(
+        intent_key="intent-success",
+        idempotency_key="stable-key",
+        payload={"capability": "TEXT_TO_VIDEO", "profile": "seedance", "params": {"prompt": "p"}},
+        mode="production",
+        receipt_store=store,
+    )
+
+    assert result["id"] == "task-1"
+    assert store.load("intent-success")["taskId"] == "task-1"
 
 
 def test_create_task_sends_preview_contract_without_exposing_token():

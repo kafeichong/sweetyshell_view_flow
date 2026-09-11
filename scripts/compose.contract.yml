@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: video_contract
+      POSTGRES_PASSWORD: video_contract
+      POSTGRES_DB: video_flow_contract
+    ports:
+      - "127.0.0.1:55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U video_contract -d video_flow_contract"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+    tmpfs:
+      - /var/lib/postgresql/data

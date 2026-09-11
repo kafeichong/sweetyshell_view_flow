@@ -21,7 +21,7 @@ class SeedanceAdapter:
     def __init__(self, api_key: Optional[str] = None):
         # 使用 Ark API Key (格式: ark-...)
         self.api_key = api_key or settings.volcengine_access_key
-        self.base_url = "https://ark.cn-beijing.volces.com/api/v3"
+        self.base_url = settings.video_flow_provider_base_url.rstrip("/")
         self.client = httpx.AsyncClient(timeout=60.0)
 
     def _build_headers(self) -> dict:
@@ -103,6 +103,9 @@ class SeedanceAdapter:
             "duration": params.get("duration", 5),
             "watermark": params.get("watermark", False)
         }
+
+        if params.get("resolution"):
+            payload["resolution"] = params["resolution"]
 
         # 可选参数
         if params.get("seed") is not None:

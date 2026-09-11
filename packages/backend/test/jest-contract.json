@@ -1,0 +1,9 @@
+{
+  "testEnvironment": "node",
+  "testMatch": ["<rootDir>/**/*.contract-spec.ts"],
+  "moduleFileExtensions": ["ts", "js", "json"],
+  "transform": {
+    "^.+\\.(t|j)s$": "ts-jest"
+  },
+  "maxWorkers": 1
+}

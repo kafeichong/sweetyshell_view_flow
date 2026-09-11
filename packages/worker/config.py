@@ -1,6 +1,36 @@
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 import os
+from urllib.parse import urlparse
+
+
+ARK_PROVIDER_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
+
+
+def validate_provider_environment(
+    *,
+    test_mode: bool,
+    provider_base_url: str,
+    provider_key: str,
+) -> None:
+    normalized_url = provider_base_url.rstrip("/")
+    if test_mode and provider_key.strip():
+        raise ValueError("REAL_PROVIDER_CREDENTIAL_FORBIDDEN")
+
+    if normalized_url == ARK_PROVIDER_BASE_URL:
+        return
+
+    if not test_mode:
+        raise ValueError("CONTRACT_PROVIDER_MODE_REQUIRED")
+
+    parsed = urlparse(normalized_url)
+    if parsed.scheme != "http" or parsed.hostname not in {
+        "127.0.0.1",
+        "localhost",
+        "::1",
+        "fake-provider",
+    }:
+        raise ValueError("CONTRACT_PROVIDER_REQUIRED")
 
 
 class Settings(BaseSettings):
@@ -24,6 +54,8 @@ class Settings(BaseSettings):
 
     # Volcengine Ark API (Seedance 视频生成) 的鉴权主密钥
     volcengine_access_key: str = ""  # Ark API Key
+    video_flow_test_mode: bool = False
+    video_flow_provider_base_url: str = ARK_PROVIDER_BASE_URL
 
     # OSS
     # oss region/bucket/credential 用于落库产物上传与签名回放。
@@ -46,4 +78,10 @@ class Settings(BaseSettings):
 
 @lru_cache()
 def get_settings() -> Settings:
-    return Settings()
+    settings = Settings()
+    validate_provider_environment(
+        test_mode=settings.video_flow_test_mode,
+        provider_base_url=settings.video_flow_provider_base_url,
+        provider_key=settings.volcengine_access_key,
+    )
+    return settings

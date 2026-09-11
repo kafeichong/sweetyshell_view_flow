@@ -58,6 +58,8 @@ model Task {
   workflowVersion String?     @map("workflow_version")
   workflowHash    String?     @map("workflow_hash")
   requestSnapshot Json?       @map("request_snapshot")
+  executionPlan  Json?        @map("execution_plan")
+  deliveryStatus String?      @map("delivery_status")
   taskStatus      TaskStatus? @map("task_status")
 
   // 输入

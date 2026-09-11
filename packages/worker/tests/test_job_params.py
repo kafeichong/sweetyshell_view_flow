@@ -76,3 +76,40 @@ def test_recovery_job_preserves_backend_execution_and_delivery_contract():
     assert job.deliveryStatus == "archiving"
     assert job.executionPlan["model"] == "doubao-seedance-2-5-260628"
     assert job.providerTaskId == "provider-1"
+
+
+def test_execution_plan_freezes_provider_parameters():
+    job = _job(
+        requestSnapshot={
+            "params": {
+                "prompt": "client prompt",
+                "image_asset_id": "untrusted-asset",
+                "duration": 60,
+                "ratio": "9:16",
+            }
+        },
+        executionPlan={
+            "specVersion": "test-v1",
+            "pricingVersion": "test-price-v1",
+            "model": "test-model",
+            "prompt": "approved prompt",
+            "imageAssetId": "approved-asset",
+            "duration": 5,
+            "ratio": "16:9",
+            "resolution": "test-resolution",
+            "generateAudio": False,
+            "watermark": True,
+        },
+    )
+
+    assert job.get_params() == {
+        "prompt": "approved prompt",
+        "image_asset_id": "approved-asset",
+        "model": "test-model",
+        "duration": 5,
+        "ratio": "16:9",
+        "resolution": "test-resolution",
+        "generate_audio": False,
+        "watermark": True,
+    }
+

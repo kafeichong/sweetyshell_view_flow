@@ -11,6 +11,8 @@
 1. **默认是 Preview。** 不显式传 `"mode": "production"` 的请求不会生成视频，只会返回一份请求摘要（`willCallProvider: false`）。这是防止误触付费的安全默认值。
 2. **Production 需要白名单授权。** 即使传了 `mode=production`，如果该 actor 不在服务端 `VIDEO_FLOW_PRODUCTION_ACTORS` 里，也会返回 **403**。需要出片时请联系管理员开通。
 
+3. **地址按运行位置区分。** 创意人员电脑上的 ComfyUI 使用公司 Backend，例如 `https://ai.sweetyshell.com`；`http://localhost:3100` 只用于 Backend 也在本机运行的开发环境。`127.0.0.1:19091` 是测试脚本与 Fake Provider 同机时的地址，不是创意人员或生产 Worker 地址。
+
 ---
 
 ## 1. 前置：拿到个人凭证
@@ -139,7 +141,7 @@ curl -sS -X POST 'https://ai.sweetyshell.com/api/v1/tasks' \
 }
 ```
 
-> `params.image_url` 仍然兼容，但需要是一个 Provider 能访问的 HTTPS 地址。**优先用 `image_asset_id`**，本地文件路径永远不能直接传给 Seedance。
+> Preview 仍兼容 `params.image_url`，但需要是 Provider 能访问的 HTTPS 地址。Production 必须使用本人已上传并完成校验的 `image_asset_id`；不能传 `image_url` 或本地文件路径。
 
 ### 3.3 请求校验规则
 
@@ -149,7 +151,7 @@ curl -sS -X POST 'https://ai.sweetyshell.com/api/v1/tasks' \
 | `profile` | 必须以 `seedance` 开头（如 `seedance`、`seedance-main`） |
 | `params.prompt` | 必填，≤ 4000 字符 |
 | `params` 整体 | 序列化后 ≤ 64 KB |
-| `IMAGE_TO_VIDEO` | 必须有 `image_asset_id` 或 `image_url` |
+| `IMAGE_TO_VIDEO` | Preview 必须有 `image_asset_id` 或 `image_url`；Production 必须是已上传完成的 `image_asset_id` |
 | `mode` | 缺省 `preview`；`production` 需白名单 |
 
 ### 3.4 Preview 响应长这样

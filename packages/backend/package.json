@@ -8,6 +8,7 @@
     "start": "nest start",
     "start:prod": "node dist/src/main",
     "test": "jest",
+    "test:contract": "jest --config test/jest-contract.json",
     "test:watch": "jest --watch",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",

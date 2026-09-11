@@ -1,5 +1,6 @@
 import asyncio
 import httpx
+import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -53,6 +54,9 @@ class JobExecutor:
         # 所有任务统一落在输出目录，便于回收和排障。
         self.output_dir = Path(settings.comfyui_output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self._submission_blocked = (
+            self._submission_block_marker().exists()
+        )
         self.oss_uploader = OssUploader()
         # 记录已经在提交后落库失败的 ComfyUI 任务，防止重复重跑造成脏状态。
         self._comfyui_quarantined_job_ids: set[str] = set()
@@ -77,8 +81,58 @@ class JobExecutor:
         token = getattr(settings, "worker_service_token", "")
         return {"X-Worker-Token": token} if token else {}
 
+    async def _append_submission_journal(
+        self,
+        *,
+        task_id: str,
+        attempt_id: Optional[str],
+        provider_task_id: str,
+        stage: str,
+    ) -> None:
+        """Persist a redacted Provider submission fact before DB callbacks.
+
+        The journal deliberately contains identifiers and lifecycle stage only;
+        it must remain useful after a response timeout without becoming a
+        second secret/prompt store.
+        """
+        journal_dir = self.output_dir / ".video-flow-journal"
+        journal_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        journal_path = journal_dir / "submissions.jsonl"
+        record = {
+            "at": datetime.now(timezone.utc).isoformat(),
+            "taskId": task_id,
+            "attemptId": attempt_id,
+            "providerTaskId": provider_task_id,
+            "stage": stage,
+        }
+        with journal_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, separators=(",", ":")) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        journal_path.chmod(0o600)
+
+    def _submission_block_marker(self) -> Path:
+        output_dir = getattr(self, "output_dir", Path("."))
+        return output_dir / ".video-flow-journal" / "SUBMISSIONS_BLOCKED"
+
+    def _mark_submission_blocked(self) -> None:
+        if not hasattr(self, "output_dir"):
+            # 仅兼容未经过 __init__ 的单元测试对象；真实 Worker 始终有
+            # output_dir，生产路径必须持久化阻断标记。
+            self._submission_blocked = True
+            return
+        marker = self._submission_block_marker()
+        marker.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        marker.write_text("manual_review_required\n", encoding="utf-8")
+        marker.chmod(0o600)
+        self._submission_blocked = True
+
     async def fetch_pending_jobs(self, limit: int = 10) -> list[Job]:
         """通过原子 claim 拿 pending 任务，支持并发 worker 不重复领取。"""
+        if getattr(self, "_submission_blocked", False):
+            print("Provider submissions are blocked; pending jobs require manual review")
+            return []
+
         claimed_jobs: list[Job] = []
 
         for _ in range(limit):
@@ -155,6 +209,7 @@ class JobExecutor:
                             "provider submission state is uncertain"
                         )
                     else:
+                        self._mark_submission_blocked()
                         print(
                             f"[{job.id}] In-flight job requires_review update failed "
                             "and may be replayed"
@@ -184,6 +239,7 @@ class JobExecutor:
                             "requeued for a new attempt"
                         )
                     else:
+                        self._mark_submission_blocked()
                         self._comfyui_manual_intervention_job_ids.add(job.id)
                         print(
                             f"[{job.id}] Requeue failed; requires manual intervention"
@@ -203,6 +259,7 @@ class JobExecutor:
                     )
                 else:
                     # 无法写回 failed 时先隔离，避免重启后又被误入执行队列。
+                    self._mark_submission_blocked()
                     self._comfyui_manual_intervention_job_ids.add(job.id)
                     print(
                         f"[{job.id}] In-flight job has no provider task ID; "
@@ -449,6 +506,19 @@ class JobExecutor:
                 provider_task_id = job.providerTaskId
                 print(f"[{job.id}] Resuming provider task: {provider_task_id}")
             else:
+                if getattr(self, "_submission_blocked", False):
+                    await self.update_job_status(
+                        job.id,
+                        JobStatus.FAILED,
+                        attempt_id=attempt_id,
+                        attempt_status="requires_review",
+                        failure_type=FailureType.UNKNOWN,
+                        failure_code="SUBMISSION_JOURNAL_BLOCKED",
+                        failure_message="Provider submissions are blocked pending journal review",
+                        task_status="requires_review",
+                    )
+                    return
+
                 if job.status == JobStatus.SUBMITTED.value and not job.providerTaskId:
                     await self.update_job_status(
                         job.id,
@@ -461,6 +531,23 @@ class JobExecutor:
                         task_status="requires_review",
                     )
                     print(f"[{job.id}] Submitted state has no provider task id; refusing new create")
+                    return
+
+                if not isinstance(job.executionPlan, dict):
+                    # 新的付费提交必须来自 Backend 固化且批准的执行快照。
+                    # 已经有 providerTaskId 的历史任务仍允许走上面的恢复分支，
+                    # 避免为补快照而二次创建 Provider 任务。
+                    await self.update_job_status(
+                        job.id,
+                        JobStatus.FAILED,
+                        attempt_id=attempt_id,
+                        attempt_status="requires_review",
+                        failure_type=FailureType.UNKNOWN,
+                        failure_code="MISSING_EXECUTION_PLAN",
+                        failure_message="No approved execution_plan for provider submission",
+                        task_status="requires_review",
+                    )
+                    print(f"[{job.id}] Missing approved execution plan, abort for safety")
                     return
 
                 provider_params = job.get_params()
@@ -500,6 +587,30 @@ class JobExecutor:
                 result = await adapter.create_task(provider_params)
                 provider_task_id = result["task_id"]
 
+                # Provider 已接受后先写本地持久证据，再尝试 DB 回写；
+                # 即使 HTTP 响应随后丢失，也能凭 taskId 进行人工核对。
+                try:
+                    await self._append_submission_journal(
+                        task_id=job.id,
+                        attempt_id=attempt_id,
+                        provider_task_id=provider_task_id,
+                        stage="provider_accepted",
+                    )
+                except Exception:
+                    self._mark_submission_blocked()
+                    await self.update_job_status(
+                        job.id,
+                        JobStatus.FAILED,
+                        attempt_id=attempt_id,
+                        attempt_status="requires_review",
+                        failure_type=FailureType.UNKNOWN,
+                        failure_code="JOURNAL_WRITE_FAILED",
+                        failure_message="Provider accepted task but submission journal could not be persisted",
+                        task_status="requires_review",
+                    )
+                    print(f"[{job.id}] Submission journal failed; provider submissions blocked")
+                    return
+
                 persisted = await self.update_job_status(
                     job.id,
                     JobStatus.SUBMITTED,
@@ -509,6 +620,7 @@ class JobExecutor:
                     submitted_at=datetime.now(timezone.utc),
                 )
                 if not persisted:
+                    self._mark_submission_blocked()
                     await self.update_job_status(
                         job.id,
                         JobStatus.FAILED,

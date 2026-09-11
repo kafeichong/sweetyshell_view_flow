@@ -13,6 +13,7 @@ jest.mock('@nestjs/common', () => ({
   ForbiddenException: class ForbiddenException extends Error { status = 403; },
   HttpException: class HttpException extends Error { constructor(message: string, public status: number) { super(message); } },
   HttpStatus: { SERVICE_UNAVAILABLE: 503, TOO_MANY_REQUESTS: 429 },
+  ServiceUnavailableException: class ServiceUnavailableException extends Error { status = 503; },
 }));
 
 import { V1TasksController } from './v1-tasks.controller';
@@ -27,6 +28,20 @@ describe('V1TasksController idempotency', () => {
   const budget = {
     createTaskWithReservation: jest.fn(),
   };
+  const assets = {
+    findOwnedUploadedInput: jest.fn(),
+  };
+  const productionSpec = JSON.stringify({
+    version: 'test-v1',
+    model: 'test-model',
+    duration: 5,
+    ratio: '16:9',
+    resolution: 'test-resolution',
+    generateAudio: false,
+    watermark: true,
+    pricingVersion: 'test-price-v1',
+    reserveCny: '2.000000',
+  });
 
   beforeEach(() => {
     tasks.findByActorRequest.mockReset();
@@ -34,7 +49,13 @@ describe('V1TasksController idempotency', () => {
     tasks.createPreview.mockReset();
     tasks.findOneForActor.mockReset();
     budget.createTaskWithReservation.mockReset();
+    assets.findOwnedUploadedInput.mockReset();
+    assets.findOwnedUploadedInput.mockResolvedValue({
+      id: 'asset-1',
+      fileHash: 'a'.repeat(64),
+    });
     delete process.env.VIDEO_FLOW_PRODUCTION_ACTORS;
+    process.env.VIDEO_FLOW_PRODUCTION_SPEC_JSON = productionSpec;
   });
 
   it('reuses an existing task for the same actor and request payload', async () => {
@@ -114,7 +135,10 @@ describe('V1TasksController idempotency', () => {
       ),
     ).rejects.toMatchObject({ status: 403 });
 
-    expect(tasks.findByActorRequest).not.toHaveBeenCalled();
+    expect(tasks.findByActorRequest).toHaveBeenCalledWith(
+      'actor-not-whitelisted',
+      'request-1',
+    );
     expect(tasks.createV1).not.toHaveBeenCalled();
     expect(tasks.createPreview).not.toHaveBeenCalled();
   });
@@ -125,13 +149,18 @@ describe('V1TasksController idempotency', () => {
     tasks.createV1.mockResolvedValue({ id: 'task-real', status: 'pending' });
     budget.createTaskWithReservation.mockResolvedValue({ id: 'task-real', status: 'pending' });
 
-    const result = await new V1TasksController(tasks as never, budget as never).create(
+    const result = await new V1TasksController(tasks as never, budget as never, assets as never).create(
       { actorId: 'actor-allowed' },
       'request-real-1',
       {
         capability: 'IMAGE_TO_VIDEO',
         profile: 'seedance',
-        params: { prompt: 'real run', image_asset_id: 'asset-1' },
+        params: {
+          prompt: 'real run',
+          image_asset_id: 'asset-1',
+          duration: 5,
+          ratio: '16:9',
+        },
         mode: 'production',
       },
     );
@@ -141,6 +170,58 @@ describe('V1TasksController idempotency', () => {
     expect(tasks.createPreview).not.toHaveBeenCalled();
     expect(result).toMatchObject({ id: 'task-real', status: 'pending' });
     expect((result as Record<string, unknown>).preview).toBeUndefined();
+  });
+
+  it('拒绝不属于当前 actor 的 production 输入素材', async () => {
+    process.env.VIDEO_FLOW_PRODUCTION_ACTORS = 'actor-allowed';
+    tasks.findByActorRequest.mockResolvedValue(null);
+    assets.findOwnedUploadedInput.mockResolvedValue(null);
+
+    await expect(
+      new V1TasksController(tasks as never, assets as never).create(
+        { actorId: 'actor-allowed' },
+        'request-owned-input',
+        {
+          capability: 'IMAGE_TO_VIDEO',
+          profile: 'seedance',
+          params: {
+            prompt: 'product',
+            image_asset_id: 'asset-other',
+            duration: 5,
+            ratio: '16:9',
+          },
+          mode: 'production',
+        },
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+
+    expect(tasks.createV1).not.toHaveBeenCalled();
+  });
+
+  it('production 规格配置缺失时 fail closed', async () => {
+    process.env.VIDEO_FLOW_PRODUCTION_ACTORS = 'actor-allowed';
+    delete process.env.VIDEO_FLOW_PRODUCTION_SPEC_JSON;
+    tasks.findByActorRequest.mockResolvedValue(null);
+
+    await expect(
+      new V1TasksController(tasks as never, assets as never).create(
+        { actorId: 'actor-allowed' },
+        'request-no-spec',
+        {
+          capability: 'IMAGE_TO_VIDEO',
+          profile: 'seedance',
+          params: {
+            prompt: 'product',
+            image_asset_id: 'asset-1',
+            duration: 5,
+            ratio: '16:9',
+          },
+          mode: 'production',
+        },
+      ),
+    ).rejects.toMatchObject({ status: 503 });
+
+    expect(tasks.createV1).not.toHaveBeenCalled();
   });
 
   it('白名单为空时 production 对所有人关闭', async () => {

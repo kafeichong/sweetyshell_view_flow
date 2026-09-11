@@ -115,6 +115,18 @@ export class AssetsService {
     });
   }
 
+  findOwnedUploadedInput(id: string, ownerId: string) {
+    const prismaAsset = this.prisma as unknown as { asset: { findFirst: any } };
+    return prismaAsset.asset.findFirst({
+      where: {
+        id,
+        ownerId,
+        role: AssetRole.INPUT,
+        inspectionStatus: { in: ['uploaded', 'verified'] },
+      },
+    });
+  }
+
   findLatestOwnedOutputForTask(taskId: string, ownerId: string) {
     const prismaAsset = this.prisma as unknown as { asset: { findFirst: any } };
     return prismaAsset.asset.findFirst({
