@@ -26,6 +26,79 @@ def approved_execution_plan():
 
 
 class ProviderSubmissionRecoveryTests(unittest.TestCase):
+    def test_journal_failure_quarantines_submission_and_blocks_followup(self):
+        import executor as executor_module
+
+        adapter = SimpleNamespace(
+            default_model="test-model",
+            create_task=AsyncMock(return_value={"task_id": "provider-unsafe"}),
+        )
+        job_executor = executor_module.JobExecutor.__new__(executor_module.JobExecutor)
+        job_executor.adapters = {"seedance": adapter}
+        job_executor.update_job_status = AsyncMock(return_value=True)
+        job_executor.resolve_asset_url = AsyncMock(return_value="https://oss.test/input")
+        job_executor.output_dir = Path(tempfile.gettempdir())
+        job_executor._append_submission_journal = AsyncMock(
+            side_effect=OSError("journal unavailable")
+        )
+
+        job = Job(
+            id="job-journal-failure",
+            status="submitted",
+            created_by="alice",
+            prompt="product",
+            created_at="2026-09-10T00:00:00+00:00",
+            provider_profile="seedance-main",
+            attempt_id="attempt-journal-failure",
+            execution_plan=approved_execution_plan(),
+        )
+        settings = SimpleNamespace(
+            comfyui_enabled=False,
+            running_job_timeout_minutes=10,
+            task_status_check_interval=0,
+        )
+        with patch.object(executor_module, "settings", settings):
+            asyncio.run(job_executor.execute_job(job))
+
+        adapter.create_task.assert_awaited_once()
+        first_failure = job_executor.update_job_status.await_args_list[-1]
+        self.assertEqual(first_failure.kwargs["failure_code"], "JOURNAL_WRITE_FAILED")
+        self.assertEqual(first_failure.kwargs["task_status"], "requires_review")
+        self.assertTrue(job_executor._submission_blocked)
+
+        job_executor.update_job_status.reset_mock()
+        asyncio.run(job_executor.execute_job(job))
+        adapter.create_task.assert_awaited_once()
+        blocked = job_executor.update_job_status.await_args
+        self.assertEqual(blocked.kwargs["failure_code"], "SUBMISSION_JOURNAL_BLOCKED")
+
+    def test_submission_journal_persists_safe_identifiers_without_secrets(self):
+        import json
+        import executor as executor_module
+
+        job_executor = executor_module.JobExecutor.__new__(executor_module.JobExecutor)
+        with tempfile.TemporaryDirectory() as directory:
+            job_executor.output_dir = Path(directory)
+            asyncio.run(
+                job_executor._append_submission_journal(
+                    task_id="task-1",
+                    attempt_id="attempt-1",
+                    provider_task_id="provider-1",
+                    stage="provider_accepted",
+                )
+            )
+
+            journal = Path(directory) / ".video-flow-journal" / "submissions.jsonl"
+            record = json.loads(journal.read_text().strip())
+
+        self.assertEqual(record["taskId"], "task-1")
+        self.assertEqual(record["attemptId"], "attempt-1")
+        self.assertEqual(record["providerTaskId"], "provider-1")
+        self.assertEqual(record["stage"], "provider_accepted")
+        self.assertNotIn("token", record)
+        self.assertNotIn("prompt", record)
+        self.assertNotIn("url", record)
+
     def test_new_submission_without_execution_plan_is_quarantined_before_provider(self):
         import executor as executor_module
 
