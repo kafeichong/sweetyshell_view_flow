@@ -1,5 +1,6 @@
 jest.mock('@nestjs/common', () => ({
   Injectable: () => (target: unknown) => target,
+  GoneException: class GoneException extends Error { status = 410; },
   Controller: () => (target: unknown) => target,
   Get: () => () => {},
   Post: () => () => {},
@@ -53,6 +54,14 @@ describe('TasksController contract', () => {
       cost: 0.7,
     });
     expect(payload.completedAt).toBeInstanceOf(Date);
+  });
+
+  it('旧任务创建入口返回 410，不再创建可执行任务', async () => {
+    await expect(controller.create({
+      createdBy: 'legacy-user',
+      prompt: 'should not run',
+    })).rejects.toMatchObject({ status: 410 });
+    expect(service.create).not.toHaveBeenCalled();
   });
 
   it('按状态和创建人过滤查询', async () => {

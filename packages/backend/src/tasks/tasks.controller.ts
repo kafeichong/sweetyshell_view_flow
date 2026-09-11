@@ -7,6 +7,7 @@ import {
   Body,
   Query,
   UseGuards,
+  GoneException,
 } from '@nestjs/common';
 import { TasksService } from './tasks.service';
 import { TaskClaimService } from './task-claim.service';
@@ -34,7 +35,7 @@ export class TasksController {
       imageUrl?: string;
     },
   ) {
-    return this.tasksService.create(body);
+    throw new GoneException('USE_V1_TASKS');
   }
 
   /**
