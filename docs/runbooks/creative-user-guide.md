@@ -193,17 +193,17 @@ curl -sS 'https://ai.sweetyshell.com/api/v1/tasks/<TASK_ID>' \
 ## 5. 取得成片
 
 ```bash
-curl -sS 'https://ai.sweetyshell.com/api/v1/assets/<ASSET_ID>/download' \
+curl -sS 'https://ai.sweetyshell.com/api/v1/assets/tasks/<TASK_ID>/result' \
   -H 'Authorization: Bearer <ACTOR_TOKEN>'
 ```
 
-返回 `{ "downloadUrl": "...", "expiresIn": 300 }`，**每次调用都生成新的短期签名地址**。
+返回 Task 对应输出 Asset 的 `objectKey`、`downloadUrl` 等信息；**每次调用都生成新的短期签名地址**。ComfyUI 中可直接使用 `Load Video Flow Result`，它会把文件流式写入 `<ComfyUI>/output/video-flow/`。
 
 ### 当前限制（务必知悉）
 
-- 任务返回的 `videoUrl` **当前仍是 7 天有效的 OSS 签名地址**，不是永久地址。7 天后该链接会失效，但**文件不会丢**（`objectKey` 已永久入库）。
-- 输出 Asset 的归属字段尚未补全，因此**用自己的 token 直接下载输出 Asset 目前会返回 404**。
-- 两个问题都已列入 [ROADMAP](../ROADMAP.md) Phase 1 的"产物交付闭环"任务。修复前请通过 `videoUrl` 取片，或联系管理员从 OSS 侧提供。
+- Task 的 `videoUrl` 字段现在保存永久 `objectKey`，不是可直接访问的 URL；不要把它粘贴到浏览器下载。
+- 只能获取自己 Task 的输出；其他 actor 的 Task 仍会返回 404。
+- `downloadUrl` 是短期地址；过期后重新调用结果接口即可，OSS 文件不会因此删除。
 
 ---
 

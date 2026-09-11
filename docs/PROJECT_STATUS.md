@@ -33,11 +33,11 @@
 
 | 包 | 技术栈 | 职责 | 受版本控制文件数 |
 | --- | --- | --- | --- |
-| `packages/backend` | NestJS 12 + Prisma 5.22 + PostgreSQL 16 | v1 对外接口、Worker 私有接口、管理接口 | 53 |
+| `packages/backend` | NestJS 12 + Prisma 5.22 + PostgreSQL 16 | v1 对外接口、Worker 私有接口、管理接口 | 55 |
 | `packages/worker` | Python 3.13 + FastAPI | 轮询领取任务、调用 Provider、OSS 归档、状态回写 | 36 |
-| `packages/comfyui-video-flow-client` | Python（ComfyUI 自定义节点） | 同事本机节点：上传素材、提交任务、查询结果 | 8 |
+| `packages/comfyui-video-flow-client` | Python（ComfyUI 自定义节点） | 同事本机节点：上传素材、提交任务、查询与下载结果 | 12 |
 
-开发跨度 2026-09-09 → 2026-09-11。生产环境已部署安全收敛版本 `67beb6c`；后续文档与交付脚本提交不改变服务运行逻辑。
+开发跨度 2026-09-09 → 2026-09-11。生产环境已部署版本 `6d3582e`，包含安全收敛与产物交付闭环；Production 白名单仍为空。
 
 ---
 
@@ -55,6 +55,7 @@
 | 凭证鉴权：token 只存 `sha256`、可撤销、记录 `lastUsedAt` | `src/auth/credentials.service.ts`、`src/auth/api-credential.guard.ts` |
 | Worker / Admin 内部接口用独立服务令牌，`timingSafeEqual` 比对 | `src/auth/worker-service.guard.ts`、`src/auth/admin-token.guard.ts` |
 | 素材预签名直传：内容寻址复用 Asset、`/complete` 时用 OSS HEAD 校验 size / mime / sha256 | `src/v1/assets/v1-assets.controller.ts`、`src/assets/asset-presign.service.ts` |
+| Worker 登记输出时继承 Task actor，写入 `ownerId`、`inspectionStatus='uploaded'` 与永久 `objectKey`；actor 可按 Task 获取新签名下载 URL | `src/v1/internal/v1-worker.controller.ts`、`src/v1/assets/v1-assets.controller.ts`、`src/assets/assets.service.ts` |
 | 数据模型分域：Task / ExecutionAttempt / Asset / ActorCredential；费用四态 `estimated / usage_calculated / billed / unavailable` | `prisma/schema.prisma` |
 
 ### 3.2 Worker
@@ -72,10 +73,11 @@
 
 | 能力 | 证据 |
 | --- | --- |
-| 三个节点：`Video Flow Config`、`Seedance Preview`、`Wait Video Flow Task` | `nodes.py` |
+| 五个节点：`Video Flow Config`、`Seedance Preview`、`Seedance Production`、`Wait Video Flow Task`、`Load Video Flow Result` | `nodes.py` |
 | token 来源优先级：`VIDEO_FLOW_TOKEN` > `VIDEO_FLOW_TOKEN_FILE` > `~/.video-flow/token` | `config.py` |
-| Preview / Production 使用不同作用域的幂等键，避免 Preview 后正式提交 409 | `client.py:117-126` |
+| Preview / Production 使用不同作用域的幂等键，profile / duration / ratio 也纳入稳定键 | `client.py` 的 `stable_idempotency_key()`、`mode_scoped_idempotency_key()` |
 | 素材上传带 SHA-256，服务端据此复用 Asset | `client.py:25-72` |
+| 结果节点按 Task 请求新签名 URL，流式写入 `<ComfyUI>/output/video-flow/`，临时 `.part` 文件失败即清理 | `client.py` 的 `download_task_result()`、`nodes.py` 的 `VideoFlowLoadResult` |
 
 ### 3.4 部署现状
 
@@ -84,6 +86,8 @@
 - 旧 `/api/tasks` 的 create / list / pending / findOne 已要求 Admin token，claim / recover / update 要求 Worker token；2026-09-11 公网无凭证验收均返回 401。
 - Backend 只监听宿主 `127.0.0.1:3100`；Worker 与 PostgreSQL 不发布宿主端口。生产 `.env` 权限为 `600`，历史 `.env.backup-token-*` 已清理。
 - Production 白名单当前为空（对所有人关闭）。
+- 版本 `6d3582e` 部署后，5 个历史输出已补齐 owner 与 `inspectionStatus='uploaded'`，Task 中遗留的过期签名 URL 已全部替换为永久 `objectKey`；该回填没有创建 Provider 任务。
+- 主 ComfyUI 的客户端文件已更新；隔离运行实例在 `127.0.0.1:8190` 验证五个节点全部注册。当前 Comfy Desktop 主实例启动早于安装，仍需重启后才会在 UI 显示两个新增节点。
 - 2026-09-10 完成过一次真实付费出片：Task `e9a0903e-bf99-4c71-b4f1-de4b41436632`，费用 ¥7.623（`usage_calculated`，非账单确认）。该次验收**未**覆盖重启恢复、并发上传、历史迁移与账单对账。
 - 2026-09-11 完成 Preview 零付费验收：Task `054a6e53-86f8-4f84-8db4-b5539133b0b9` 落 `status='preview'`、Attempt 为 0；Production 请求返回 403。详见 [runbooks/preview-acceptance.md](./runbooks/preview-acceptance.md)。
 
@@ -98,18 +102,15 @@
 | ID | 风险 | 证据 | 影响 | 处置 |
 | --- | --- | --- | --- | --- |
 | R3 | 无任何额度 / 计费闸门：`ActorCredential.dailyLimitCny` / `monthlyLimitCny` 是死字段，无代码读取；无提交前预估与拦截 | `prisma/schema.prisma:139-140`；全仓无引用 | 开放给多人后共享火山账号消耗不可控，出事只能事后反推 | 额度校验上线（ROADMAP Phase 1） |
-| R4 | 产物交付闭环断裂：输出 Asset 未写 `ownerId` / `inspectionStatus`，而客户端下载接口要求 `findOwnedUploaded` → 必然 404；`Task.videoUrl` 存的是 7 天有效签名 URL | `src/v1/internal/v1-worker.controller.ts:30-54`、`src/assets/assets.service.ts`（`registerOutput`）、`packages/worker/oss_uploader.py:6,23`、`executor.py:536-537,570` | 出片后无法在 ComfyUI 内直接查看 / 复用；历史 URL 7 天后失效，同事会以为文件被删 | 补 ownerId / inspectionStatus、新增结果节点、`videoUrl` 改存 objectKey（ROADMAP Phase 1） |
 
 ### P1
 
 | ID | 风险 | 证据 | 影响 | 处置 |
 | --- | --- | --- | --- | --- |
 | R6 | 重试不可持久化：schema 无 `retry_count` / `next_retry_at`，限流 / 超时 / 网络类失败统一落 `failed`，标记 `RETRY_NOT_PERSISTED` | `executor.py:598-619`、`prisma/schema.prisma` | 一次瞬时抖动 = 一次永久失败 + 人工重提（可能再次付费） | 补迁移 + 有限自动重试（ROADMAP Phase 1） |
-| R7 | 无 Production 客户端路径：客户端无 Production 提交节点，也无真实视频输出节点 | `nodes.py` 仅 3 个节点 | 即使打开白名单，同事也无法自助完成正式出片 | 新增 Production 与结果加载节点（ROADMAP Phase 1） |
 | R8 | 可观测性为零：无 metrics / 告警 / 结构化日志 / TaskEvent，失败仅 `print` + docker logs | `executor.py` 全篇 `print` | 排障只能登服务器翻日志；无法回答失败率与消耗 | TaskEvent + `/metrics` + 核心告警（ROADMAP Phase 2） |
 | R9 | 无内容安全审核：`inspectionStatus` 只会是 `pending_upload` / `uploaded`，prompt 与图片无合规留痕 | `src/v1/assets/v1-assets.controller.ts`、`assets.service.ts` | 公司账号被用于生成违规内容的合规风险，事后无法举证 | 接入内容安全审核（ROADMAP Phase 2） |
 | R11 | 成本只有 usage 推算，从未与火山账单对账；pricing 为代码内硬编码 | `providers/seedance_adapter.py` | 预算与报价不可信，无法交代真实单位成本 | 月度对账流程（ROADMAP Phase 1 首次 / Phase 2 常态化） |
-| R12 | 幂等键不含生成参数：`stable_idempotency_key(prompt, image_bytes)` 未含 profile / duration / ratio | `client.py:117-119` | 同图同 prompt 换时长会命中错误任务或误判 409 | 参数纳入幂等键（ROADMAP Phase 1） |
 | R13 | 单 Worker、无持久队列；ComfyUI 隔离区仅内存集合，重启即丢 | `executor.py:55-60` | 重启可能重放已提交 prompt；无法安全横向扩容 | 先做"重启不重复计费"验收（ROADMAP Phase 1） |
 
 ### 2026-09-11 已关闭
@@ -118,8 +119,11 @@
 | --- | --- | --- |
 | R1 | 旧任务接口按用途加 `AdminTokenGuard` / `WorkerServiceGuard` | decorator metadata 测试；公网 GET / POST 无凭证均为 401 |
 | R2 | Backend 改为 `127.0.0.1:3100`；Worker / PostgreSQL 删除宿主端口 | Compose 配置核对；生产 `ss` 与容器端口核对 |
+| R4 | 输出 Asset 继承 Task actor 并保存永久 `objectKey`；新增按 Task 签发下载 URL；5 个历史输出完成回填 | Backend / Worker 测试；生产数据只读核对；未创建 Provider 任务 |
 | R5 | 新增三包 GitHub Actions；客户端增加稳定的包根测试入口 | Backend、Worker、Client 本地全绿；远端 CI 以最新 run 为准 |
+| R7 | 新增 Production 提交节点与结果下载节点 | 客户端单测；ComfyUI 0.35.1 隔离实例 `/object_info` 验证五个节点 |
 | R10 | 删除唯一 `.env.backup-token-*`，生产 `.env` 改为 `600` | 文件名计数为 0；权限检查为 `600` |
+| R12 | profile / duration / ratio 纳入稳定幂等键，mode 保持独立作用域 | 客户端幂等测试 |
 
 ### P2（工程债，按需清理）
 
@@ -140,10 +144,10 @@
 在提交修复前后都应运行这三条；AGENTS.md 要求三包全绿。
 
 ```bash
-# Backend：构建 + 单测（期望 12 套件 / 63 测试通过）
+# Backend：构建 + 单测（期望 13 套件 / 68 测试通过）
 cd packages/backend && npm run build && npx jest
 
-# Worker：单测（期望 79 通过 / 26 跳过）
+# Worker：单测（期望 80 通过 / 26 跳过）
 cd packages/worker && venv/bin/python -m pytest -q
 
 # ComfyUI 客户端：使用自己的依赖环境，可从包根运行
@@ -152,9 +156,9 @@ cd packages/comfyui-video-flow-client && python -m pip install -r requirements.t
 
 | 命令 | 2026-09-11 实测 |
 | --- | --- |
-| Backend `npm run build && npx jest` | ✅ 12 套件 / 63 测试通过 |
-| Worker `pytest -q` | ✅ 79 通过 / 26 跳过 |
-| Client（包根、安装自身依赖） | ✅ 14 通过 |
+| Backend `npm run build && npx jest` | 13 套件 / 68 测试通过 |
+| Worker `pytest -q` | 80 通过 / 26 跳过（6 个既有 deprecation warning） |
+| Client（包根、安装自身依赖） | 19 通过 |
 | `git ls-files \| grep -iE "token\|\.env"` | ✅ 无凭证入库（`.env`、`*-actor-token` 已 gitignore） |
 
 > 客户端依赖在 `packages/comfyui-video-flow-client/requirements.txt` 中声明为 `httpx[socks]`。运行客户端测试前必须在客户端自己的环境安装该文件；不要借用 Worker venv。

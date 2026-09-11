@@ -74,11 +74,11 @@
 | 任务 | 对应风险 | 估时 |
 | --- | --- | --- |
 | 额度闸门：单次上限 + 日 / 月额度校验，超限返回 429 并说明提额路径；被拒请求不创建 ExecutionAttempt | R3 | 1 天 |
-| 产物交付闭环：输出 Asset 补 `ownerId` + `inspectionStatus='uploaded'`；`videoUrl` 改存 `objectKey`，签名按需生成 | R4 | 1 天 |
-| 客户端补齐：Production 提交节点 + 结果加载节点（直接把视频写进 ComfyUI output） | R7 | 1.5 天 |
+| ~~产物交付闭环：输出 Asset 补 `ownerId` + `inspectionStatus='uploaded'`；`videoUrl` 改存 `objectKey`，签名按需生成~~ | R4 | **已完成并部署；5 个历史输出已回填** |
+| ~~客户端补齐：Production 提交节点 + 结果加载节点（直接把视频写进 ComfyUI output）~~ | R7 | **代码、部署与隔离运行时加载已完成；主 Comfy Desktop 待重启** |
 | 重试与恢复：补 retry 迁移 + 仅对"确认未提交成功"的失败做有限自动重试（≤2 次、退避）；`requires_review` 有明确人工处置路径 | R6 | 1.5 天 |
 | 恢复验收：杀 Worker 重启，验证已提交任务恢复轮询且**不产生第二次计费** | R13 | 0.5 天 |
-| 幂等键纳入生成参数（profile / duration / ratio） | R12 | 0.5 天 |
+| ~~幂等键纳入生成参数（profile / duration / ratio）~~ | R12 | **已完成** |
 | 上线检查表与回滚演练（用 [runbooks/deploy-and-rollback.md](./runbooks/deploy-and-rollback.md) 补全执行人与时间） | — | 0.5 天 |
 | 真实出片 3 条，逐条记录 usage 与推算费用，并与火山账单核对一次 | R11 | 0.5 天 |
 
