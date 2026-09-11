@@ -11,6 +11,7 @@ import {
 import { TasksService } from './tasks.service';
 import { TaskClaimService } from './task-claim.service';
 import { WorkerServiceGuard } from '../auth/worker-service.guard';
+import { AdminTokenGuard } from '../auth/admin-token.guard';
 
 @Controller('tasks')
 export class TasksController {
@@ -24,6 +25,7 @@ export class TasksController {
    * POST /api/tasks
    */
   @Post()
+  @UseGuards(AdminTokenGuard)
   async create(
     @Body()
     body: {
@@ -40,6 +42,7 @@ export class TasksController {
    * GET /api/tasks?status=pending&createdBy=张三
    */
   @Get()
+  @UseGuards(AdminTokenGuard)
   async findAll(
     @Query('status') status?: string,
     @Query('createdBy') createdBy?: string,
@@ -52,6 +55,7 @@ export class TasksController {
    * GET /api/tasks/pending
    */
   @Get('pending')
+  @UseGuards(AdminTokenGuard)
   async findPending() {
     return this.tasksService.findPending();
   }
@@ -86,6 +90,7 @@ export class TasksController {
    * GET /api/tasks/:id
    */
   @Get(':id')
+  @UseGuards(AdminTokenGuard)
   async findOne(@Param('id') id: string) {
     return this.tasksService.findOne(id);
   }
