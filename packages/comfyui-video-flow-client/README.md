@@ -2,7 +2,13 @@
 
 这是 Video Flow 的 Preview 客户端节点包。节点只访问公司的 Backend，不保存或接收火山 Ark、OSS 密钥。
 
-安装：将目录复制到 ComfyUI 的 `custom_nodes/`，在该目录安装 `requirements.txt`，重启 ComfyUI。
+推荐使用随包安装脚本（第二个参数是管理员单独提供的 actor token 文件）：
+
+```bash
+./install.sh /path/to/ComfyUI /path/to/actor-token
+```
+
+脚本会备份已有 `video_flow_client`、复制节点、使用 ComfyUI 自己的 Python 安装依赖，并把 token 保存到 `~/.video-flow/token`（权限 `600`）。完成后重启 ComfyUI。
 
 公司生产环境使用以下 Backend URL；本地开发未设置时仍默认为 `http://localhost:3100`：
 
