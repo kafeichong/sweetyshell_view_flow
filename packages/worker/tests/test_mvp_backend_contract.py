@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 import importlib
 from datetime import datetime, timezone
+from unittest.mock import patch
 
 import httpx
 
@@ -31,6 +32,25 @@ def _new_executor() -> Any:
 
 class WorkerBackendContractTests(unittest.IsolatedAsyncioTestCase):
     """锁定新版 Worker 回写合同：任务状态与执行尝试字段。"""
+
+    async def test_empty_claim_response_returns_no_jobs_without_error_log(self):
+        async def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, content=b"")
+
+        executor = _new_executor()
+        await executor.client.aclose()
+        executor.client = httpx.AsyncClient(
+            transport=httpx.MockTransport(handler),
+            base_url="https://backend.local",
+        )
+        executor.backend_url = "https://backend.local"
+
+        with patch("builtins.print") as print_mock:
+            jobs = await executor.fetch_pending_jobs()
+        await executor.client.aclose()
+
+        self.assertEqual(jobs, [])
+        print_mock.assert_not_called()
 
     async def test_update_job_status_writes_attempt_contract(self):
         calls = []

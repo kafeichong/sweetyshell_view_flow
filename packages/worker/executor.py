@@ -89,6 +89,9 @@ class JobExecutor:
                 )
                 response.raise_for_status()
 
+                if response.status_code == 204 or not response.content.strip():
+                    break
+
                 payload = response.json()
                 if not payload:
                     break
