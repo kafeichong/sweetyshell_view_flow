@@ -1,8 +1,11 @@
 # 统一 Seedance 接入架构基线
 
-> 日期：2026-09-10  
-> 状态：开发基线，实施前不再回到“服务器集中部署 ComfyUI”方案  
+> 日期：2026-09-10（最后整理 2026-09-11）
+> 状态：**现行架构基线**，冻结边界不退回到"服务器集中部署 ComfyUI"方案
 > 适用范围：`/Users/steven/works/20260909video_flow`
+>
+> 相关文档：[PROJECT_STATUS.md](../PROJECT_STATUS.md)（现状与风险）、[ROADMAP.md](../ROADMAP.md)（计划与门禁）。
+> 本文描述架构约定与规则，不描述实现进度；实现进度以 PROJECT_STATUS 为准。
 
 ## 1. 目标
 

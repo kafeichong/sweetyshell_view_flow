@@ -7,8 +7,8 @@ This repository is a three-package workspace:
 - `packages/worker/`：Python FastAPI Worker（服务入口 `main.py`，任务执行器 `executor.py`，配置 `config.py`，适配器在 `packages/worker/providers/`，测试在 `packages/worker/tests/`）。
 - `packages/comfyui-video-flow-client/`：ComfyUI 自定义节点（同事本机安装，只访问后端 HTTPS，不持有 Ark/OSS 密钥）。
 - 根目录不包含统一入口脚本；请按子包分别处理依赖与运行环境。
-- 开发时请忽略并避免提交环境产物：`venv/`、`__pycache__/`、`.pyc`、下载缓存目录等临时文件。
-- ComfyUI workflow JSON 属于仓库外部资产：缺失时相关测试会显式 `skip` 而不是失败。
+- 开发时请忽略并避免提交环境产物：`venv/`、`__pycache__/`、`.pytest_cache/`、`.pyc`、下载缓存目录等临时文件。
+- ComfyUI workflow JSON 属于仓库外部资产：缺失时相关测试会显式 `skip` 而不是失败（`packages/worker/workflows/` 不存在，因此 Worker 有约 26 项 skip，属预期）。
 
 ## Build, Test, and Development Commands
 - Backend（NestJS）：
@@ -38,7 +38,13 @@ This repository is a three-package workspace:
 - 推荐命令：
   - `cd packages/backend && npm run build && npx jest`
   - 注：部分 spec 会用 `jest.mock('@nestjs/common')` 替换装饰器，这类测试不覆盖真实 Guard/管道装配，涉及鉴权的改动请另做集成验证。
-- 提交前请确保 `packages/worker` 的 `pytest` 与 `packages/backend` 的 `build + jest` 均为绿色。
+- ComfyUI 客户端测试框架同为 `pytest`，测试文件在 `packages/comfyui-video-flow-client/tests/`。
+- 推荐命令：
+  - `cd packages/comfyui-video-flow-client && python -m pip install -r requirements.txt pytest`（依赖含 `httpx[socks]`，未装会导致 SOCKS 用例失败）
+  - `cd packages/comfyui-video-flow-client && python -m pytest -q`
+  - 注：使用客户端自己的依赖环境，不要复用 Worker venv。
+- 提交前请确保三个包的测试均为绿色：`packages/backend` 的 `build + jest`、`packages/worker` 的 `pytest`、`packages/comfyui-video-flow-client` 的 `pytest`。
+- 测试全绿不等于链路可用：关键路径（创建任务 → claim → Provider → 回写）改动请补端到端契约验证，不要只看单测。
 
 ## Commit & Pull Request Guidelines
 - 提交信息建议统一约定，例如 `feat: ...`、`fix: ...`、`chore: ...`。
@@ -48,3 +54,10 @@ This repository is a three-package workspace:
 ## Security & Configuration Tips
 - 所有外部调用密钥（如 Provider/API、OSS、数据库）必须通过环境变量注入，不要写入代码和提交中。
 - 本地测试账号与 token 不得混用生产环境；涉及视频素材、任务状态、计费逻辑改动时务必标注风险与回滚方案。
+- **不得新增未鉴权的付费执行路径。** 任何能让 Worker 真实调用 Provider 的接口（例如创建 `status='pending'` 任务）都必须要求凭证，并受 `VIDEO_FLOW_PRODUCTION_ACTORS` 与额度校验约束。旧的 `/api/tasks` 已按 Admin / Worker 用途加 Guard，只允许继续收紧，不得扩展。
+- 公开文档、脚本与测试示例中不要演示未鉴权的任务创建调用。
+
+## Documentation Rules
+- 现状只写在 `docs/PROJECT_STATUS.md`，计划只写在 `docs/ROADMAP.md`。其他文档需要现状时用链接引用，不要复制结论。
+- 文档入口是 `docs/README.md`；被取代的文档移入 `docs/archive/` 并在 `docs/archive/README.md` 记录归档原因，不要直接删除。
+- 现状类结论必须附文件路径（必要时到行号）与验证命令；接口变更时同步更新 `docs/runbooks/` 下的对应手册。

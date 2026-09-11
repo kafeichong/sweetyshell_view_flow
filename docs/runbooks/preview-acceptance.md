@@ -1,5 +1,10 @@
 # Preview 联调验收记录
 
+> 本文件既是**可复用的验收清单**，也是 **2026-09-11 的实测记录**。清单部分可重复执行。
+> 记录部分属于历史快照，不要据此判断当前状态；现状见 [PROJECT_STATUS.md](../PROJECT_STATUS.md)。
+>
+> 本记录执行时客户端测试套件为 **11 项**；2026-09-11 加入交付脚本测试后当前为 14 项。SOCKS 用例要求客户端环境按自身 `requirements.txt` 安装 `httpx[socks]`，不要借用 Worker venv。
+
 ## 配置检查
 
 - [x] Backend 已配置 `VIDEO_FLOW_WORKER_TOKEN`
