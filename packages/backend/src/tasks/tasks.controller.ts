@@ -106,6 +106,7 @@ export class TasksController {
       videoUrl?: string;
       attemptId?: string;
       attemptStatus?: string;
+      attemptModel?: string;
       providerTaskId?: string;
       failureType?: string;
       failureCode?: string;
@@ -118,6 +119,7 @@ export class TasksController {
       usageCalculatedCostCny?: number;
       billedCostCny?: number;
       startedAt?: string;
+      submittedAt?: string;
       finishedAt?: string;
     },
   ) {

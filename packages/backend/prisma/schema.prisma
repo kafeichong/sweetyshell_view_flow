@@ -147,6 +147,7 @@ model Asset {
   inspectionStatus String?           @map("inspection_status")
   createdAt        DateTime          @default(now()) @map("created_at")
 
+  @@unique([ownerId, role, fileHash])
   @@map("assets")
 }
 

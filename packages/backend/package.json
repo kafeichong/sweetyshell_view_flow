@@ -11,7 +11,8 @@
     "test:watch": "jest --watch",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:studio": "prisma studio"
+    "prisma:studio": "prisma studio",
+    "assets:backfill": "node dist/tools/asset-hash-backfill.js"
   },
   "dependencies": {
     "@nestjs/common": "^12.0.1",

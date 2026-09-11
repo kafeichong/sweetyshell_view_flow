@@ -123,7 +123,7 @@ class JobExecutor:
             job_state = {
                 "status": job.status,
                 "provider_task_id": job.providerTaskId,
-                "submitted_at": job.submittedAt,
+                "submitted_at": job.attemptSubmittedAt or job.submittedAt,
             }
 
             if should_resume_job(job_state):
@@ -216,6 +216,7 @@ class JobExecutor:
         *,
         attempt_id: Optional[str] = None,
         attempt_status: Optional[str] = None,
+        attempt_model: Optional[str] = None,
         provider_task_id: Optional[str] = None,
         failure_type: Optional[FailureType] = None,
         failure_code: Optional[str] = None,
@@ -226,6 +227,9 @@ class JobExecutor:
         pricing_version: Optional[str] = None,
         task_status: Optional[str] = None,
         video_url: Optional[str] = None,
+        started_at: Optional[datetime] = None,
+        submitted_at: Optional[datetime] = None,
+        finished_at: Optional[datetime] = None,
     ):
         """更新 Backend 中的任务状态。"""
         payload = {"status": status.value}
@@ -259,6 +263,24 @@ class JobExecutor:
             elif status == JobStatus.FAILED:
                 payload["attemptStatus"] = "failed"
 
+            if attempt_model is not None:
+                payload["attemptModel"] = attempt_model
+
+            if started_at is not None:
+                payload["startedAt"] = started_at.isoformat()
+
+            if submitted_at is not None:
+                payload["submittedAt"] = submitted_at.isoformat()
+
+            if finished_at is None and status in {
+                JobStatus.COMPLETED,
+                JobStatus.FAILED,
+            }:
+                finished_at = datetime.now(timezone.utc)
+
+            if finished_at is not None:
+                payload["finishedAt"] = finished_at.isoformat()
+
             if provider_task_id is not None:
                 payload["providerTaskId"] = provider_task_id
 
@@ -279,6 +301,9 @@ class JobExecutor:
 
             if failure_message is not None:
                 payload["failureMessage"] = failure_message
+
+            if failure_type is not None:
+                payload["failureType"] = failure_type.value
 
         try:
             worker_token = getattr(settings, "worker_service_token", "")
@@ -400,7 +425,7 @@ class JobExecutor:
             job_state = {
                 "status": job.status,
                 "provider_task_id": job.providerTaskId,
-                "submitted_at": job.submittedAt,
+                "submitted_at": job.attemptSubmittedAt or job.submittedAt,
             }
 
             if should_resume_job(job_state):
@@ -421,6 +446,12 @@ class JobExecutor:
                 provider_task_id = job.providerTaskId
                 print(f"[{job.id}] Resuming provider task: {provider_task_id}")
             else:
+                provider_params = job.get_params()
+                effective_model = str(
+                    provider_params.get("model")
+                    or getattr(adapter, "default_model", "")
+                ).strip()
+
                 if attempt_id:
                     # 先把 attempt 写成已提交，避免网络抖动时重复提交造成二次计费。
                     submitted_recorded = await self.update_job_status(
@@ -428,6 +459,8 @@ class JobExecutor:
                         JobStatus.SUBMITTED,
                         attempt_id=attempt_id,
                         attempt_status="submitted",
+                        attempt_model=effective_model or None,
+                        started_at=datetime.now(timezone.utc),
                     )
 
                     if not submitted_recorded:
@@ -444,7 +477,6 @@ class JobExecutor:
                         return
 
                 # 2. 无可恢复上下文时，创建新任务并持久化 provider 端 task id。
-                provider_params = job.get_params()
                 asset_id = provider_params.get("image_asset_id")
                 if asset_id:
                     provider_params["image_url"] = await self.resolve_asset_url(str(asset_id))
@@ -457,6 +489,7 @@ class JobExecutor:
                     attempt_id=attempt_id,
                     attempt_status="submitted",
                     provider_task_id=provider_task_id,
+                    submitted_at=datetime.now(timezone.utc),
                 )
                 if not persisted:
                     await self.update_job_status(
@@ -536,6 +569,7 @@ class JobExecutor:
                 pricing_version=cost_audit["pricing_version"],
                 video_url=uploaded_video_url,
                 task_status="completed",
+                finished_at=datetime.now(timezone.utc),
             )
             print(
                 f"[{job.id}] Completed successfully "

@@ -5,6 +5,7 @@ type AttemptUpdatePayload = {
   status?: string;
   attemptId?: string;
   attemptStatus?: string;
+  attemptModel?: string;
   providerTaskId?: string;
   failureType?: string;
   failureCode?: string;
@@ -17,6 +18,7 @@ type AttemptUpdatePayload = {
   usageCalculatedCostCny?: number | null;
   billedCostCny?: number | null;
   startedAt?: Date;
+  submittedAt?: Date;
   finishedAt?: Date;
   taskStatus?: string;
 };
@@ -69,6 +71,40 @@ export class TasksService {
     });
   }
 
+  /**
+   * Preview 任务：只记录请求意图，不创建 ExecutionAttempt。
+   *
+   * 关键点是 status='preview'。Worker 的 claim 条件要求 status='pending'，
+   * 恢复条件要求 taskStatus='in_progress'，因此该记录在结构上不可被执行，
+   * 也不会产生任何付费调用。
+   *
+   * taskStatus 不写值：它是 Prisma 枚举，没有 preview 成员，新增枚举值需要迁移；
+   * 而安全闸门只依赖 status 字段，所以这里保持 null，避免为了预览引入 schema 变更。
+   */
+  async createPreview(data: {
+    actorId: string;
+    clientRequestId: string;
+    capability: string;
+    workflowName: string;
+    requestSnapshot: object;
+    prompt: string;
+    imageUrl?: string;
+  }) {
+    return this.prisma.task.create({
+      data: {
+        createdBy: data.actorId,
+        actorId: data.actorId,
+        clientRequestId: data.clientRequestId,
+        capability: data.capability,
+        workflowName: data.workflowName,
+        requestSnapshot: data.requestSnapshot,
+        prompt: data.prompt,
+        imageUrl: data.imageUrl,
+        status: 'preview',
+      },
+    });
+  }
+
   async findOneForActor(id: string, actorId: string) {
     return this.prisma.task.findFirst({ where: { id, actorId } });
   }
@@ -93,6 +129,7 @@ export class TasksService {
     taskStatus?: string;
     attemptId?: string;
     attemptStatus?: string;
+    attemptModel?: string;
     providerTaskId?: string;
     failureType?: string;
     failureCode?: string;
@@ -105,11 +142,13 @@ export class TasksService {
     usageCalculatedCostCny?: number;
     billedCostCny?: number;
     startedAt?: Date;
+    submittedAt?: Date;
     finishedAt?: Date;
   }) {
     const {
       attemptId,
       attemptStatus,
+      attemptModel,
       providerTaskId,
       failureType,
       failureCode,
@@ -122,6 +161,7 @@ export class TasksService {
       usageCalculatedCostCny,
       billedCostCny,
       startedAt,
+      submittedAt,
       finishedAt,
       taskStatus,
       ...taskPayload
@@ -144,6 +184,10 @@ export class TasksService {
 
     if (attemptStatus) {
       attemptPayload.status = attemptStatus;
+    }
+
+    if (attemptModel !== undefined) {
+      attemptPayload.model = attemptModel;
     }
 
     if (providerTaskId) {
@@ -196,6 +240,10 @@ export class TasksService {
 
     if (startedAt !== undefined) {
       attemptPayload.startedAt = startedAt;
+    }
+
+    if (submittedAt !== undefined) {
+      attemptPayload.submittedAt = submittedAt;
     }
 
     if (finishedAt !== undefined) {

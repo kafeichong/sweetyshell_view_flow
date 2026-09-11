@@ -11,7 +11,12 @@ package-lock.json
 __pycache__/
 *.pyc
 venv/
+.venv/
 .pytest_cache/
+
+# 本地联调凭证，禁止提交
+.preview-actor-token
+*-actor-token
 
 # Docker
 .docker/

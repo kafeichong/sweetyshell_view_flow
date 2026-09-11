@@ -52,7 +52,7 @@ describe('TaskClaimService contract', () => {
       status: 'pending',
       provider: 'seedance',
       model: null,
-      submittedAt: new Date('2026-09-10T00:00:01.000Z'),
+      submittedAt: null,
     });
 
     const result = await service.claimNext('worker-1', 'production');
@@ -95,7 +95,7 @@ describe('TaskClaimService contract', () => {
       attemptStatus: 'pending',
       attemptProvider: 'seedance',
       attemptModel: null,
-      attemptSubmittedAt: '2026-09-10T00:00:01.000Z',
+      attemptSubmittedAt: null,
     });
   });
 

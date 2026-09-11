@@ -22,7 +22,7 @@ export class V1WorkerController {
 
   @Get('assets/:assetId/download')
   async resolveAsset(@Param('assetId') assetId: string) {
-    const asset = await this.assets.findById(assetId);
+    const asset = await this.assets.findUploadedById(assetId);
     if (!asset) throw new NotFoundException('Asset not found');
     return this.presign.createDownloadUrl(asset.objectKey);
   }

@@ -15,6 +15,7 @@ class ProviderSubmissionUncertainError(Exception):
 class SeedanceAdapter:
     """火山方舟 Ark API 适配器 - 视频生成任务"""
 
+    default_model = "doubao-seedance-2-5-260628"
     pricing_version = "seedance-token-v1"
 
     def __init__(self, api_key: Optional[str] = None):
@@ -95,7 +96,7 @@ class SeedanceAdapter:
 
         # 构建请求体
         payload = {
-            "model": params.get("model", "doubao-seedance-2-5-260628"),
+            "model": params.get("model", self.default_model),
             "content": content,
             "generate_audio": params.get("generate_audio", False),
             "ratio": params.get("ratio", "16:9"),

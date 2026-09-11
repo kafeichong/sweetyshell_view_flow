@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from typing import Any
 import importlib
+from datetime import datetime, timezone
 
 import httpx
 
@@ -58,13 +59,18 @@ class WorkerBackendContractTests(unittest.IsolatedAsyncioTestCase):
         )
         executor.backend_url = "https://backend.local"
 
+        started_at = datetime(2026, 9, 10, 10, 0, tzinfo=timezone.utc)
+        finished_at = datetime(2026, 9, 10, 10, 3, tzinfo=timezone.utc)
         result = await executor.update_job_status(
             "job-completed-1",
             JobStatus.COMPLETED,
             attempt_id="attempt-1",
+            attempt_model="doubao-seedance-2-5-260628",
             provider_task_id="provider-abc",
             actual_cost=0.58,
             cost_status_value="confirmed",
+            started_at=started_at,
+            finished_at=finished_at,
         )
         await executor.client.aclose()
 
@@ -83,6 +89,9 @@ class WorkerBackendContractTests(unittest.IsolatedAsyncioTestCase):
         assert payload["costStatus"] == "usage_calculated"
         assert "completedAt" in payload
         assert payload["providerTaskId"] == "provider-abc"
+        assert payload["attemptModel"] == "doubao-seedance-2-5-260628"
+        assert payload["startedAt"] == "2026-09-10T10:00:00+00:00"
+        assert payload["finishedAt"] == "2026-09-10T10:03:00+00:00"
         assert "errorMsg" not in payload
         assert "provider_usage" not in payload
 
@@ -127,6 +136,7 @@ class WorkerBackendContractTests(unittest.IsolatedAsyncioTestCase):
         assert payload["status"] == "failed"
         assert payload["attemptId"] == "attempt-1"
         assert payload["attemptStatus"] == "failed"
+        assert payload["failureType"] == "content_policy"
         assert payload["failureMessage"] == "policy reject"
         assert "errorMsg" not in payload
         assert "completedAt" in payload
