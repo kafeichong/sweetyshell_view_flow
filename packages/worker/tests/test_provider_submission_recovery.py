@@ -26,6 +26,46 @@ def approved_execution_plan():
 
 
 class ProviderSubmissionRecoveryTests(unittest.TestCase):
+    def test_recovery_write_failure_blocks_new_claims_persistently(self):
+        import executor as executor_module
+
+        payload = {
+            "id": "job-recovery-write-failure",
+            "status": "submitted",
+            "created_by": "alice",
+            "prompt": "product",
+            "created_at": "2026-09-10T00:00:00+00:00",
+            "provider_profile": "seedance-main",
+            "attempt_id": "attempt-recovery-write-failure",
+            "attempt_status": "submitted",
+        }
+        response = SimpleNamespace(
+            content=b"{}",
+            raise_for_status=lambda: None,
+            json=lambda: [payload],
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            job_executor = executor_module.JobExecutor.__new__(executor_module.JobExecutor)
+            job_executor.output_dir = Path(directory)
+            job_executor.backend_url = "http://backend.test"
+            job_executor.client = SimpleNamespace(
+                get=AsyncMock(return_value=response),
+                post=AsyncMock(),
+            )
+            job_executor.update_job_status = AsyncMock(return_value=False)
+            job_executor._submission_blocked = False
+
+            awaitable = job_executor.fetch_inflight_jobs()
+            asyncio.run(awaitable)
+
+            self.assertTrue(job_executor._submission_blocked)
+            marker = Path(directory) / ".video-flow-journal" / "SUBMISSIONS_BLOCKED"
+            self.assertTrue(marker.exists())
+            jobs = asyncio.run(job_executor.fetch_pending_jobs())
+
+        self.assertEqual(jobs, [])
+        job_executor.client.post.assert_not_awaited()
+
     def test_backend_write_failure_persists_quarantine_and_never_recreates(self):
         import executor as executor_module
 

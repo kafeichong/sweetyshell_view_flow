@@ -116,6 +116,11 @@ class JobExecutor:
         return output_dir / ".video-flow-journal" / "SUBMISSIONS_BLOCKED"
 
     def _mark_submission_blocked(self) -> None:
+        if not hasattr(self, "output_dir"):
+            # 仅兼容未经过 __init__ 的单元测试对象；真实 Worker 始终有
+            # output_dir，生产路径必须持久化阻断标记。
+            self._submission_blocked = True
+            return
         marker = self._submission_block_marker()
         marker.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         marker.write_text("manual_review_required\n", encoding="utf-8")
@@ -204,6 +209,7 @@ class JobExecutor:
                             "provider submission state is uncertain"
                         )
                     else:
+                        self._mark_submission_blocked()
                         print(
                             f"[{job.id}] In-flight job requires_review update failed "
                             "and may be replayed"
@@ -233,6 +239,7 @@ class JobExecutor:
                             "requeued for a new attempt"
                         )
                     else:
+                        self._mark_submission_blocked()
                         self._comfyui_manual_intervention_job_ids.add(job.id)
                         print(
                             f"[{job.id}] Requeue failed; requires manual intervention"
@@ -252,6 +259,7 @@ class JobExecutor:
                     )
                 else:
                     # 无法写回 failed 时先隔离，避免重启后又被误入执行队列。
+                    self._mark_submission_blocked()
                     self._comfyui_manual_intervention_job_ids.add(job.id)
                     print(
                         f"[{job.id}] In-flight job has no provider task ID; "
