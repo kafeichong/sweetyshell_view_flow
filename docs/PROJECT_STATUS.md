@@ -1,8 +1,33 @@
 # Video Flow 项目现状（权威）
 
 > 最后核验：2026-09-11
-> 核验方式：只读代码走查 + 实跑三个包的测试 + 交叉核对历史文档
+> 本轮核验方式：只读代码、接口调用链与测试走查；测试、部署和真实生成结果沿用下文注明的前轮核验快照，本轮未重跑、未部署、未创建付费任务。
 > 本文是**唯一**描述"系统现在是什么样"的文档。任何历史文档与本文冲突时，以本文为准；如果本文与代码冲突，以代码为准并立即更新本文。
+
+---
+
+## 0. 本轮交付判断
+
+**尚不能宣告可交付创意人员独立使用；也不是重新从零开发。** 已有任务、鉴权、上传、Provider 调用和下载接口，但“有这些组件”不等于“同事从 ComfyUI 一次执行能拿到成片”。此前将 R4 / R7 关闭的口径过宽，本轮重新打开其未完成部分。
+
+| 问题 | 本轮源码证据（仓库根相对路径） | 判断 |
+| --- | --- | --- |
+| Wait 是否真的等待？ | `packages/comfyui-video-flow-client/nodes.py:105`：只 GET 一次，输出 `task_json` 而不是完成后的 `task_id` | 未形成提交 → 等待 → 下载的执行依赖；节点注册不证明工作流跑通 |
+| 视频是否进入用户实际 output？ | `packages/comfyui-video-flow-client/nodes.py:119`：按安装路径推导，没有读取 ComfyUI 运行时 output 设置 | 自定义输出目录可能不一致；结果只返回路径字符串，未证明用户能找到并播放 |
+| 重启能否接续原任务？ | `packages/backend/src/tasks/task-claim.service.ts:110` 未展平 Attempt 的 `providerTaskId`；`packages/worker/executor.py:107` 读取展平字段 | 恢复逻辑与真实返回契约不匹配，不能称“恢复已完成” |
+| completed 是否必有可取视频？ | `packages/worker/executor.py:525` 起：无 URL 可继续完成；Asset 登记与最终状态回写返回值未检查 | Provider 成功、归档成功、客户端拿到文件三种成功未严密区分 |
+| 生成成功但归档失败，费用还在吗？ | `packages/worker/executor.py:554`：usage / 成本在下载、OSS 上传之后才回写 | 中途失败会遗漏已发生的 Provider usage；不能仅靠成功 Task 汇总消耗 |
+| 有额度字段是否等于有额度控制？ | `packages/backend/prisma/schema.prisma:161`；`packages/backend/src/v1/tasks/v1-tasks.controller.ts:95` | 字段存在，生产创建路径未执行额度占用和拦截 |
+| 能否使用任意输入 Asset？ | `packages/backend/src/v1/tasks/preview-plan.ts:97` 只检查标识存在；`packages/backend/src/v1/internal/v1-worker.controller.ts:26` 按 ID 查询 uploaded Asset | 生产入口缺输入 Asset 与 actor 的归属校验；已知他人 Asset ID 不能仅靠 ID 难猜来保护 |
+| 是否完全没有记录？ | `packages/backend/prisma/schema.prisma`；`docker-compose.yml:48`、`:77` | 已有 Task / Attempt / Asset 与 Docker 日志；缺的是可靠写入、关键阶段串联、保留期与有人处理的告警 |
+
+本表属于静态调用链结论，不声称故障已在生产注入复现。核验命令见第 5 节。交付门槛和整改顺序只在 [ROADMAP.md](./ROADMAP.md) 维护。
+
+### 外部能力与本地实现不能混为一谈
+
+2026-09-11 查阅的[火山官方 SDK 任务资源源码](https://raw.githubusercontent.com/volcengine/volcengine-python-sdk/master/volcenginesdkarkruntime/resources/content_generation/tasks.py)具有 create / get / list / delete，并暴露 `resolution`、`callback_url` 等字段。它证明接口入口存在，**不证明当前账号、模型都支持，也不证明 delete 等于免费取消**。
+
+本地 `packages/worker/providers/seedance_adapter.py` 实现提交、查询、轮询与 usage 推算，但未转发 `resolution`，没有列表/删除调用，也没有经核实的 Provider 幂等约定。精确完成百分比、提交前最终账单金额、取消计费语义、无 ID 时的可靠请求匹配，本轮均未建立足够证据；不能将它们写成可保证能力，也不能武断写成平台不支持。创意效果与产品还原度仍需看实际视频，接口返回成功不能代替判断。
 
 ---
 
@@ -22,7 +47,7 @@
 
 冻结边界（见 [architecture/seedance-integration-baseline.md](./architecture/seedance-integration-baseline.md)）：
 
-- Server Worker 是**唯一**允许持有火山 / OSS 生产密钥的组件。
+- 火山生产密钥只在 Worker；OSS 凭证限受信任的服务器组件：Worker 上传，Backend 签发上传/下载 URL 与 HEAD 校验（`docker-compose.yml`、`packages/backend/src/assets/asset-presign.service.ts`）。历史“只有 Worker 持有 OSS 密钥”的文字与实现不符。
 - 同事电脑只有 Video Flow 的可撤销凭证，永不接触 Ark / OSS 密钥。
 - PostgreSQL 是任务与执行状态的权威数据源；数据库只永久保存 `objectKey`，签名 URL 按需生成。
 - 不在服务器上集中部署 ComfyUI 或 Seedance 模型。
@@ -37,11 +62,18 @@
 | `packages/worker` | Python 3.13 + FastAPI | 轮询领取任务、调用 Provider、OSS 归档、状态回写 | 36 |
 | `packages/comfyui-video-flow-client` | Python（ComfyUI 自定义节点） | 同事本机节点：上传素材、提交任务、查询与下载结果 | 12 |
 
-开发跨度 2026-09-09 → 2026-09-11。生产环境已部署版本 `6d3582e`，包含安全收敛与产物交付闭环；Production 白名单仍为空。
+开发跨度 2026-09-09 → 2026-09-11。前轮生产核验快照为版本 `6d3582e`，包含安全收敛与输出登记/下载接口；不能据此称产物交付闭环验收完成。Production 白名单在该快照中为空，本轮未重新查询远端。
 
 ---
 
 ## 3. 已经具备的能力（附证据）
+
+### 3.0 当前开发分支进度（尚未部署）
+
+- `feat/creative-mvp` 隔离 worktree 已完成 ROADMAP T00：新增真实编译 Backend + PostgreSQL 的合同测试入口、仅 loopback 的假 Provider、Provider 测试环境 fail-closed 校验，并修正 `start:prod` 指向实际构建入口 `dist/src/main`。
+- 2026-09-11 本分支实测：Backend build + 68 测试通过；Worker 83 通过 / 26 跳过；Client 19 通过；合同测试 3 通过、假 Provider 2 通过。合同用例验证 Preview 不产生 Attempt，假 Provider create 计数为 0。
+- 空库执行现有 `prisma migrate deploy` 仍会因 `assets` 创建顺序失败；T00 临时合同库使用 `prisma db push`。该迁移链缺口已列入 ROADMAP T01，修复前不能称新环境部署流程已通过。
+- 上述仅是开发分支离线证据，未推送、未部署、未开放 Production、未创建真实 Provider 任务。
 
 ### 3.1 Backend
 
@@ -63,9 +95,9 @@
 | 能力 | 证据 |
 | --- | --- |
 | Seedance 适配器：提交、轮询、下载、usage 计费 | `providers/seedance_adapter.py` |
-| 提交不确定时进入 `requires_review`，禁止自动重新提交 | `executor.py:584-596`、`providers/seedance_adapter.py` |
-| 重启后按 `providerTaskId` 恢复轮询；未提交成功的任务放回 pending | `executor.py:104-200`、`recovery.py` |
-| 产物归档 OSS 并登记 Asset；成本审计带 `pricingVersion` | `executor.py:524-573`、`recovery.py` |
+| 网络请求异常有 `requires_review` 分支；但 5xx、成功响应缺 ID 等不确定情况未统一归类 | `executor.py:584-601`、`providers/seedance_adapter.py:135` |
+| 存在按 `providerTaskId` 恢复轮询的代码；Backend 返回映射缺字段，真实恢复未通过 | `executor.py:104-200`、`src/tasks/task-claim.service.ts:110`（Backend） |
+| 有 OSS 归档、Asset 登记、含 `pricingVersion` 的成本审计代码；归档失败与回写失败存在缺口 | `executor.py:524-578`、`recovery.py` |
 | ComfyUI 本地 dry-run 通道（生产环境关闭：`COMFYUI_ENABLED=false`） | `executor.py:63-72,376-392` |
 | HTTP 探针：`/`、`/health` | `main.py` |
 
@@ -77,9 +109,11 @@
 | token 来源优先级：`VIDEO_FLOW_TOKEN` > `VIDEO_FLOW_TOKEN_FILE` > `~/.video-flow/token` | `config.py` |
 | Preview / Production 使用不同作用域的幂等键，profile / duration / ratio 也纳入稳定键 | `client.py` 的 `stable_idempotency_key()`、`mode_scoped_idempotency_key()` |
 | 素材上传带 SHA-256，服务端据此复用 Asset | `client.py:25-72` |
-| 结果节点按 Task 请求新签名 URL，流式写入 `<ComfyUI>/output/video-flow/`，临时 `.part` 文件失败即清理 | `client.py` 的 `download_task_result()`、`nodes.py` 的 `VideoFlowLoadResult` |
+| 结果节点按 Task 请求新签名 URL，流式下载并清理失败的 `.part`；目录按安装路径推导，未适配运行时 output 覆盖 | `client.py` 的 `download_task_result()`、`nodes.py:119` |
 
 ### 3.4 部署现状
+
+以下均为前轮核验/历史记录，不是本轮重新执行的远端检查；正式验收前须刷新版本、白名单、主实例与任务状态。
 
 - 服务器：`8.140.49.56:/data/video-flow`，容器 `video-flow-backend` / `video-flow-worker` / `video-flow-postgres`。
 - 公网入口：`https://ai.sweetyshell.com/api/` → `127.0.0.1:3100`（Nginx，见 [runbooks/domain-and-https.md](./runbooks/domain-and-https.md)）。
@@ -95,23 +129,26 @@
 
 ## 4. 风险登记册
 
-严重度：**P0 = 可造成资金损失或数据泄露，必须当周解决；P1 = 阻断业务目标或造成大量人工；P2 = 工程债。**
+严重度：**P0 = 资金或数据边界缺口，开放前必须解决；P1 = 阻断业务目标或异常处理；P2 = 按需改进。** 所有阶段与处置顺序见 [ROADMAP.md](./ROADMAP.md)，下表不代表已实施。
 
 ### P0
 
 | ID | 风险 | 证据 | 影响 | 处置 |
 | --- | --- | --- | --- | --- |
-| R3 | 无任何额度 / 计费闸门：`ActorCredential.dailyLimitCny` / `monthlyLimitCny` 是死字段，无代码读取；无提交前预估与拦截 | `prisma/schema.prisma:139-140`；全仓无引用 | 开放给多人后共享火山账号消耗不可控，出事只能事后反推 | 额度校验上线（ROADMAP Phase 1） |
+| R3 | 额度字段未参与生产准入；无预占、结算与并发原子校验 | `packages/backend/prisma/schema.prisma:161`、`packages/backend/src/v1/tasks/v1-tasks.controller.ts` | 连续提交消耗不可控；仅白名单不足以控制已授权用户费用 | ROADMAP M1 |
+| R14 | 生产参数与输入权限校验不足：未限定 duration / ratio / model，也未校验输入 Asset 归属 | `packages/backend/src/v1/tasks/preview-plan.ts`、`packages/backend/src/v1/internal/v1-worker.controller.ts` | 可绕过客户端限制，提交非预期成本参数或使用他人已知素材 ID | ROADMAP M1 |
 
 ### P1
 
 | ID | 风险 | 证据 | 影响 | 处置 |
 | --- | --- | --- | --- | --- |
-| R6 | 重试不可持久化：schema 无 `retry_count` / `next_retry_at`，限流 / 超时 / 网络类失败统一落 `failed`，标记 `RETRY_NOT_PERSISTED` | `executor.py:598-619`、`prisma/schema.prisma` | 一次瞬时抖动 = 一次永久失败 + 人工重提（可能再次付费） | 补迁移 + 有限自动重试（ROADMAP Phase 1） |
-| R8 | 可观测性为零：无 metrics / 告警 / 结构化日志 / TaskEvent，失败仅 `print` + docker logs | `executor.py` 全篇 `print` | 排障只能登服务器翻日志；无法回答失败率与消耗 | TaskEvent + `/metrics` + 核心告警（ROADMAP Phase 2） |
-| R9 | 无内容安全审核：`inspectionStatus` 只会是 `pending_upload` / `uploaded`，prompt 与图片无合规留痕 | `src/v1/assets/v1-assets.controller.ts`、`assets.service.ts` | 公司账号被用于生成违规内容的合规风险，事后无法举证 | 接入内容安全审核（ROADMAP Phase 2） |
-| R11 | 成本只有 usage 推算，从未与火山账单对账；pricing 为代码内硬编码 | `providers/seedance_adapter.py` | 预算与报价不可信，无法交代真实单位成本 | 月度对账流程（ROADMAP Phase 1 首次 / Phase 2 常态化） |
-| R13 | 单 Worker、无持久队列；ComfyUI 隔离区仅内存集合，重启即丢 | `executor.py:55-60` | 重启可能重放已提交 prompt；无法安全横向扩容 | 先做"重启不重复计费"验收（ROADMAP Phase 1） |
+| R4 | 输出归属/下载接口已补，但无 URL 仍可完成、Asset/状态回写失败未阻断；输出秒级命名、登记非幂等 | `packages/worker/executor.py:525`、`packages/backend/src/assets/assets.service.ts:65` | completed 可能无可交付视频，修复归档可能新增重复记录 | ROADMAP M2 |
+| R6 | 无可持久化自动重试；提交不确定类型覆盖不全 | `packages/worker/executor.py:585`、`packages/worker/providers/seedance_adapter.py:135` | 错误若被当作可重新生成，可能额外付费；人工也缺安全恢复入口 | ROADMAP M2；自动重提不作为 MVP 要求 |
+| R7 | Wait 只查一次、输出不衔接、目录硬编码；相同参数无明确“再生成一版”标识 | `packages/comfyui-video-flow-client/nodes.py:83`、`:105`、`:119` | 客户端节点齐全不等于可自助出片；重取与新生成意图不清 | ROADMAP M3 |
+| R8 | 已有数据库记录与滚动日志，缺持久结构化事件、有效心跳、告警处置；日志输出签名 URL | `docker-compose.yml:48`、`:77`；`packages/worker/main.py:50`、`executor.py:525`、`:543` | 日志最多按每服务 3 × 10 MB 轮换，不能保证保留天数；healthy 不证明执行循环工作 | ROADMAP M4 |
+| R9 | 有请求快照、Prompt 与素材记录，但没有内容审核结论/处置记录；uploaded 只表示上传完成 | `packages/backend/prisma/schema.prisma`、`packages/backend/src/v1/assets/v1-assets.controller.ts` | 素材来源与审核通过不能由上传状态推断 | ROADMAP 试点素材边界与人工审核 |
+| R11 | 已有 usage 推算及费用状态，但归档失败前 usage 尚未保存；单价硬编码；无本轮账单核对证据 | `packages/worker/executor.py:554`、`packages/worker/providers/seedance_adapter.py` | 消耗可能漏记，推算不能称最终账单 | ROADMAP M1 / M2 / M4 |
+| R13 | PostgreSQL 已持久化任务，但恢复响应未展平 `providerTaskId`，且租约过期未参与领取判断 | `packages/backend/src/tasks/task-claim.service.ts:86`、`:110`；`packages/worker/executor.py:107` | 已存在的 Provider 任务不能可靠接续；不能据此扩容多 Worker | ROADMAP M2；MVP 单 Worker |
 
 ### 2026-09-11 已关闭
 
@@ -119,9 +156,7 @@
 | --- | --- | --- |
 | R1 | 旧任务接口按用途加 `AdminTokenGuard` / `WorkerServiceGuard` | decorator metadata 测试；公网 GET / POST 无凭证均为 401 |
 | R2 | Backend 改为 `127.0.0.1:3100`；Worker / PostgreSQL 删除宿主端口 | Compose 配置核对；生产 `ss` 与容器端口核对 |
-| R4 | 输出 Asset 继承 Task actor 并保存永久 `objectKey`；新增按 Task 签发下载 URL；5 个历史输出完成回填 | Backend / Worker 测试；生产数据只读核对；未创建 Provider 任务 |
 | R5 | 新增三包 GitHub Actions；客户端增加稳定的包根测试入口 | Backend、Worker、Client 本地全绿；远端 CI 以最新 run 为准 |
-| R7 | 新增 Production 提交节点与结果下载节点 | 客户端单测；ComfyUI 0.35.1 隔离实例 `/object_info` 验证五个节点 |
 | R10 | 删除唯一 `.env.backup-token-*`，生产 `.env` 改为 `600` | 文件名计数为 0；权限检查为 `600` |
 | R12 | profile / duration / ratio 纳入稳定幂等键，mode 保持独立作用域 | 客户端幂等测试 |
 
@@ -141,6 +176,19 @@
 
 ## 5. 验证命令与实测结果
 
+本轮静态复核（仓库根执行）：
+
+```bash
+git status --short --branch
+rg -n 'providerTaskId|attachAttempt|findRecoverable' packages/backend/src/tasks/task-claim.service.ts packages/worker/executor.py packages/worker/models.py
+rg -n 'class VideoFlowWaitTask|def wait|default_output_dir|stable_idempotency_key' packages/comfyui-video-flow-client/nodes.py
+rg -n 'dailyLimitCny|monthlyLimitCny' packages/backend/src packages/backend/prisma/schema.prisma
+rg -n 'result_url|create_asset|cost_audit|Completed successfully' packages/worker/executor.py
+rg -n 'max-size|max-file' docker-compose.yml
+```
+
+以下测试结果是 2026-09-11 **前轮实跑记录**，本轮仅修改文档，未重新执行。历史通过数字不是下一版的固定期望数量。
+
 在提交修复前后都应运行这三条；AGENTS.md 要求三包全绿。
 
 ```bash
@@ -159,7 +207,7 @@ cd packages/comfyui-video-flow-client && python -m pip install -r requirements.t
 | Backend `npm run build && npx jest` | 13 套件 / 68 测试通过 |
 | Worker `pytest -q` | 80 通过 / 26 跳过（6 个既有 deprecation warning） |
 | Client（包根、安装自身依赖） | 19 通过 |
-| `git ls-files \| grep -iE "token\|\.env"` | ✅ 无凭证入库（`.env`、`*-actor-token` 已 gitignore） |
+| `git ls-files \| grep -iE "token\|\.env"` | 仅为敏感文件名检查；不能据此证明文件内容或整个 Git 历史无泄露 |
 
 > 客户端依赖在 `packages/comfyui-video-flow-client/requirements.txt` 中声明为 `httpx[socks]`。运行客户端测试前必须在客户端自己的环境安装该文件；不要借用 Worker venv。
 
@@ -170,3 +218,5 @@ cd packages/comfyui-video-flow-client && python -m pip install -r requirements.t
 - **测试全绿 ≠ 链路可用。** 2026-09-10 的评审报告已证明：29 个后端测试全绿时，三条主链路仍然互不匹配。关键路径必须靠端到端契约验证，不能只看单测。
 - 鉴权相关改动不能只依赖单测：部分 spec 用 `jest.mock('@nestjs/common')` 替换装饰器，绕过了真实 Guard 装配。涉及鉴权的改动必须补集成验证（真实 HTTP 请求 + 期望 401/403）。
 - Worker 的 26 项 skip 覆盖了真实 ComfyUI workflow 解析；这些路径目前**没有**自动回归保护。
+- `packages/comfyui-video-flow-client/tests/test_nodes.py` 使用假客户端与临时目录，不证明真实节点图等待、ComfyUI 自定义 output、下载后播放可用。
+- `scripts/seedance_production_acceptance.py` 以 completed 与非空 `videoUrl` 判断通过，不足以证明视频已下载并可解码；默认时间戳幂等键也不能用于不加区分地重跑付费验收。
