@@ -4,6 +4,13 @@
 
 安装：将目录复制到 ComfyUI 的 `custom_nodes/`，在该目录安装 `requirements.txt`，重启 ComfyUI。
 
+公司生产环境使用以下 Backend URL；本地开发未设置时仍默认为 `http://localhost:3100`：
+
+```bash
+export VIDEO_FLOW_BACKEND_URL=https://ai.sweetyshell.com
+export VIDEO_FLOW_PROTOCOL_VERSION=1
+```
+
 配置 Backend URL 和协议版本后，客户端按以下优先级读取 actor token：
 
 1. ComfyUI 进程环境变量 `VIDEO_FLOW_TOKEN`。
