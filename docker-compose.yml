@@ -10,8 +10,6 @@ services:
       POSTGRES_DB: video_flow
     volumes:
       - video_postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5433:5432"  # 避免和其他项目冲突
     networks:
       - video-network
     healthcheck:
@@ -44,7 +42,7 @@ services:
       OSS_BUCKET: ${OSS_BUCKET}
       OSS_REGION: ${OSS_REGION}
     ports:
-      - "3100:3000"  # 外部 3100，内部 3000
+      - "127.0.0.1:3100:3000"
     networks:
       - video-network
     logging:
@@ -74,8 +72,6 @@ services:
       COMFYUI_OUTPUT_DIR: /app/output
     volumes:
       - video_output:/app/output
-    ports:
-      - "8101:8001"
     networks:
       - video-network
     logging:
