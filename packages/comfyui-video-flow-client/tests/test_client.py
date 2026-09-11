@@ -179,3 +179,13 @@ def test_missing_token_file_yields_empty_token(monkeypatch, tmp_path):
     monkeypatch.setenv("VIDEO_FLOW_TOKEN_FILE", str(tmp_path / "does-not-exist"))
 
     assert VideoFlowConfig.from_env().token == ""
+
+
+def test_client_initializes_when_comfyui_uses_a_socks_proxy(monkeypatch):
+    for name in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("ALL_PROXY", "socks5://127.0.0.1:9")
+    monkeypatch.delenv("all_proxy", raising=False)
+
+    client = VideoFlowClient(VideoFlowConfig("https://backend.test", "secret-token"))
+    client.client.close()
