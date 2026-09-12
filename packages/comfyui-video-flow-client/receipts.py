@@ -7,9 +7,22 @@ from pathlib import Path
 from typing import Any
 
 
+def credential_namespace(backend_url: str, token: str) -> str:
+    """按后端地址与凭证派生不可逆命名空间。
+
+    换账号或换后端后，旧回执里的 taskId 属于另一个身份，绝不能拿来当成本次
+    执行的结果。这里只存摘要，原始的 token 永远不落盘。
+    """
+    material = f"{(backend_url or '').rstrip('/')}\0{token or ''}".encode("utf-8")
+    return hashlib.sha256(material).hexdigest()[:16]
+
+
 class ReceiptStore:
-    def __init__(self, root: str | Path):
+    def __init__(self, root: str | Path, namespace: str | None = None):
         self.root = Path(root).expanduser()
+        # 命名空间是派生摘要，只做目录名，不参与任何可逆解析。
+        if namespace:
+            self.root = self.root / namespace
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.root.chmod(0o700)
 

@@ -3,11 +3,184 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from client import VideoFlowClient
+from client import ReceiptUpdateError, VideoFlowClient
 from config import VideoFlowConfig
 from receipts import ReceiptStore
+
+
+class _FlakyReceiptStore(ReceiptStore):
+    """第 fail_on 次写入失败，用来验证回执写不进去时的行为。"""
+
+    def __init__(self, root, fail_on: int):
+        super().__init__(root)
+        self.fail_on = fail_on
+        self.calls = 0
+
+    def save(self, intent_key, payload):
+        self.calls += 1
+        if self.calls == self.fail_on:
+            raise OSError("disk full")
+        return super().save(intent_key, payload)
+
+
+def test_retry_reuses_the_original_intent_instead_of_rebuilt_metadata(tmp_path):
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        if len(requests) == 1:
+            raise httpx.ReadTimeout("connection dropped")
+        return httpx.Response(201, json={"id": "task-1"})
+
+    client = VideoFlowClient(
+        VideoFlowConfig("https://backend.test", "secret-token"),
+        httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    store = ReceiptStore(tmp_path)
+    original = {"capability": "IMAGE_TO_VIDEO", "profile": "seedance", "params": {"prompt": "p"}}
+
+    with pytest.raises(httpx.ReadTimeout):
+        client.create_task_with_receipt(
+            intent_key="intent-upgrade",
+            idempotency_key="stable-key",
+            payload=original,
+            mode="production",
+            receipt_store=store,
+        )
+
+    # 模拟软件升级后重建的请求体：多了一个当时不存在的 metadata 字段。
+    upgraded = {
+        "capability": "IMAGE_TO_VIDEO",
+        "profile": "seedance",
+        "params": {"prompt": "p"},
+        "client_metadata": {"node_version": "2.0"},
+    }
+    result = client.create_task_with_receipt(
+        intent_key="intent-upgrade",
+        idempotency_key="stable-key",
+        payload=upgraded,
+        mode="production",
+        receipt_store=store,
+    )
+
+    assert result["id"] == "task-1"
+    # 重试必须原样复用第一次的 key 与请求体，否则会变成"同 key 不同请求"。
+    assert requests[0].headers["idempotency-key"] == requests[1].headers["idempotency-key"]
+    assert json.loads(requests[1].content) == json.loads(requests[0].content)
+    assert "client_metadata" not in json.loads(requests[1].content)
+
+
+def test_retry_does_not_bump_generation_version(tmp_path):
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        if len(requests) == 1:
+            raise httpx.ReadTimeout("connection dropped")
+        return httpx.Response(201, json={"id": "task-1"})
+
+    client = VideoFlowClient(
+        VideoFlowConfig("https://backend.test", "secret-token"),
+        httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    store = ReceiptStore(tmp_path)
+    base_key = client.stable_idempotency_key("p", b"image", generation_version=3)
+
+    with pytest.raises(httpx.ReadTimeout):
+        client.create_task_with_receipt(
+            intent_key="intent-version",
+            idempotency_key=base_key,
+            payload={"capability": "IMAGE_TO_VIDEO", "profile": "seedance", "params": {"prompt": "p"}},
+            mode="production",
+            receipt_store=store,
+        )
+
+    # 重跑时调用方（或新版本模板）换了参数，但意图已经固化，不允许自动改版本。
+    client.create_task_with_receipt(
+        intent_key="intent-version",
+        idempotency_key=client.stable_idempotency_key("p", b"image", generation_version=4),
+        payload={"capability": "IMAGE_TO_VIDEO", "profile": "seedance", "params": {"prompt": "p"}},
+        mode="production",
+        receipt_store=store,
+    )
+
+    assert requests[1].headers["idempotency-key"] == client.mode_scoped_idempotency_key(
+        base_key, "production"
+    )
+    assert store.load("intent-version")["taskId"] == "task-1"
+
+
+def test_receipt_write_failure_blocks_the_paid_submission(tmp_path):
+    requests = []
+    client = VideoFlowClient(
+        VideoFlowConfig("https://backend.test", "secret-token"),
+        httpx.Client(
+            transport=httpx.MockTransport(
+                lambda request: requests.append(request) or httpx.Response(201, json={"id": "t"})
+            )
+        ),
+    )
+    store = _FlakyReceiptStore(tmp_path, fail_on=1)
+
+    # 意图都没落盘就发付费请求，一次超时之后就再无凭据可查。
+    with pytest.raises(OSError):
+        client.create_task_with_receipt(
+            intent_key="intent-no-receipt",
+            idempotency_key="stable-key",
+            payload={"capability": "IMAGE_TO_VIDEO", "profile": "seedance", "params": {"prompt": "p"}},
+            mode="production",
+            receipt_store=store,
+        )
+
+    assert requests == []
+    assert store.load("intent-no-receipt") is None
+
+
+def test_receipt_update_failure_reports_the_created_task_id(tmp_path):
+    client = VideoFlowClient(
+        VideoFlowConfig("https://backend.test", "secret-token"),
+        httpx.Client(
+            transport=httpx.MockTransport(
+                lambda _request: httpx.Response(201, json={"id": "task-created"})
+            )
+        ),
+    )
+    store = _FlakyReceiptStore(tmp_path, fail_on=2)
+
+    with pytest.raises(ReceiptUpdateError) as error:
+        client.create_task_with_receipt(
+            intent_key="intent-update-failure",
+            idempotency_key="stable-key",
+            payload={"capability": "IMAGE_TO_VIDEO", "profile": "seedance", "params": {"prompt": "p"}},
+            mode="production",
+            receipt_store=store,
+        )
+
+    # 任务确实创建了：必须显示 taskId，不能报成"未提交"诱导再跑一次。
+    assert error.value.task_id == "task-created"
+    assert "task-created" in str(error.value)
+    assert store.load("intent-update-failure")["taskId"] is None
+
+
+def test_receipt_store_is_namespaced_by_backend_and_credential(tmp_path):
+    client = VideoFlowClient(
+        VideoFlowConfig("https://backend.test", "token-a"),
+        httpx.Client(transport=httpx.MockTransport(lambda _r: httpx.Response(201, json={"id": "t"}))),
+    )
+    other = VideoFlowClient(
+        VideoFlowConfig("https://backend.test", "token-b"),
+        httpx.Client(transport=httpx.MockTransport(lambda _r: httpx.Response(201, json={"id": "t"}))),
+    )
+
+    first = client.receipt_store(tmp_path)
+    second = other.receipt_store(tmp_path)
+
+    assert first.root != second.root
+    assert "token-a" not in str(first.root)
 
 
 def test_create_task_with_receipt_reuses_key_after_timeout(tmp_path):
@@ -118,6 +291,27 @@ def test_stable_idempotency_key_changes_with_generation_parameters():
     )
 
     assert len({base, changed_duration, changed_ratio}) == 3
+
+
+def test_explicit_version_distinguishes_new_generation():
+    kwargs = {"profile": "seedance", "duration": 5, "ratio": "16:9", "spec_version": "test-v1"}
+
+    version_1 = VideoFlowClient.stable_idempotency_key(
+        "product", b"png", generation_version=1, **kwargs
+    )
+    version_2 = VideoFlowClient.stable_idempotency_key(
+        "product", b"png", generation_version=2, **kwargs
+    )
+    other_spec = VideoFlowClient.stable_idempotency_key(
+        "product", b"png", generation_version=1, **{**kwargs, "spec_version": "test-v2"}
+    )
+
+    # 版本由用户显式提升才表示再生成一版；规格升级同样属于新的生成意图。
+    assert version_1 != version_2
+    assert version_1 != other_spec
+    assert version_1 == VideoFlowClient.stable_idempotency_key(
+        "product", b"png", generation_version=1, **kwargs
+    )
 
 
 def test_create_task_scopes_same_base_idempotency_key_by_mode():

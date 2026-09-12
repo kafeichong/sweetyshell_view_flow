@@ -82,6 +82,8 @@ class VideoFlowSeedanceProduction:
             filename="reference.png",
             mime_type="image/png",
         )
+        # 稳定键显式带上 generation_version 与规格版本：同参数同版本重复执行
+        # 命中同一个任务，用户主动提升版本号才表示再生成一版。
         intent_key = client.stable_idempotency_key(
             prompt,
             image_bytes,
@@ -89,16 +91,10 @@ class VideoFlowSeedanceProduction:
             duration=duration,
             ratio=ratio,
             generation_version=generation_version,
+            spec_version=config.spec_version,
         )
         task = client.create_task_with_receipt(
-            idempotency_key=client.stable_idempotency_key(
-                prompt,
-                image_bytes,
-                profile="seedance",
-                duration=duration,
-                ratio=ratio,
-                generation_version=generation_version,
-            ),
+            idempotency_key=intent_key,
             mode="production",
             payload={
                 "capability": "IMAGE_TO_VIDEO",
@@ -111,7 +107,8 @@ class VideoFlowSeedanceProduction:
                 },
             },
             intent_key=intent_key,
-            receipt_store=ReceiptStore(config.receipt_dir),
+            # 回执按后端地址与凭证分命名空间：换账号不会误用上一个人的 taskId。
+            receipt_store=client.receipt_store(config.receipt_dir),
         )
         return (str(task["id"]),)
 

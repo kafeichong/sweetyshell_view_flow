@@ -7,10 +7,26 @@ import httpx
 
 try:
     from .config import VideoFlowConfig
-    from .receipts import ReceiptStore
+    from .receipts import ReceiptStore, credential_namespace
 except ImportError:  # ComfyUI loads custom node modules directly from the folder.
     from config import VideoFlowConfig
-    from receipts import ReceiptStore
+    from receipts import ReceiptStore, credential_namespace
+
+
+class ReceiptUpdateError(RuntimeError):
+    """任务已经创建，但回执补写失败。
+
+    这种情况必须把 taskId 明确带给用户：把它报成"没提交成功"会诱导重跑，
+    而重跑意味着第二次付费生成。
+    """
+
+    def __init__(self, task_id: str, cause: Exception):
+        super().__init__(
+            f"task {task_id} was created but its receipt could not be saved: {cause}. "
+            "Do not resubmit with a new version; reuse this task id."
+        )
+        self.task_id = task_id
+        self.cause = cause
 
 
 class VideoFlowClient:
@@ -95,13 +111,7 @@ class VideoFlowClient:
             idempotency_key,
             mode,
         )
-        response = self.client.post(
-            f"{self.config.backend_url}/api/v1/tasks",
-            headers=self._headers(scoped_idempotency_key),
-            json={**payload, "mode": mode},
-        )
-        response.raise_for_status()
-        return response.json()
+        return self._post_task(scoped_idempotency_key, {**payload, "mode": mode})
 
     def create_task_with_receipt(
         self,
@@ -112,42 +122,69 @@ class VideoFlowClient:
         mode: str = "preview",
         receipt_store: ReceiptStore,
     ) -> dict[str, Any]:
-        """Create a task while preserving the exact retry intent on disk."""
+        """Create a task while preserving the exact retry intent on disk.
+
+        重试语义：一旦某个 intent_key 形成了意图，后续重跑一律沿用回执里的
+        原 key 与原请求体。软件升级后重建的 payload 可能多出或少掉几个字段
+        （设备别名、版本等），如果拿它去重试，就会变成"同 key 不同请求"被
+        服务端判 409，或者被误当成一次新的生成。
+        """
         existing = receipt_store.load(intent_key)
         if existing and existing.get("taskId"):
             return self.get_task(str(existing["taskId"]))
 
-        scoped_key = self.mode_scoped_idempotency_key(idempotency_key, mode)
-        request_body = {**payload, "mode": mode}
-        receipt_store.save(
-            intent_key,
-            {
-                "idempotencyKey": scoped_key,
-                "mode": mode,
-                "body": request_body,
-                "taskId": None,
-            },
-        )
-        try:
-            result = self.create_task(
-                idempotency_key=idempotency_key,
-                payload=payload,
-                mode=mode,
+        if existing:
+            scoped_key = str(existing["idempotencyKey"])
+            request_body = dict(existing["body"])
+        else:
+            scoped_key = self.mode_scoped_idempotency_key(idempotency_key, mode)
+            request_body = {**payload, "mode": mode}
+            # 先落盘意图，再发 POST：回执写不进去就不允许创建付费任务，
+            # 否则一次超时就再也没有"当初到底提交了什么"的凭据。
+            receipt_store.save(
+                intent_key,
+                {
+                    "idempotencyKey": scoped_key,
+                    "mode": mode,
+                    "body": request_body,
+                    "taskId": None,
+                },
             )
-        except Exception:
-            # 保留 taskId=null 的原始意图，调用方可安全使用同一 key 重试。
-            raise
 
-        receipt_store.save(
-            intent_key,
-            {
-                "idempotencyKey": scoped_key,
-                "mode": mode,
-                "body": request_body,
-                "taskId": result.get("id"),
-            },
-        )
+        result = self._post_task(scoped_key, request_body)
+        task_id = result.get("id")
+
+        try:
+            receipt_store.save(
+                intent_key,
+                {
+                    "idempotencyKey": scoped_key,
+                    "mode": request_body.get("mode", mode),
+                    "body": request_body,
+                    "taskId": task_id,
+                },
+            )
+        except Exception as error:
+            raise ReceiptUpdateError(str(task_id), error) from error
+
         return result
+
+    def _post_task(self, scoped_idempotency_key: str, request_body: dict[str, Any]) -> dict[str, Any]:
+        """按给定的 scoped key 与请求体创建任务，不做任何重写。"""
+        response = self.client.post(
+            f"{self.config.backend_url}/api/v1/tasks",
+            headers=self._headers(scoped_idempotency_key),
+            json=request_body,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def receipt_namespace(self) -> str:
+        """当前后端地址与凭证对应的回执命名空间。"""
+        return credential_namespace(self.config.backend_url, self.config.token)
+
+    def receipt_store(self, root: str | Path) -> ReceiptStore:
+        return ReceiptStore(root, namespace=self.receipt_namespace())
 
     def get_task(self, task_id: str) -> dict[str, Any]:
         response = self.client.get(

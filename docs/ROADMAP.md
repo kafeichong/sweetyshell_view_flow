@@ -358,12 +358,14 @@ def test_artifact_key_is_stable_and_task_scoped():
 **新增：** `packages/comfyui-video-flow-client/receipts.py`、`tests/test_receipts.py`。
 **接口：** Production 增加 `generation_version` 正整数，默认 1；稳定 key 纳入该值、specVersion、Prompt、图片 hash 与生成规格，仍按 preview/production 分作用域。`ReceiptStore(root: Path).save(intent_key, payload)` / `load(intent_key)` 使用原子临时文件替换。
 
-- [ ] “同参数、同版本”重复执行沿用同 key；用户主动增加版本号才表示再生成一版。保留旧 stable_idempotency_key 的可选参数兼容，但新模板显式带版本。
-- [ ] 上传完成后、发 POST 前保存意图/key/完整稳定请求；拿到 Task 后补 taskId。不将每次执行时间戳、临时签名 URL 混入幂等请求。
-- [ ] 回执按后端地址及凭证的不可逆命名空间隔离，避免换账号误用旧 taskId；不写原 token，目录 700/文件 600。
-- [ ] POST 超时后重新执行使用回执中的原 body/key；服务端已创建时找回原 Task，未创建时创建一次。不得自动提升 generation_version。
-- [ ] 回执无法写入时在创建付费任务前报错；已创建后的补写失败明确显示 taskId，不误报“未提交”。
-- [ ] 版本、设备别名等只在第一次形成意图时固化；后续重试重用原快照，不能因软件升级改 metadata 导致同 key 409。
+- [x] “同参数、同版本”重复执行沿用同 key；用户主动增加版本号才表示再生成一版。保留旧 stable_idempotency_key 的可选参数兼容，但新模板显式带版本。
+- [x] 上传完成后、发 POST 前保存意图/key/完整稳定请求；拿到 Task 后补 taskId。不将每次执行时间戳、临时签名 URL 混入幂等请求。
+- [x] 回执按后端地址及凭证的不可逆命名空间隔离，避免换账号误用旧 taskId；不写原 token，目录 700/文件 600。
+- [x] POST 超时后重新执行使用回执中的原 body/key；服务端已创建时找回原 Task，未创建时创建一次。不得自动提升 generation_version。
+- [x] 回执无法写入时在创建付费任务前报错；已创建后的补写失败明确显示 taskId，不误报“未提交”。
+- [x] 版本、设备别名等只在第一次形成意图时固化；后续重试重用原快照，不能因软件升级改 metadata 导致同 key 409。
+
+**完成状态（2026-09-13）：** 以上检查项均已实现。`ReceiptStore` 增加由「后端地址 + 凭证」派生的不可逆命名空间（`credential_namespace`，目录 700/文件 600，磁盘只出现摘要不含原 token），换账号或换后端不会读到也不会误用上一个人的 taskId；`VideoFlowClient.receipt_store()` 供节点构造带命名空间的存储。重试语义改为"沿用第一次形成的意图"：回执已存在时用其中的原 idempotencyKey 与原请求体重发，不再用调用方新建的 payload（软件升级后多出的 metadata 字段不会把同一个 key 变成"同 key 不同请求"），也不会自动提升 generation_version；新增 `_post_task` 作为唯一发送入口，`create_task` 与带回执的创建共用它。回执写不进去时在发 POST 之前就报错；任务已创建但回执补写失败时抛 `ReceiptUpdateError`，消息与属性都带 taskId，明确提示不要重新提交。稳定键纳入规格版本：`VideoFlowConfig.spec_version`（`VIDEO_FLOW_SPEC_VERSION`）参与 `stable_idempotency_key`，生产节点显式传 `generation_version` 与 `spec_version`；README 同步说明。测试：`packages/comfyui-video-flow-client/.venv/bin/python -m pytest tests/test_client.py tests/test_receipts.py tests/test_nodes.py -q` 通过（含"服务端已创建但响应丢失后重跑沿用原 key/原 body""回执写入失败不发付费请求""已创建后补写失败带 taskId""换凭证读到空回执"）。
 
 代表性用例（在 `test_client.py`）：
 

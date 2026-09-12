@@ -29,6 +29,9 @@ class VideoFlowConfig:
     token: str
     protocol_version: str = "1"
     receipt_dir: str = "~/.video-flow/receipts"
+    # 服务端批准的生成规格版本，参与稳定幂等键。规格升级后同一份输入属于
+    # 新的生成意图，应当得到新的 key，而不是复用旧任务。
+    spec_version: str = ""
 
     @classmethod
     def from_env(cls) -> "VideoFlowConfig":
@@ -37,4 +40,5 @@ class VideoFlowConfig:
             token=os.getenv("VIDEO_FLOW_TOKEN", "").strip() or _read_token_file(),
             protocol_version=os.getenv("VIDEO_FLOW_PROTOCOL_VERSION", "1"),
             receipt_dir=os.getenv("VIDEO_FLOW_RECEIPT_DIR", "~/.video-flow/receipts"),
+            spec_version=os.getenv("VIDEO_FLOW_SPEC_VERSION", "").strip(),
         )
