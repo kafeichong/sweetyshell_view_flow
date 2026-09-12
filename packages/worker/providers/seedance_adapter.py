@@ -52,12 +52,18 @@ class SeedanceAdapter:
         self.client = httpx.AsyncClient(timeout=60.0)
 
     def _build_headers(self) -> dict:
-        """构建请求头 - Bearer Token 鉴权"""
-        # Bearer 鉴权集中在此处，后续若切换网关可仅改此处头部生成。
-        return {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
+        """构建请求头 - Bearer Token 鉴权。
+
+        没有密钥时不要发出 `Authorization: Bearer `（空值）：这不是"匿名请求"，
+        而是格式非法的头，httpx 会直接拒绝，提交会被误判成"结果不确定"，
+        掩盖"密钥没配"这个真实原因。合同环境按规约不允许配置 Provider 密钥，
+        因此这里必须容忍空密钥；真需要鉴权的 Provider 会返回 401，那是明确的拒绝。
+        """
+        headers = {"Content-Type": "application/json"}
+        api_key = (self.api_key or "").strip()
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        return headers
 
     async def create_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """

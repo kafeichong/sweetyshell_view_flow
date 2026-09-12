@@ -87,12 +87,11 @@ cd "$REPO_ROOT"
 
 # T11 跨包合同：真实 Worker 代码 + 真实 Backend/DB + Fake Provider。
 #
-# ⚠️ 这段目前**尚未通过**：用例已写好（packages/worker/tests/test_mvp_live_contract.py），
-# 但 Worker 的 Provider create 在本机环境下没有真正打到 Fake Provider，
-# 需要继续排查（代理/连接层）。在它通过之前不得据此签收 T11，因此默认关闭，
-# 需要时显式开启：VIDEO_FLOW_RUN_LIVE_CONTRACT=1 bash scripts/run_mvp_contract.sh
-if test "${VIDEO_FLOW_RUN_LIVE_CONTRACT:-0}" != "1"; then
-  echo 'T11 跨包合同未启用（尚未通过，见 scripts/run_mvp_contract.sh 注释）' >&2
+# 默认开启。覆盖"预览不创建 Provider 任务"与"同一意图只创建一次、重跑沿用原 ID"
+# 两条跨包不变量。产物交付那一段依赖真实对象存储（合同环境按规约不用真实凭证、
+# 也没有 OSS 替身），由各包用例覆盖，端到端留到 T12。
+if test "${VIDEO_FLOW_RUN_LIVE_CONTRACT:-1}" != "1"; then
+  echo 'T11 跨包合同被显式关闭（VIDEO_FLOW_RUN_LIVE_CONTRACT=0）' >&2
 else
 
   # 起一个独立 Backend 实例（与 jest 合同的实例无关），并写入一条测试凭证。

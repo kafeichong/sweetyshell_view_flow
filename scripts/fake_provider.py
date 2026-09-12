@@ -1,10 +1,17 @@
 """Loopback-only fake Ark provider for isolated contract tests."""
 
+import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
+
+# Worker 从 Provider 取片子，所以返回的地址必须是 Worker 能访问到的主机：
+# 宿主脚本用 127.0.0.1，Docker 里的 Worker 必须用服务名 fake-provider。
+PUBLIC_BASE_URL = os.getenv("VIDEO_FLOW_FAKE_PROVIDER_PUBLIC_URL", "http://127.0.0.1:19091")
+CLIP_PATH = Path(__file__).resolve().parent / "tests" / "fixtures" / "contract-clip.mp4"
 
 
 def correlation_key(payload: dict[str, Any]) -> str:
@@ -42,7 +49,7 @@ class FakeProviderState:
             "id": task_id,
             "status": self.task_status,
             "model": payload.get("model"),
-            "content": {"video_url": f"http://127.0.0.1/__test__/videos/{task_id}.mp4"},
+            "content": {"video_url": f"{PUBLIC_BASE_URL}/__test__/videos/{task_id}.mp4"},
             "usage": {"total_tokens": 1000},
         }
         return {"id": task_id}
@@ -62,6 +69,17 @@ def create_app(state: FakeProviderState | None = None) -> FastAPI:
         if not task:
             raise HTTPException(status_code=404, detail="fake task not found")
         return task
+
+    @app.get("/__test__/videos/{name}")
+    async def download_video(name: str):
+        """返回一份本地生成的短视频，供归档链路真实下载。
+
+        它只验证"文件流程能跑通"，不代表任何真实模型能力；素材由测试生成，
+        不涉及生产素材。
+        """
+        if not CLIP_PATH.is_file():
+            raise HTTPException(status_code=404, detail="contract clip fixture missing")
+        return Response(content=CLIP_PATH.read_bytes(), media_type="video/mp4")
 
     @app.get("/__test__/stats")
     @app.get("/api/v3/__test__/stats")

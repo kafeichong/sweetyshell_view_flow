@@ -1,7 +1,11 @@
+import subprocess
+from pathlib import Path
+
 import httpx
 import pytest
+from starlette.testclient import TestClient
 
-from fake_provider import FakeProviderState, create_app
+from fake_provider import FakeProviderState, app, create_app
 
 
 @pytest.mark.asyncio
@@ -53,3 +57,25 @@ async def test_fake_provider_fault_does_not_increment_create_count():
 
     assert response.status_code == 500
     assert stats.json()["createCount"] == 0
+
+
+def test_fake_provider_serves_a_decodable_contract_clip():
+    """归档链路要真的下载到文件：没有可解码的 fixture 就只能测到一半。"""
+    fixture = Path(__file__).resolve().parent / "fixtures" / "contract-clip.mp4"
+    assert fixture.is_file(), "contract clip fixture missing"
+
+    with TestClient(app) as client:
+        response = client.get("/__test__/videos/anything.mp4")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "video/mp4"
+    assert len(response.content) > 0
+
+    # 用 ffprobe 校验真的能解码，而不是一段随便的字节。
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "stream=codec_name", "-of", "csv=p=0", "-"],
+        input=response.content,
+        capture_output=True,
+    )
+    assert probe.returncode == 0, probe.stderr.decode()
+    assert b"h264" in probe.stdout

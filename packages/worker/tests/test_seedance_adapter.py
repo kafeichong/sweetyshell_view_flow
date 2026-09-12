@@ -154,3 +154,42 @@ async def test_create_task_forwards_frozen_resolution():
         await adapter.client.aclose()
 
     assert json.loads(requests[0].content)["resolution"] == "test-resolution"
+
+
+@pytest.mark.asyncio
+async def test_missing_api_key_omits_the_authorization_header():
+    adapter = SeedanceAdapter(api_key="")
+
+    # 空密钥不能拼成 `Bearer `：那是非法头，httpx 会拒绝，
+    # 提交会被误报成"结果不确定"而不是"没配密钥"。
+    assert "Authorization" not in adapter._build_headers()
+    assert adapter._build_headers()["Content-Type"] == "application/json"
+    await adapter.client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_api_key_produces_a_bearer_header():
+    adapter = SeedanceAdapter(api_key="  ark-secret  ")
+
+    assert adapter._build_headers()["Authorization"] == "Bearer ark-secret"
+    await adapter.client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_create_task_works_without_an_api_key():
+    requests = []
+
+    async def handler(request):
+        requests.append(request)
+        return httpx.Response(200, json={"id": "fake-task"})
+
+    adapter = SeedanceAdapter(api_key="")
+    await adapter.client.aclose()
+    adapter.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        result = await adapter.create_task({"prompt": "contract"})
+    finally:
+        await adapter.client.aclose()
+
+    assert result["task_id"] == "fake-task"
+    assert "authorization" not in requests[0].headers
