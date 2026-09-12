@@ -14,3 +14,41 @@ services:
       retries: 30
     tmpfs:
       - /var/lib/postgresql/data
+
+  # T11：验证 Worker 与 Fake Provider 都在 Docker 里时，必须用服务名寻址。
+  # 代码用当前仓库内容覆盖镜像内副本，保证验证的是最新实现。
+  fake-provider:
+    image: video-flow-contract-worker:latest
+    build:
+      context: ../packages/worker
+      dockerfile: Dockerfile
+    working_dir: /contract
+    volumes:
+      - ./:/contract
+    environment:
+      VIDEO_FLOW_FAKE_PROVIDER_PUBLIC_URL: http://fake-provider:19091
+      # 容器内必须绑 0.0.0.0，否则同网络的其它容器连不上。
+      VIDEO_FLOW_FAKE_PROVIDER_HOST: 0.0.0.0
+    command: python fake_provider.py
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import httpx,sys; sys.exit(0 if httpx.get('http://127.0.0.1:19091/api/v3/__test__/stats', timeout=2).status_code==200 else 1)\""]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  worker-contract:
+    image: video-flow-contract-worker:latest
+    build:
+      context: ../packages/worker
+      dockerfile: Dockerfile
+    depends_on:
+      fake-provider:
+        condition: service_healthy
+    # 用镜像自带的 /app（镜像就是当前仓库构建的），不要挂到 /contract，
+    # 否则 providers 包不在 import 路径上。
+    environment:
+      VIDEO_FLOW_TEST_MODE: "1"
+      VIDEO_FLOW_PROVIDER_BASE_URL: http://fake-provider:19091/api/v3
+    command: python -c "print('idle')"
+    networks:
+      - default

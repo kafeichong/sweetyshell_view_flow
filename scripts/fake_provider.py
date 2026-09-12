@@ -139,4 +139,7 @@ app = create_app()
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="127.0.0.1", port=19091)
+    # 宿主机跑合同脚本时绑回环即可；容器里必须绑 0.0.0.0，否则另一个容器
+    # 只能解析到服务名却连不上（容器内的 127.0.0.1 只指向它自己）。
+    host = os.getenv("VIDEO_FLOW_FAKE_PROVIDER_HOST", "127.0.0.1")
+    uvicorn.run(app, host=host, port=19091)

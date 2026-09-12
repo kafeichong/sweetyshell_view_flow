@@ -49,6 +49,10 @@ jobs:
           fi
       - name: Run isolated contract and cross-package suites
         run: bash scripts/run_mvp_contract.sh
+      - name: Verify Docker service-name addressing
+        # Worker 与 Fake Provider 都在容器里时必须用服务名；只把配置写对
+        # 不代表连得通（这条曾经真的漏掉：容器内只绑了 127.0.0.1）。
+        run: bash scripts/run_docker_provider_addressing.sh
 
   worker-unit:
     name: worker / unit
