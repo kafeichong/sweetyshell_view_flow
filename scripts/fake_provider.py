@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Request, Response
 
 # Worker 从 Provider 取片子，所以返回的地址必须是 Worker 能访问到的主机：
 # 宿主脚本用 127.0.0.1，Docker 里的 Worker 必须用服务名 fake-provider。
@@ -32,6 +32,7 @@ class FakeProviderState:
     task_status: str = "succeeded"
     create_count: int = 0
     create_counts_by_key: dict[str, int] = field(default_factory=dict)
+    objects: dict[str, bytes] = field(default_factory=dict)
     tasks: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def create_task(self, payload: dict[str, Any]) -> dict[str, str]:
@@ -89,6 +90,33 @@ def create_app(state: FakeProviderState | None = None) -> FastAPI:
             "createCountsByKey": dict(provider.create_counts_by_key),
             "taskIds": list(provider.tasks),
         }
+
+    @app.put("/{key:path}")
+    async def put_object(key: str, request: Request):
+        """对象存储替身（兜底路由）：合同环境没有真实 OSS，归档链路需要能真的存取。
+
+        oss2 会丢弃 endpoint 里的路径部分，请求落在根路径上，所以这些路由必须
+        放在所有具体路由之后，只兜住没人认领的 PUT/HEAD/GET。
+        """
+        provider.objects[key] = await request.body()
+        return Response(status_code=200)
+
+    @app.head("/{key:path}")
+    async def head_object(key: str):
+        body = provider.objects.get(key)
+        if body is None:
+            raise HTTPException(status_code=404, detail="object not found")
+        return Response(
+            status_code=200,
+            headers={"Content-Length": str(len(body)), "Content-Type": "video/mp4"},
+        )
+
+    @app.get("/{key:path}")
+    async def get_object(key: str):
+        body = provider.objects.get(key)
+        if body is None:
+            raise HTTPException(status_code=404, detail="object not found")
+        return Response(content=body, media_type="video/mp4")
 
     return app
 

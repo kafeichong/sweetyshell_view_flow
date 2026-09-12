@@ -12,7 +12,14 @@ class OssUploader:
     def __init__(self):
         # 使用 settings 注入的 RAM 凭证，不在代码内硬编码任何敏感信息。
         auth = oss2.Auth(settings.oss_access_key_id, settings.oss_access_key_secret)
-        self.bucket = oss2.Bucket(auth, settings.oss_endpoint, settings.oss_bucket)
+        # is_cname=True 时请求直接打到 endpoint 上（路径里不带 bucket），
+        # 隔离合同用它对接到 Fake Provider 的对象存储替身；生产保持 False。
+        self.bucket = oss2.Bucket(
+            auth,
+            settings.oss_endpoint,
+            settings.oss_bucket,
+            is_cname=bool(getattr(settings, "oss_cname", False)),
+        )
         self.bucket_name = settings.oss_bucket
         self.region = settings.oss_region
 

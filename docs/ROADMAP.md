@@ -496,7 +496,9 @@ def test_review_task_is_actionable_without_metrics_platform():
 
 **排查结论（值得记住）：** 失败根因是**适配器在密钥为空时仍拼出 `Authorization: Bearer `**（尾部空值构成非法头），httpx 直接拒绝，于是每次提交都被误判成"结果不确定"——真实原因"没配密钥"被完全掩盖。合同环境按规约不允许配置 Provider 密钥，所以这个缺陷只在跨包链路里暴露。已修：空密钥不再发送该头（真需要鉴权的 Provider 会返回 401，那是明确拒绝），并补了三条单测。顺带补齐：Fake Provider 现在真的提供一份**本地生成、ffprobe 可解码**的短视频 fixture（`scripts/tests/fixtures/contract-clip.mp4`，2KB/64×64/H.264），供归档链路真实下载；其地址可通过 `VIDEO_FLOW_FAKE_PROVIDER_PUBLIC_URL` 切换，为 Docker 场景的 `http://fake-provider:19091` 寻址留好接口。
 
-**尚未完成：** E01–E13 中仅 E01（预览不创建 Provider 任务）与 E06 的核心不变量（同一意图只创建一次、重跑沿用原 ID）由跨包用例覆盖并通过；其余矩阵项仍由各包用例覆盖。**完整产物交付链路（下载→上传 OSS→HEAD→登记）依赖真实对象存储**，合同环境没有 OSS 替身，端到端留到 T12。宿主机/Docker 两种 Provider 寻址的显式验证也尚未做（Docker 场景的接口已备好）。
+**完整交付链路也已跨包验证（2026-09-13）：** Fake Provider 增加对象存储替身（PUT/HEAD/GET 兜底路由；oss2 会丢弃 endpoint 的路径部分，所以必须放最后兜底），Worker 侧新增 `OSS_CNAME` 开关把请求直接打到替代 endpoint（生产保持 False）。跨包用例现在断言的是**真的交付成功**：下载短视频 → 上传 → HEAD 校验 → 登记 Asset → `delivery.status=ready`，并同时断言 Provider create 恰好一次、重跑沿用原 providerTaskId。E06 的核心不变量与 E07 的"交付不假报 ready"由此有了端到端覆盖。
+
+**尚未完成：** E01–E13 中其余矩阵项仍由各包用例覆盖，未做成跨包用例；宿主机/Docker 两种 Provider 寻址的显式验证尚未做（Docker 场景所需的服务名寻址接口已备好：`VIDEO_FLOW_FAKE_PROVIDER_PUBLIC_URL`）。
 - [ ] Worker restart 用真正退出/启动测试进程验证；用读取数据库持久化 providerTaskId 作为中断触发点，不依赖固定 sleep 猜时机。
 - [ ] 安装测试覆盖新增 Python 模块与前端资源、两个模板、备份位于 custom_nodes 之外；不改同事其他自定义节点。
 - [ ] CI 分开显示单元、合同、预期外部 workflow skip；跨包合同不得使用真实 Provider 凭证，漏跑应失败而不是跳过。

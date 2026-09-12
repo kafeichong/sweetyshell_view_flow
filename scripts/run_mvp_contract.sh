@@ -178,6 +178,12 @@ else
   VIDEO_FLOW_LIVE_ASSET_ID="$LIVE_ASSET_ID" \
   VIDEO_FLOW_AUDIT_DIR="$(mktemp -d -t video-flow-live-audit.XXXXXX)" \
   COMFYUI_OUTPUT_DIR="$(mktemp -d -t video-flow-live-output.XXXXXX)" \
+OSS_ENDPOINT="http://127.0.0.1:19091/oss" \
+OSS_CNAME=1 \
+OSS_ACCESS_KEY_ID="live-contract-oss" \
+OSS_ACCESS_KEY_SECRET="live-contract-oss-secret" \
+OSS_BUCKET="live-contract-bucket" \
+OSS_REGION="oss-cn-beijing" \
   NO_PROXY="127.0.0.1,localhost" \
   no_proxy="127.0.0.1,localhost" \
   "$CONTRACT_WORKER_PYTHON" -m pytest tests/test_mvp_live_contract.py -m live_contract -p no:cacheprovider || {

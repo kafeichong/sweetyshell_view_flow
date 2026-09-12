@@ -177,12 +177,11 @@ class LiveMVPContractTests(unittest.TestCase):
         self.assertIsNotNone(payload["execution"]["providerTaskId"])
         self.assertEqual(payload["execution"]["providerTaskId"], self._first_provider_task_id)
 
-        # 产物交付本身依赖真实对象存储；合同环境按规约不允许使用真实凭证，
-        # 也没有可用的 OSS 替身，所以这里只断言任务走到了确定的终态，
-        # 且**没有**因为重跑而多创建一次 Provider 任务。
-        # 完整的下载→上传→HEAD→登记链路由 Worker 的 artifact_delivery 单测与
-        # Backend 的 artifact-delivery 合同用例覆盖，端到端留到 T12 真实环境验收。
-        self.assertIn(payload["delivery"]["status"], {"ready", "failed"})
+        # 合同环境用 Fake Provider 的对象存储替身跑完整归档链路：
+        # 下载短视频 → 上传 → HEAD 校验 → 登记 Asset → 确认交付就绪。
+        # 这里断言的是"真的交付成功"，而不只是"没报错"。
+        self.assertEqual(payload["delivery"]["status"], "ready")
+        self.assertIsNotNone(payload["delivery"]["assetId"])
         self.assertEqual(payload["execution"]["status"], "completed")
 
 

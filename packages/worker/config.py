@@ -68,6 +68,9 @@ class Settings(BaseSettings):
     oss_access_key_id: str = ""
     oss_access_key_secret: str = ""
     oss_endpoint: str = "https://oss-cn-beijing.aliyuncs.com"
+    # 合同测试用：把 endpoint 当作服务地址而不是 <bucket>.<endpoint>。
+    # 只有在隔离环境里才允许开启，生产必须保持 False。
+    oss_cname: bool = False
 
     # Polling
     # 轮询间隔与超时阈值，决定系统吞吐和重跑策略的速度。
