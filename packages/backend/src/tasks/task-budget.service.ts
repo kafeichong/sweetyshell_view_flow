@@ -3,15 +3,20 @@ import { PrismaService } from '../prisma.service';
 import { Prisma } from '@prisma/client';
 
 export interface ExecutionPlan {
-  version: string;
+  specVersion?: string;
+  version?: string;
   model: string;
   duration: number;
   ratio: string;
   resolution: string;
-  generate_audio: boolean;
+  generateAudio?: boolean;
+  generate_audio?: boolean;
   watermark: boolean;
   pricingVersion: string;
   reserveCny: string;
+  prompt?: string;
+  imageAssetId?: string;
+  inputFileHash?: string | null;
 }
 
 export interface ProductionTaskData {
@@ -34,6 +39,11 @@ export function fitsBudget(limit: string, used: string, reserve: string): boolea
   return new Prisma.Decimal(used).add(reserve).lte(new Prisma.Decimal(limit));
 }
 
+function readPositiveIntEnv(name: string, fallback: number): number {
+  const raw = Number(process.env[name]);
+  return Number.isInteger(raw) && raw > 0 ? raw : fallback;
+}
+
 @Injectable()
 export class TaskBudgetService {
   private readonly logger = new Logger(TaskBudgetService.name);
@@ -43,7 +53,10 @@ export class TaskBudgetService {
   async createTaskWithReservation(data: ProductionTaskData) {
     return this.prisma.$transaction(async (tx) => {
       if (typeof (tx as any).$executeRaw === 'function') {
-        await (tx as any).$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${data.actorId}, 0))`;
+        // 固定顺序：先拿全局准入锁（用于全局 pending 数校验），再拿 actor 锁；
+        // 两把锁使用不同的 classid（0 / 1）命名空间，不会与彼此的 key 冲突。
+        await (tx as any).$executeRaw`SELECT pg_advisory_xact_lock(0, 0)`;
+        await (tx as any).$executeRaw`SELECT pg_advisory_xact_lock(1, hashtext(${data.actorId}))`;
       }
       const gate = await tx.productionGate.findUnique({ where: { id: 'production' } });
       if (gate?.paused !== false) {
@@ -61,13 +74,20 @@ export class TaskBudgetService {
           actorId: data.actorId,
           clientRequestId: data.clientRequestId,
           executionPlan: data.executionPlan as unknown as Prisma.InputJsonValue,
-          deliveryStatus: 'pending',
+          deliveryStatus: 'not_started',
         },
       });
 
       await this.reserveInTransaction(tx, task.id, data.actorId, data.executionPlan);
       return task;
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    });
+    // 注意：不要用 Serializable 隔离级别。advisory lock 已经串行化了整个
+    // 检查+写入的关键区；Serializable 事务的 snapshot 在第一条语句（拿锁）
+    // 时就已经固定，锁释放后 unblock 时不会刷新，会导致后拿到锁的事务用
+    // 旧 snapshot 做预算检查（看不到刚提交的预占），到 commit 时才因
+    // serialization_failure 报错——而这个错误不在 reasonMap 里，会被
+    // controller 当成未知错误抛成 500，而不是预期的 429。默认的
+    // ReadCommitted 每条语句都会取新 snapshot，解锁后能看到最新数据。
   }
 
   async reserveInTransaction(
@@ -246,6 +266,20 @@ export class TaskBudgetService {
 
     if (!fitsBudget(monthlyLimit, monthlyUsed, reserveCny)) {
       return { canProceed: false, reason: 'MONTHLY_LIMIT_EXCEEDED' };
+    }
+
+    const dailyTaskLimit = readPositiveIntEnv('VIDEO_FLOW_DAILY_TASK_LIMIT', 10);
+    const dailyTaskCount = await tx.taskBudgetReservation.count({
+      where: { actorId, dayKey, state: { not: 'released' } },
+    });
+    if (dailyTaskCount >= dailyTaskLimit) {
+      return { canProceed: false, reason: 'DAILY_TASK_COUNT_EXCEEDED' };
+    }
+
+    const maxPendingTasks = readPositiveIntEnv('VIDEO_FLOW_MAX_PENDING_TASKS', 5);
+    const globalPendingCount = await tx.task.count({ where: { status: 'pending' } });
+    if (globalPendingCount >= maxPendingTasks) {
+      return { canProceed: false, reason: 'GLOBAL_PENDING_LIMIT_EXCEEDED' };
     }
 
     return { canProceed: true };

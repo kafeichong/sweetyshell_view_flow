@@ -178,7 +178,7 @@ describe('V1TasksController idempotency', () => {
     assets.findOwnedUploadedInput.mockResolvedValue(null);
 
     await expect(
-      new V1TasksController(tasks as never, assets as never).create(
+      new V1TasksController(tasks as never, budget as never, assets as never).create(
         { actorId: 'actor-allowed' },
         'request-owned-input',
         {
@@ -204,7 +204,7 @@ describe('V1TasksController idempotency', () => {
     tasks.findByActorRequest.mockResolvedValue(null);
 
     await expect(
-      new V1TasksController(tasks as never, assets as never).create(
+      new V1TasksController(tasks as never, budget as never, assets as never).create(
         { actorId: 'actor-allowed' },
         'request-no-spec',
         {

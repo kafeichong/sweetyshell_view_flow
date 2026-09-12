@@ -134,8 +134,10 @@ export class V1TasksController {
     try {
       if (!previewPlan) {
         // Production：创建可被 Worker 领取的真实任务（status='pending'）。
-        // T02: 预算检查和预占
-        const estimatedCny = '60.000000'; // MVP: 固定预估值，后续增强
+        // T02: 预算检查和预占；金额以 executionPlan.reserveCny（来自已批准的
+        // production spec）为唯一依据，不能与预算检查使用不同的金额，否则
+        // 预占记录的金额会与实际准入判断脱节。
+        const estimatedCny = executionPlan!.reserveCny;
 
         try {
           if (!this.budget) {
@@ -167,6 +169,8 @@ export class V1TasksController {
             NO_LIMITS_CONFIGURED: 'Budget limits not configured',
             DAILY_LIMIT_EXCEEDED: 'Daily budget limit exceeded',
             MONTHLY_LIMIT_EXCEEDED: 'Monthly budget limit exceeded',
+            DAILY_TASK_COUNT_EXCEEDED: 'Daily task count limit exceeded',
+            GLOBAL_PENDING_LIMIT_EXCEEDED: 'Global pending task limit exceeded',
             PRODUCTION_PAUSED: 'Production is paused',
           };
           if (reasonMap[reason]) {

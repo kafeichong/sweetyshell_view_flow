@@ -42,6 +42,7 @@ export type ContractHarness = {
 
 export type ContractHarnessOptions = {
   productionSpec?: Record<string, unknown>;
+  env?: Record<string, string>;
 };
 
 async function reserveLoopbackPort(): Promise<number> {
@@ -119,6 +120,7 @@ export async function createContractHarness(
     cwd: process.cwd(),
     env: {
       ...process.env,
+      ...options.env,
       PORT: String(port),
       VIDEO_FLOW_ADMIN_TOKEN: adminToken,
       VIDEO_FLOW_WORKER_TOKEN: workerToken,

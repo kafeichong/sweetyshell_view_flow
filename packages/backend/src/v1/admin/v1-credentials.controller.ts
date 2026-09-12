@@ -63,6 +63,12 @@ export class V1CredentialsController {
     return this.prisma.actorCredential.update({
       where: { actorId },
       data: updateData,
+      select: {
+        actorId: true,
+        dailyLimitCny: true,
+        monthlyLimitCny: true,
+        updatedAt: true,
+      },
     });
   }
 }

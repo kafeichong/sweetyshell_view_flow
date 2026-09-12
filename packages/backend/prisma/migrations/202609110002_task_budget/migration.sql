@@ -32,8 +32,3 @@ CREATE TABLE "production_gates" (
 -- Insert default production gate (paused)
 INSERT INTO "production_gates" ("id", "paused", "reason")
 VALUES ('production', true, 'Initial state - awaiting first deployment verification');
-
--- Add new fields to Task table for T02
-ALTER TABLE "tasks"
-ADD COLUMN "execution_plan" JSONB,
-ADD COLUMN "delivery_status" TEXT;

@@ -45,6 +45,18 @@ describe('production input contract', () => {
   test('freezes approved parameters for an owned uploaded input', async () => {
     const harness = await createContractHarness({ productionSpec: testSpec });
     try {
+      await harness.prisma.productionGate.upsert({
+        where: { id: 'production' },
+        create: { id: 'production', paused: false },
+        update: { paused: false },
+      });
+      await harness.prisma.actorCredential.update({
+        where: { actorId: harness.actorId },
+        data: {
+          dailyLimitCny: '1000.000000',
+          monthlyLimitCny: '10000.000000',
+        },
+      });
       const input = await harness.prisma.asset.create({
         data: {
           ownerId: harness.actorId,

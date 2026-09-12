@@ -195,13 +195,15 @@ test('rejects duration outside the fixed spec', () => {
 **接口：** Task 一对一 `TaskBudgetReservation`，含 taskId（唯一 FK）、actorId、reservedCny、settledCny?、state（reserved/settled/review/released）、dayKey、monthKey、pricingVersion、createdAt/updatedAt。金额 Decimal(18,6)，按 actor+dayKey/monthKey 建索引。
 `TaskBudgetService.reserveInTransaction(tx, taskId, actorId, executionPlan)` 仅在创建事务调用；`settleInTransaction(tx, taskId, amountCny)` / `holdForReviewInTransaction(tx, taskId)` / `releaseInTransaction(tx, taskId, reason)` 由 T05 的费用合同驱动。
 
-- [ ] 定义统一预算时区 Asia/Shanghai；占用 = 当前周期已结算金额 + 全部尚未结算预占（含跨周期在途/review）。未知金额不能因跨日/月恢复为可花额度。
-- [ ] 准入事务按固定顺序取得全局准入锁、actor 锁，再检查 active credential、白名单、日/月金额、日次数、全局 pending 数；Task 与预占一并提交。PostgreSQL 参数化事务 advisory lock，不在 SQL 拼接 actorId。
-- [ ] 并发相同 key 只预占一次；同 key 重放不得先因新额度不足而拒绝已有任务。新 key 的并发预算检查必须串行化，不用“先查再单独插入”。
-- [ ] TasksModule 注册/导出 TaskBudgetService，使用方显式导入；避免复制创建不共享状态的服务实例。
-- [ ] 增加 Admin Guard 保护的 `PATCH /api/v1/admin/credentials/:actorId/limits`，只更新日/月限额；配置非负、有限数值，空值代表不开生产，不输出 token。次数/队列上限从 `VIDEO_FLOW_DAILY_TASK_LIMIT`、`VIDEO_FLOW_MAX_PENDING_TASKS` 读取。
-- [ ] 预算权威计算将限额转为 Decimal 比较；新增结算值不用二进制浮点累计。migration 同时创建 T10 定义的 ProductionGate 单例，默认 paused=true；测试 fixture 显式启用，生产启用留到 T12。旧浮点费用只兼容展示，不参与剩余额度。
-- [ ] 测试同 key 并发、不同 key 抢最后一份额度、事务失败无残留占用、空限额拒绝、跨月预占、重复结算不重复扣减；migration 回滚以关闭 Production + 保留新增表为先，不删除资金记录。
+- [x] 定义统一预算时区 Asia/Shanghai；占用 = 当前周期已结算金额 + 全部尚未结算预占（含跨周期在途/review）。未知金额不能因跨日/月恢复为可花额度。
+- [x] 准入事务按固定顺序取得全局准入锁、actor 锁，再检查 active credential、白名单、日/月金额、日次数、全局 pending 数；Task 与预占一并提交。PostgreSQL 参数化事务 advisory lock，不在 SQL 拼接 actorId。
+- [x] 并发相同 key 只预占一次；同 key 重放不得先因新额度不足而拒绝已有任务。新 key 的并发预算检查必须串行化，不用“先查再单独插入”。
+- [x] TasksModule 注册/导出 TaskBudgetService，使用方显式导入；避免复制创建不共享状态的服务实例。
+- [x] 增加 Admin Guard 保护的 `PATCH /api/v1/admin/credentials/:actorId/limits`，只更新日/月限额；配置非负、有限数值，空值代表不开生产，不输出 token。次数/队列上限从 `VIDEO_FLOW_DAILY_TASK_LIMIT`、`VIDEO_FLOW_MAX_PENDING_TASKS` 读取。
+- [x] 预算权威计算将限额转为 Decimal 比较；新增结算值不用二进制浮点累计。migration 同时创建 T10 定义的 ProductionGate 单例，默认 paused=true；测试 fixture 显式启用，生产启用留到 T12。旧浮点费用只兼容展示，不参与剩余额度。
+- [x] 测试同 key 并发、不同 key 抢最后一份额度、事务失败无残留占用、空限额拒绝、跨月预占、重复结算不重复扣减；migration 回滚以关闭 Production + 保留新增表为先，不删除资金记录。
+
+**完成状态（2026-09-12）：** 以上检查项均已实现并通过 `npx jest task-budget --runInBand`（22 个用例）与 `npm run test:contract -- budget --runInBand`（含并发抢额度、每日任务数上限、Asia/Shanghai 时区键、跨月预占计入准入等场景）验证。修复了一个真实并发缺陷：准入事务此前使用 Serializable 隔离级别，与 advisory lock 组合会导致后置事务用旧快照做预算检查，在 COMMIT 时抛出未捕获的 `serialization_failure` 而返回 500（应为 429）；现已改为默认 ReadCommitted，由 advisory lock 单独负责串行化。同时修复了 `PATCH .../limits` 返回体泄漏 `tokenHash` 字段的问题（改为显式 `select` 白名单字段）。
 
 精确预算函数（在 service 文件导出，测试传字符串）：
 

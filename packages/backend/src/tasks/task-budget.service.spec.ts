@@ -252,7 +252,9 @@ describe('TaskBudgetService', () => {
           aggregate: jest.fn().mockResolvedValue({
             _sum: { settledCny: null },
           }),
+          count: jest.fn().mockResolvedValue(0),
         },
+        task: { count: jest.fn().mockResolvedValue(0) },
       } as any;
 
       const result = await service.checkBudgetAvailability(
@@ -330,9 +332,168 @@ describe('TaskBudgetService', () => {
         reason: 'MONTHLY_LIMIT_EXCEEDED',
       });
     });
+
+    it('should count an unsettled reservation from a prior month against current admission', async () => {
+      // 占用 = 当前周期已结算 + 全部尚未结算预占（含跨周期在途/review），
+      // 所以上个月的 reserved 记录必须仍然计入本次准入检查，不能因为跨月而"清零"。
+      const mockTx = {
+        actorCredential: {
+          findUnique: jest.fn().mockResolvedValue({
+            actorId: 'actor-1',
+            status: 'active',
+            dailyLimitCny: new Prisma.Decimal('10.000000'),
+            monthlyLimitCny: new Prisma.Decimal('1000.000000'),
+          }),
+        },
+        taskBudgetReservation: {
+          findMany: jest.fn().mockResolvedValue([
+            { reservedCny: new Prisma.Decimal('8.000000'), dayKey: '2026-08-15', monthKey: '2026-08' },
+          ]),
+          aggregate: jest.fn().mockResolvedValue({
+            _sum: { settledCny: null },
+          }),
+        },
+      } as any;
+
+      const result = await service.checkBudgetAvailability(
+        mockTx,
+        'actor-1',
+        '5.000000',
+      );
+
+      expect(result).toEqual({
+        canProceed: false,
+        reason: 'DAILY_LIMIT_EXCEEDED',
+      });
+    });
+
+    it('should reject when daily task count limit exceeded', async () => {
+      const previousEnv = process.env.VIDEO_FLOW_DAILY_TASK_LIMIT;
+      process.env.VIDEO_FLOW_DAILY_TASK_LIMIT = '2';
+      try {
+        const mockTx = {
+          actorCredential: {
+            findUnique: jest.fn().mockResolvedValue({
+              actorId: 'actor-1',
+              status: 'active',
+              dailyLimitCny: new Prisma.Decimal('100.000000'),
+              monthlyLimitCny: new Prisma.Decimal('1000.000000'),
+            }),
+          },
+          taskBudgetReservation: {
+            findMany: jest.fn().mockResolvedValue([]),
+            aggregate: jest.fn().mockResolvedValue({ _sum: { settledCny: null } }),
+            count: jest.fn().mockResolvedValue(2),
+          },
+        } as any;
+
+        const result = await service.checkBudgetAvailability(
+          mockTx,
+          'actor-1',
+          '5.000000',
+        );
+
+        expect(result).toEqual({
+          canProceed: false,
+          reason: 'DAILY_TASK_COUNT_EXCEEDED',
+        });
+      } finally {
+        process.env.VIDEO_FLOW_DAILY_TASK_LIMIT = previousEnv;
+      }
+    });
+
+    it('should reject when global pending task limit exceeded', async () => {
+      const previousEnv = process.env.VIDEO_FLOW_MAX_PENDING_TASKS;
+      process.env.VIDEO_FLOW_MAX_PENDING_TASKS = '3';
+      try {
+        const mockTx = {
+          actorCredential: {
+            findUnique: jest.fn().mockResolvedValue({
+              actorId: 'actor-1',
+              status: 'active',
+              dailyLimitCny: new Prisma.Decimal('100.000000'),
+              monthlyLimitCny: new Prisma.Decimal('1000.000000'),
+            }),
+          },
+          taskBudgetReservation: {
+            findMany: jest.fn().mockResolvedValue([]),
+            aggregate: jest.fn().mockResolvedValue({ _sum: { settledCny: null } }),
+            count: jest.fn().mockResolvedValue(0),
+          },
+          task: { count: jest.fn().mockResolvedValue(3) },
+        } as any;
+
+        const result = await service.checkBudgetAvailability(
+          mockTx,
+          'actor-1',
+          '5.000000',
+        );
+
+        expect(result).toEqual({
+          canProceed: false,
+          reason: 'GLOBAL_PENDING_LIMIT_EXCEEDED',
+        });
+      } finally {
+        process.env.VIDEO_FLOW_MAX_PENDING_TASKS = previousEnv;
+      }
+    });
   });
 
   describe('createTaskWithReservation', () => {
+    it('acquires the global lock before the actor lock', async () => {
+      const executedSql: string[] = [];
+      const tx = {
+        $executeRaw: jest.fn((strings: TemplateStringsArray, ...values: unknown[]) => {
+          executedSql.push(strings.join('?'));
+          return Promise.resolve();
+        }),
+        actorCredential: {
+          findUnique: jest.fn().mockResolvedValue({
+            actorId: 'actor-1',
+            status: 'active',
+            dailyLimitCny: new Prisma.Decimal('100.000000'),
+            monthlyLimitCny: new Prisma.Decimal('1000.000000'),
+          }),
+        },
+        taskBudgetReservation: {
+          findMany: jest.fn().mockResolvedValue([]),
+          aggregate: jest.fn().mockResolvedValue({ _sum: { settledCny: null } }),
+          create: jest.fn().mockResolvedValue({}),
+          count: jest.fn().mockResolvedValue(0),
+        },
+        task: {
+          create: jest.fn().mockResolvedValue({ id: 'task-1', status: 'pending' }),
+          count: jest.fn().mockResolvedValue(0),
+        },
+        productionGate: {
+          findUnique: jest.fn().mockResolvedValue({ paused: false }),
+        },
+      };
+      (prisma.$transaction as jest.Mock).mockImplementation(async (callback: any) => callback(tx));
+
+      await service.createTaskWithReservation({
+        actorId: 'actor-1',
+        clientRequestId: 'request-1',
+        estimatedCny: '5.000000',
+        executionPlan: {
+          version: 'test-v1',
+          model: 'test-model',
+          duration: 5,
+          ratio: '16:9',
+          resolution: '720p',
+          generate_audio: false,
+          watermark: true,
+          pricingVersion: 'test-price',
+          reserveCny: '5.000000',
+        },
+        task: { createdBy: 'actor-1', prompt: 'hello', status: 'pending' },
+      });
+
+      expect(executedSql).toHaveLength(2);
+      expect(executedSql[0]).toContain('pg_advisory_xact_lock(0, 0)');
+      expect(executedSql[1]).toContain('pg_advisory_xact_lock(1, hashtext(');
+    });
+
     it('creates the task and reservation in one transaction', async () => {
       const tx = {
         actorCredential: {
@@ -347,9 +508,11 @@ describe('TaskBudgetService', () => {
           findMany: jest.fn().mockResolvedValue([]),
           aggregate: jest.fn().mockResolvedValue({ _sum: { settledCny: null } }),
           create: jest.fn().mockResolvedValue({}),
+          count: jest.fn().mockResolvedValue(0),
         },
         task: {
           create: jest.fn().mockResolvedValue({ id: 'task-1', status: 'pending' }),
+          count: jest.fn().mockResolvedValue(0),
         },
         productionGate: {
           findUnique: jest.fn().mockResolvedValue({ paused: false }),
