@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import os
+import subprocess
 import sys
 import time
 import unittest
@@ -183,6 +184,146 @@ class LiveMVPContractTests(unittest.TestCase):
         self.assertEqual(payload["delivery"]["status"], "ready")
         self.assertIsNotNone(payload["delivery"]["assetId"])
         self.assertEqual(payload["execution"]["status"], "completed")
+
+
+
+
+class WorkerRestartRecoveryTests(unittest.TestCase):
+    """E06：Provider ID 落库后 Worker 真的退出并重启，create 总数仍为 1。
+
+    中断点是**读数据库/接口里已持久化的 providerTaskId**，不是 sleep 猜时机：
+    先让 Fake Provider 停在 running，等 providerTaskId 落库后再 SIGKILL，
+    这样"提交已成功、任务未结束"这个窗口是确定的。
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.base_url = required_env("VIDEO_FLOW_LIVE_BASE_URL")
+        cls.provider_url = required_env("VIDEO_FLOW_LIVE_PROVIDER_URL")
+        cls.actor_token = required_env("VIDEO_FLOW_LIVE_ACTOR_TOKEN")
+        cls.asset_id = required_env("VIDEO_FLOW_LIVE_ASSET_ID")
+        cls.worker_token = required_env("VIDEO_FLOW_WORKER_TOKEN")
+        cls.worker_dir = Path(__file__).resolve().parents[1]
+
+    def _api(self):
+        return httpx.Client(base_url=self.base_url, timeout=30.0)
+
+    def _spawn_worker(self):
+        """真正启动一个独立的 Worker 进程（不是同进程里的对象）。"""
+        env = {
+            **os.environ,
+            "BACKEND_URL": self.base_url,
+            "WORKER_SERVICE_TOKEN": self.worker_token,
+            "VIDEO_FLOW_PROVIDER_BASE_URL": f"{self.provider_url}/api/v3",
+            "COMFYUI_OUTPUT_DIR": os.environ.get("COMFYUI_OUTPUT_DIR", ""),
+            "NO_PROXY": "127.0.0.1,localhost",
+            "no_proxy": "127.0.0.1,localhost",
+        }
+        return subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                "import asyncio, executor; asyncio.run(executor.JobExecutor().poll_loop())",
+            ],
+            cwd=str(self.worker_dir),
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+    def _wait_until(self, predicate, *, timeout=60.0, description=""):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            value = predicate()
+            if value:
+                return value
+            time.sleep(0.2)
+        raise AssertionError(f"timed out waiting for {description}")
+
+    def test_restart_after_provider_id_is_persisted_delivers_without_a_second_create(self):
+        prompt = "live restart e06"
+        with self._api() as client:
+            created = client.post(
+                "/api/v1/tasks",
+                headers={
+                    "Authorization": f"Bearer {self.actor_token}",
+                    "Idempotency-Key": f"live-{prompt}",
+                },
+                json={
+                    "mode": "production",
+                    "capability": "IMAGE_TO_VIDEO",
+                    "profile": "seedance",
+                    "params": {
+                        "prompt": prompt,
+                        "image_asset_id": self.asset_id,
+                        "duration": 5,
+                        "ratio": "16:9",
+                    },
+                },
+            )
+        created.raise_for_status()
+        task_id = created.json()["id"]
+
+        before = provider_stats(self.provider_url)["createCountsByKey"].get(prompt, 0)
+
+        # 让 Provider 停在 running：Worker 提交后会一直轮询，我们才有确定的
+        # 中断窗口（而不是靠固定 sleep 去赌它还没跑完）。
+        httpx.get(f"{self.provider_url}/__test__/task-status", params={"value": "running"})
+
+        first_worker = self._spawn_worker()
+        try:
+            def provider_id_persisted():
+                with self._api() as client:
+                    response = client.get(
+                        f"/api/v1/tasks/{task_id}",
+                        headers={"Authorization": f"Bearer {self.actor_token}"},
+                    )
+                return (response.json().get("execution") or {}).get("providerTaskId")
+
+            persisted_id = self._wait_until(
+                provider_id_persisted,
+                description="providerTaskId 落库（这就是中断触发点）",
+            )
+
+            # 真·异常退出：SIGKILL，不给它优雅收尾的机会。
+            first_worker.kill()
+            first_worker.wait(timeout=10)
+        finally:
+            if first_worker.poll() is None:
+                first_worker.kill()
+
+        # Provider 侧任务完成；新进程必须凭已落库的 ID 恢复，而不是重新 create。
+        httpx.get(f"{self.provider_url}/__test__/task-status", params={"value": "succeeded"})
+
+        second_worker = self._spawn_worker()
+        try:
+            def delivered():
+                with self._api() as client:
+                    response = client.get(
+                        f"/api/v1/tasks/{task_id}",
+                        headers={"Authorization": f"Bearer {self.actor_token}"},
+                    )
+                payload = response.json()
+                return (payload.get("delivery") or {}).get("status") == "ready"
+
+            self._wait_until(delivered, description="重启后的 Worker 交付就绪", timeout=90.0)
+        finally:
+            second_worker.kill()
+            second_worker.wait(timeout=10)
+
+        after = provider_stats(self.provider_url)["createCountsByKey"].get(prompt, 0)
+        self.assertEqual(after, before + 1, "重启后重复创建了 Provider 任务")
+
+        with self._api() as client:
+            summary = client.get(
+                f"/api/v1/tasks/{task_id}",
+                headers={"Authorization": f"Bearer {self.actor_token}"},
+            )
+        summary.raise_for_status()
+        payload = summary.json()
+        # 同一个 Provider 任务：恢复是"接着查"，不是"重新提交"。
+        self.assertEqual(payload["execution"]["providerTaskId"], persisted_id)
+        self.assertEqual(payload["delivery"]["status"], "ready")
 
 
 if __name__ == "__main__":

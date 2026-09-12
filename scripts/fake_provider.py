@@ -91,6 +91,18 @@ def create_app(state: FakeProviderState | None = None) -> FastAPI:
             "taskIds": list(provider.tasks),
         }
 
+    @app.get("/__test__/task-status")
+    async def set_task_status(value: str = "succeeded"):
+        """把已创建任务的状态切到 running/succeeded，供"重启恢复"用例制造中断点。
+
+        只有在任务处于 running 时，Worker 才会停在轮询里，我们才有机会在
+        "Provider ID 已落库、任务尚未结束"这个精确时刻真正杀掉进程。
+        """
+        provider.task_status = value
+        for task in provider.tasks.values():
+            task["status"] = value
+        return {"taskStatus": provider.task_status}
+
     @app.put("/{key:path}")
     async def put_object(key: str, request: Request):
         """对象存储替身（兜底路由）：合同环境没有真实 OSS，归档链路需要能真的存取。

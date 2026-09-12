@@ -498,14 +498,16 @@ def test_review_task_is_actionable_without_metrics_platform():
 
 **完整交付链路也已跨包验证（2026-09-13）：** Fake Provider 增加对象存储替身（PUT/HEAD/GET 兜底路由；oss2 会丢弃 endpoint 的路径部分，所以必须放最后兜底），Worker 侧新增 `OSS_CNAME` 开关把请求直接打到替代 endpoint（生产保持 False）。跨包用例现在断言的是**真的交付成功**：下载短视频 → 上传 → HEAD 校验 → 登记 Asset → `delivery.status=ready`，并同时断言 Provider create 恰好一次、重跑沿用原 providerTaskId。E06 的核心不变量与 E07 的"交付不假报 ready"由此有了端到端覆盖。
 
+**Worker 重启恢复已真实验证（2026-09-13）：** 新增跨包用例用**真正退出/启动的独立 Worker 进程**验证 E06：先让 Fake Provider 停在 `running`，轮询接口等到 `providerTaskId` 落库（这就是确定的中断触发点，不靠 sleep 猜时机），随即 `SIGKILL` 第一个进程；再把 Provider 切到 `succeeded` 并启动第二个进程——它凭已落库的 ID 恢复轮询并交付就绪，Provider create 总数仍为 1、`providerTaskId` 未变。为此给 Fake Provider 加了 `GET /__test__/task-status` 开关。
+
 **尚未完成：** E01–E13 中其余矩阵项仍由各包用例覆盖，未做成跨包用例；宿主机/Docker 两种 Provider 寻址的显式验证尚未做（Docker 场景所需的服务名寻址接口已备好：`VIDEO_FLOW_FAKE_PROVIDER_PUBLIC_URL`）。
-- [ ] Worker restart 用真正退出/启动测试进程验证；用读取数据库持久化 providerTaskId 作为中断触发点，不依赖固定 sleep 猜时机。
+- [x] Worker restart 用真正退出/启动测试进程验证；用读取数据库持久化 providerTaskId 作为中断触发点，不依赖固定 sleep 猜时机。
 - [x] 安装测试覆盖新增 Python 模块与前端资源、两个模板、备份位于 custom_nodes 之外；不改同事其他自定义节点。
 - [x] CI 分开显示单元、合同、预期外部 workflow skip；跨包合同不得使用真实 Provider 凭证，漏跑应失败而不是跳过。
 - [ ] Worker 与 Fake Provider 都运行在 Docker 时，显式验证 `http://fake-provider:19091/api/v3` 的服务名寻址；仅宿主机合同脚本使用 `http://127.0.0.1:19091/api/v3`。
 
 **说明：** CI 已按层拆成 5 个 job（backend-unit / backend-contract / worker-unit / scripts-unit / comfyui-client），合同层单独成 job 并包含跨包用例；worker 与客户端 job 使用 `-rs` 列出每条 skip 的原因，当前唯一一类"预期外部 skip"是 `test_workflow_contracts.py` 的 3 条——缺"已复核的 ComfyUI 工作流导出"（等真实 ComfyUI 导出补齐后自动转成实跑，属 T08/T12 遗留）。合同脚本与 CI 都加了硬闸门：`VOLCENGINE_ACCESS_KEY` 非空直接失败，跨包用例未收集到 2 条也直接失败。安装测试新增断言：同事其他自定义节点不被触碰。
-- [ ] 两份手册写明正常使用、generation_version 的付费含义、超时恢复、费用未知、报障 taskId、管理员查询/恢复/暂停、迁移备份回滚。
+- [x] 两份手册写明正常使用、generation_version 的付费含义、超时恢复、费用未知、报障 taskId、管理员查询/恢复/暂停、迁移备份回滚。
 - [ ] 三包测试、构建、隔离合同和实际 ComfyUI 假服务工作流都通过后才交给 T12；此时只写“待真实验收”。
 
 | 编号 | 注入条件 | 必须断言 |
