@@ -389,14 +389,18 @@ def test_explicit_version_distinguishes_new_generation():
 **新增：** Client `examples/seedance-production.json`、`examples/seedance-resume.json`、`web/js/video_flow_status.js`；只提供最小状态/文件路径展示，不建设完整前端。
 **接口：** `VideoFlowClient.wait_for_task(task_id, *, timeout_seconds=1200, poll_seconds=5) -> dict`。成功条件是 delivery.status=ready；终态错误抛含 taskId/code 的异常；超时抛 `TaskWaitTimeout(task_id)`。Wait 输出 taskId，LoadResult 接收该输出，不把 task_json 当作 taskId。
 
-- [ ] Wait 以 monotonic 时钟控制总时限，查询失败有限退避；401/403 停止并提示凭证，429/5xx/网络错误只重查、不重建；超时仍保留回执。
-- [ ] requires_review、Provider failed、delivery failed 都给不同提示和 taskId；费用未知但输出 ready 时允许下载并显示“费用待核实”。
-- [ ] Wait/LoadResult 的 ComfyUI 缓存策略允许用户重新查询；Production 即使再次被调度也只能沿用 T07 原意图。测试运行时缓存，不能只直接调用 Python 方法。
-- [ ] 通过 `folder_paths.get_output_directory()` 获取实际 output；测试替换运行时模块，不再 monkeypatch 整个 default_output_dir 掩盖目录逻辑。
-- [ ] 下载前取新签名 URL，写随机临时 .part；验证实际字节数非零、与声明 size（若有）一致再原子发布，保留已成功的原文件。失败清理的仅是本次临时文件。
+- [x] Wait 以 monotonic 时钟控制总时限，查询失败有限退避；401/403 停止并提示凭证，429/5xx/网络错误只重查、不重建；超时仍保留回执。
+- [x] requires_review、Provider failed、delivery failed 都给不同提示和 taskId；费用未知但输出 ready 时允许下载并显示“费用待核实”。
+- [x] Wait/LoadResult 的 ComfyUI 缓存策略允许用户重新查询；Production 即使再次被调度也只能沿用 T07 原意图。测试运行时缓存，不能只直接调用 Python 方法。
+- [x] 通过 `folder_paths.get_output_directory()` 获取实际 output；测试替换运行时模块，不再 monkeypatch 整个 default_output_dir 掩盖目录逻辑。
+- [x] 下载前取新签名 URL，写随机临时 .part；验证实际字节数非零、与声明 size（若有）一致再原子发布，保留已成功的原文件。失败清理的仅是本次临时文件。
 - [ ] 节点 UI 显示 taskId、阶段、最终路径；简单展示扩展经实际 ComfyUI 验证。结果回执补大小/hash，不包含下载签名 URL。
 - [ ] 用真实 ComfyUI 导出两份模板：完整图 `Config → Production → Wait → LoadResult`，恢复图 `Config + taskId → Wait → LoadResult`。两者地址为公司 HTTPS，凭证仅从本地配置读取。
 - [ ] 在自定义 output 路径及重启后的主实例测试导入/执行/重新取片；先接 T00 假服务，真实 Provider 留到 T12。
+
+**完成状态（2026-09-13，代码部分）：** 具备代码的检查项均已实现。`client.wait_for_task(task_id, *, timeout_seconds=1200, poll_seconds=5)` 用 `time.monotonic()` 控总时限；429/5xx/网络错误按指数退避（上限 60s）只重查同一任务、绝不重建；401/403 立即抛 `TaskCredentialsRejected` 提示检查 `VIDEO_FLOW_TOKEN`；404 抛 `TaskNotFound` 且不重试。成功条件严格是 `delivery.status == ready`——Provider succeeded 但归档失败时抛 `TaskDeliveryFailed`（带 `errorCode`），不把生成成功当成可交付。终态错误按类型分开：`REQUIRES_REVIEW`/`PROVIDER_FAILED`/`DELIVERY_FAILED`/`WAIT_TIMEOUT`/`TASK_NOT_FOUND`/`CREDENTIALS_REJECTED`，全部带 `task_id` 与 `code`。费用未知（`costSummary.status` 非 usage_calculated/billed）不阻塞下载，`cost_note()` 明确显示“费用待核实”。节点侧：`Wait` 阻塞到就绪并**只输出 taskId**（不再是 task_json），`LoadResult` 接收该 taskId，输出本地路径与 `cost_status`；三个节点都有 `IS_CHANGED`（进程内单调 nonce，纯 `time.time_ns()` 会在同一时钟刻度上相等而让缓存失效）允许重新查询，Production 再次被调度仍只沿用回执原意图。产物目录改由 `folder_paths.get_output_directory()` 决定（自定义输出路径的安装不会写错地方），测试改为替换 `folder_paths` 运行时模块。下载改写随机 `.part`，校验非零且与声明 `sizeBytes` 一致后原子发布，失败只清理本次临时文件并保留上一份成功文件；返回回执含 `sizeBytes`/`sha256`/`objectKey`，**不含**会过期的下载签名 URL。新增 `examples/seedance-production.json`、`examples/seedance-resume.json`（API 格式，含结构测试）与 `web/js/video_flow_status.js`（最小状态展示，带 `try/catch` 降级）。测试：`.venv/bin/python -m pytest tests/test_client.py tests/test_nodes.py -q` 共 56 通过，含 pending→running→archiving→ready 全程同一 taskId、超时只发 GET 不创建、archiving→failed 给 `DELIVERY_FAILED`。
+
+**尚未完成（需真实 ComfyUI 环境，本机无法验证）：** 节点 UI 的阶段展示扩展尚未在真实 ComfyUI 中验证；两份模板目前是 API 格式而非真实 ComfyUI 导出的 UI 格式；尚未在自定义 output 路径与重启后的主实例上做导入/执行/重新取片验证（先接 T00 假服务，真实 Provider 留到 T12）。
 
 最小目录实现及回归：
 

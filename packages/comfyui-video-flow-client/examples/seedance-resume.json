@@ -1,0 +1,24 @@
+{
+  "1": {
+    "class_type": "VideoFlowConfig",
+    "inputs": {
+      "backend_url": "https://ai.sweetyshell.com",
+      "protocol_version": "1"
+    }
+  },
+  "2": {
+    "class_type": "VideoFlowWaitTask",
+    "inputs": {
+      "config": ["1", 0],
+      "task_id": "把已有任务的 taskId 填在这里",
+      "timeout_seconds": 1200
+    }
+  },
+  "3": {
+    "class_type": "VideoFlowLoadResult",
+    "inputs": {
+      "config": ["1", 0],
+      "task_id": ["2", 0]
+    }
+  }
+}

@@ -56,6 +56,22 @@ Production 节点的 `generation_version` 默认是 `1`。相同版本会复用�
 - `Wait Video Flow Task`
 - `Load Video Flow Result`
 
-`Seedance Production` 会产生真实费用，目前 Production 白名单保持为空；额度门禁上线并完成单人授权后才可使用。`Load Video Flow Result` 向 Backend 获取短期下载地址，并把视频流式写入 `<ComfyUI>/output/video-flow/`。
+`Seedance Production` 会产生真实费用，目前 Production 白名单保持为空；额度门禁上线并完成单人授权后才可使用。
+
+## 一次完整提交
+
+`Config → Production → Wait → LoadResult`。`Wait` 阻塞到任务可交付为止（`delivery.status=ready`）并**只输出 `taskId`**；把它的输出接到 `LoadResult` 的 `task_id` 输入即可，不要手工粘贴 task JSON——JSON 不是 taskId，会让下载请求打到错误地址。
+
+- 查询失败会自动重查：`429`/`5xx`/网络抖动只重复查询同一个任务，不会重建；`401/403` 立即停止并提示检查 `VIDEO_FLOW_TOKEN`。
+- 终态错误都带 `taskId`：`REQUIRES_REVIEW`（需人工核查）、`PROVIDER_FAILED`（Provider 明确失败）、`DELIVERY_FAILED`（生成成功但归档失败）、`WAIT_TIMEOUT`（等超时，任务仍在服务端跟踪，请稍后重查而不是重新提交）。
+- 费用未知但产物已就绪时仍然允许下载，`LoadResult` 的 `cost_status` 输出会显示"费用待核实"。费用与交付状态是两件事，不互相阻塞。
+- 产物落在 ComfyUI 自己的输出目录下 `video-flow/`（跟随 `folder_paths` 配置，自定义输出路径也一致）。下载先写随机临时文件，校验非空且与声明大小一致后原子发布；重新下载失败时上一份成功的文件保持不变。
+
+`Wait` / `LoadResult` 带 `IS_CHANGED`，重跑工作流会重新查询状态与重新取片，而不是复用 ComfyUI 缓存。`Production` 即使被再次调度也只沿用同一份回执意图，不会因为重跑产生第二次付费生成。
+
+`examples/` 下有两份可直接导入的最小模板（API 格式）：
+
+- `seedance-production.json`：完整链路 `Config → LoadImage → Production → Wait → LoadResult`。
+- `seedance-resume.json`：只等待并下载一个已有 `taskId`（把任务 id 填进 `Wait` 节点即可），不包含任何提交节点。
 
 服务端未配置真实 OSS 签名器时，上传票据接口会返回 `503`，这是预期的安全失败。

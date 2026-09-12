@@ -7,7 +7,17 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from client import ReceiptUpdateError, VideoFlowClient
+from client import (
+    ArtifactDownloadError,
+    ReceiptUpdateError,
+    TaskCredentialsRejected,
+    TaskDeliveryFailed,
+    TaskNotFound,
+    TaskProviderFailed,
+    TaskRequiresReview,
+    TaskWaitTimeout,
+    VideoFlowClient,
+)
 from config import VideoFlowConfig
 from receipts import ReceiptStore
 
@@ -479,6 +489,15 @@ def test_download_task_result_uses_fresh_result_url_and_writes_output(tmp_path):
                     "downloadUrl": "https://oss.test/fresh-signed-url",
                 },
             )
+        if request.url.path.endswith("/api/v1/tasks/task-1"):
+            return httpx.Response(
+                200,
+                json={
+                    "id": "task-1",
+                    "delivery": {"status": "ready", "assetId": "asset-1"},
+                    "costSummary": {"status": "usage_calculated", "usageCalculatedCny": "0.700000"},
+                },
+            )
         if request.url.host == "oss.test":
             return httpx.Response(200, content=b"video-bytes")
         return httpx.Response(404)
@@ -496,3 +515,294 @@ def test_download_task_result_uses_fresh_result_url_and_writes_output(tmp_path):
     assert output.read_bytes() == b"video-bytes"
     assert requests[0].headers["authorization"] == "Bearer secret-token"
     assert "authorization" not in requests[1].headers
+
+
+def _wait_client(handler):
+    return VideoFlowClient(
+        VideoFlowConfig("https://backend.test", "secret-token"),
+        httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+
+def test_wait_for_task_returns_only_when_delivery_is_ready():
+    summaries = [
+        {"delivery": {"status": "not_started"}, "taskStatus": "pending"},
+        {"delivery": {"status": "archiving"}, "taskStatus": "in_progress"},
+        {
+            "delivery": {"status": "ready", "assetId": "asset-1"},
+            "taskStatus": "completed",
+            "costSummary": {"status": "usage_calculated", "usageCalculatedCny": "0.700000"},
+        },
+    ]
+
+    def handler(_request):
+        return httpx.Response(200, json=summaries.pop(0))
+
+    result = _wait_client(handler).wait_for_task("task-1", poll_seconds=0)
+
+    # Provider succeeded 不等于能交付：只有 delivery=ready 才算等到。
+    assert result["delivery"]["status"] == "ready"
+
+
+def test_wait_for_task_keeps_polling_transient_failures_without_rebuilding():
+    calls = []
+
+    def handler(_request):
+        calls.append(1)
+        if len(calls) == 1:
+            return httpx.Response(429, json={"message": "slow down"})
+        if len(calls) == 2:
+            return httpx.Response(503, json={"message": "unavailable"})
+        if len(calls) == 3:
+            raise httpx.ConnectError("connection reset")
+        return httpx.Response(200, json={"delivery": {"status": "ready"}})
+
+    result = _wait_client(handler).wait_for_task("task-1", poll_seconds=0)
+
+    assert result["delivery"]["status"] == "ready"
+    # 只重复查询同一个 task，绝不重新创建。
+    assert len(calls) == 4
+
+
+def test_wait_for_task_stops_on_rejected_credentials():
+    def handler(_request):
+        return httpx.Response(401, json={"message": "invalid token"})
+
+    with pytest.raises(TaskCredentialsRejected) as error:
+        _wait_client(handler).wait_for_task("task-1", poll_seconds=0)
+
+    assert error.value.task_id == "task-1"
+    assert error.value.status_code == 401
+    assert "VIDEO_FLOW_TOKEN" in str(error.value)
+
+
+def test_wait_for_task_reports_missing_task_without_retrying():
+    calls = []
+
+    def handler(_request):
+        calls.append(1)
+        return httpx.Response(404, json={"message": "Task not found"})
+
+    with pytest.raises(TaskNotFound):
+        _wait_client(handler).wait_for_task("task-1", poll_seconds=0)
+
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize(
+    "summary,expected",
+    [
+        (
+            {"delivery": {"status": "failed", "errorCode": "upload:ARTIFACT_UPLOAD_FAILED"},
+             "taskStatus": "failed"},
+            TaskDeliveryFailed,
+        ),
+        (
+            {"delivery": {"status": "not_started"}, "taskStatus": "requires_review"},
+            TaskRequiresReview,
+        ),
+        (
+            {"delivery": {"status": "not_started"}, "taskStatus": "failed",
+             "errorMsg": "content policy"},
+            TaskProviderFailed,
+        ),
+    ],
+)
+def test_wait_for_task_distinguishes_terminal_failures(summary, expected):
+    def handler(_request):
+        return httpx.Response(200, json=summary)
+
+    with pytest.raises(expected) as error:
+        _wait_client(handler).wait_for_task("task-1", poll_seconds=0)
+
+    # 每种失败都要能拿到 taskId，用户才知道拿哪个任务去核对或人工恢复。
+    assert error.value.task_id == "task-1"
+    assert error.value.code != ""
+
+
+def test_wait_for_task_times_out_without_dropping_the_task():
+    calls = []
+
+    def handler(_request):
+        calls.append(1)
+        return httpx.Response(200, json={"delivery": {"status": "archiving"}})
+
+    with pytest.raises(TaskWaitTimeout) as error:
+        _wait_client(handler).wait_for_task("task-1", timeout_seconds=0, poll_seconds=0)
+
+    assert error.value.task_id == "task-1"
+    assert "query it again instead of resubmitting" in str(error.value)
+    assert len(calls) == 1
+
+
+def test_cost_note_flags_unverified_usage_without_blocking_download():
+    client = _wait_client(lambda _r: httpx.Response(200, json={}))
+
+    unverified = {"delivery": {"status": "ready"}, "costSummary": {"status": "unavailable"}}
+    verified = {
+        "delivery": {"status": "ready"},
+        "costSummary": {"status": "usage_calculated", "usageCalculatedCny": "0.700000"},
+    }
+
+    assert client.cost_is_unverified(unverified) is True
+    assert "费用待核实" in client.cost_note(unverified)
+    assert client.cost_is_unverified(verified) is False
+    assert "0.700000" in client.cost_note(verified)
+
+
+def _download_client(result_body, content=b"video-bytes", fail=False):
+    def handler(request):
+        if request.url.path.endswith("/result"):
+            return httpx.Response(200, json=result_body)
+        if request.url.path.endswith("/api/v1/tasks/task-1"):
+            return httpx.Response(200, json={"delivery": {"status": "ready"}})
+        if request.url.host == "oss.test":
+            if fail:
+                raise httpx.ConnectError("oss unreachable")
+            return httpx.Response(200, content=content)
+        return httpx.Response(404)
+
+    return VideoFlowClient(
+        VideoFlowConfig("https://backend.test", "secret-token"),
+        httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+
+def test_download_receipt_keeps_identity_and_drops_the_signed_url(tmp_path):
+    client = _download_client(
+        {
+            "taskId": "task-1",
+            "assetId": "asset-1",
+            "objectKey": "videos/task-1/attempt-1/result.mp4",
+            "sizeBytes": 11,
+            "downloadUrl": "https://oss.test/signed?Signature=abc",
+        }
+    )
+
+    result = client.download_task_result("task-1", tmp_path)
+
+    # 回执补大小与 hash，但不含会过期的下载签名 URL。
+    assert result["sizeBytes"] == 11
+    assert len(result["sha256"]) == 64
+    assert result["objectKey"] == "videos/task-1/attempt-1/result.mp4"
+    assert "downloadUrl" not in result
+    assert "Signature" not in json.dumps(result)
+
+
+def test_download_rejects_an_empty_artifact(tmp_path):
+    client = _download_client(
+        {
+            "taskId": "task-1",
+            "objectKey": "videos/task-1/attempt-1/result.mp4",
+            "downloadUrl": "https://oss.test/signed",
+        },
+        content=b"",
+    )
+
+    with pytest.raises(ArtifactDownloadError) as error:
+        client.download_task_result("task-1", tmp_path)
+
+    assert error.value.code == "EMPTY_ARTIFACT"
+    assert error.value.task_id == "task-1"
+    # 失败不留下半成品，也不产生目标文件。
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_download_rejects_a_size_mismatch(tmp_path):
+    client = _download_client(
+        {
+            "taskId": "task-1",
+            "objectKey": "videos/task-1/attempt-1/result.mp4",
+            "sizeBytes": 999,
+            "downloadUrl": "https://oss.test/signed",
+        },
+        content=b"video-bytes",
+    )
+
+    with pytest.raises(ArtifactDownloadError) as error:
+        client.download_task_result("task-1", tmp_path)
+
+    assert error.value.code == "ARTIFACT_SIZE_MISMATCH"
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_failed_redownload_keeps_the_previous_successful_file(tmp_path):
+    body = {
+        "taskId": "task-1",
+        "objectKey": "videos/task-1/attempt-1/result.mp4",
+        "sizeBytes": 11,
+        "downloadUrl": "https://oss.test/signed",
+    }
+    good = _download_client(body)
+    first = good.download_task_result("task-1", tmp_path)
+    published = Path(first["localPath"])
+
+    # 第二次下载失败（OSS 不可达）：已发布的文件必须原样保留。
+    broken = _download_client(body, fail=True)
+    with pytest.raises(httpx.ConnectError):
+        broken.download_task_result("task-1", tmp_path)
+
+    assert published.read_bytes() == b"video-bytes"
+    assert sorted(p.name for p in tmp_path.iterdir()) == [published.name]
+
+
+def test_download_without_a_url_fails_with_a_clear_code(tmp_path):
+    client = _download_client({"taskId": "task-1", "objectKey": "videos/task-1/attempt-1/result.mp4"})
+
+    with pytest.raises(ArtifactDownloadError) as error:
+        client.download_task_result("task-1", tmp_path)
+
+    assert error.value.code == "MISSING_DOWNLOAD_URL"
+
+
+def test_wait_walks_pending_running_archiving_ready_on_one_task():
+    seen_paths = []
+    summaries = [
+        {"delivery": {"status": "not_started"}, "taskStatus": "pending"},
+        {"delivery": {"status": "not_started"}, "taskStatus": "in_progress"},
+        {"delivery": {"status": "archiving"}, "taskStatus": "in_progress"},
+        {"delivery": {"status": "ready"}, "taskStatus": "completed"},
+    ]
+
+    def handler(request):
+        seen_paths.append(request.url.path)
+        return httpx.Response(200, json=summaries.pop(0))
+
+    result = _wait_client(handler).wait_for_task("task-1", poll_seconds=0)
+
+    assert result["delivery"]["status"] == "ready"
+    # 全程只查询同一个 taskId，没有任何创建动作。
+    assert seen_paths == ["/api/v1/tasks/task-1"] * 4
+
+
+def test_wait_timeout_never_creates_a_task():
+    methods = []
+
+    def handler(request):
+        methods.append(request.method)
+        return httpx.Response(200, json={"delivery": {"status": "archiving"}})
+
+    with pytest.raises(TaskWaitTimeout):
+        _wait_client(handler).wait_for_task("task-1", timeout_seconds=0, poll_seconds=0)
+
+    assert set(methods) == {"GET"}
+
+
+def test_wait_reports_delivery_failed_after_archiving():
+    summaries = [
+        {"delivery": {"status": "archiving"}, "taskStatus": "in_progress"},
+        {
+            "delivery": {"status": "failed", "errorCode": "upload:ARTIFACT_UPLOAD_FAILED"},
+            "taskStatus": "failed",
+        },
+    ]
+
+    def handler(_request):
+        return httpx.Response(200, json=summaries.pop(0))
+
+    with pytest.raises(TaskDeliveryFailed) as error:
+        _wait_client(handler).wait_for_task("task-1", poll_seconds=0)
+
+    # 生成成功但归档失败：不能当成功，也不能让用户以为是 Provider 失败。
+    assert error.value.error_code == "upload:ARTIFACT_UPLOAD_FAILED"
+    assert error.value.task_id == "task-1"

@@ -1,7 +1,10 @@
 from typing import Any, BinaryIO
 import hashlib
 import json
+import os
 import re
+import secrets
+import time
 from pathlib import Path
 import httpx
 
@@ -11,6 +14,78 @@ try:
 except ImportError:  # ComfyUI loads custom node modules directly from the folder.
     from config import VideoFlowConfig
     from receipts import ReceiptStore, credential_namespace
+
+
+class ArtifactDownloadError(RuntimeError):
+    """产物下载失败：空文件或与声明大小不符。"""
+
+    def __init__(self, task_id: str, code: str, message: str):
+        super().__init__(f"[{code}] task {task_id}: {message}")
+        self.task_id = task_id
+        self.code = code
+
+
+class TaskWaitError(RuntimeError):
+    """等待任务时遇到的终态或不可继续的错误。
+
+    一定带上 taskId 与可分类的 code：用户需要拿 taskId 去查、去核对、去人工恢复，
+    而不是重新提交一次付费任务。
+    """
+
+    def __init__(self, task_id: str, code: str, message: str):
+        super().__init__(f"[{code}] task {task_id}: {message}")
+        self.task_id = task_id
+        self.code = code
+
+
+class TaskWaitTimeout(TaskWaitError):
+    def __init__(self, task_id: str, timeout_seconds: float):
+        super().__init__(
+            task_id,
+            "WAIT_TIMEOUT",
+            f"still not delivered after {timeout_seconds:g}s; "
+            "the task is still tracked, query it again instead of resubmitting",
+        )
+        self.timeout_seconds = timeout_seconds
+
+
+class TaskRequiresReview(TaskWaitError):
+    def __init__(self, task_id: str, message: str):
+        super().__init__(task_id, "REQUIRES_REVIEW", message)
+
+
+class TaskProviderFailed(TaskWaitError):
+    def __init__(self, task_id: str, message: str):
+        super().__init__(task_id, "PROVIDER_FAILED", message)
+
+
+class TaskDeliveryFailed(TaskWaitError):
+    def __init__(self, task_id: str, error_code: str):
+        super().__init__(
+            task_id,
+            "DELIVERY_FAILED",
+            f"generation succeeded but the artifact could not be delivered ({error_code})",
+        )
+        self.error_code = error_code
+
+
+class TaskCredentialsRejected(TaskWaitError):
+    def __init__(self, task_id: str, status_code: int):
+        super().__init__(
+            task_id,
+            "CREDENTIALS_REJECTED",
+            f"backend rejected the credential (HTTP {status_code}); check VIDEO_FLOW_TOKEN",
+        )
+        self.status_code = status_code
+
+
+class TaskNotFound(TaskWaitError):
+    def __init__(self, task_id: str):
+        super().__init__(
+            task_id,
+            "TASK_NOT_FOUND",
+            "task does not exist or does not belong to this credential",
+        )
 
 
 class ReceiptUpdateError(RuntimeError):
@@ -186,6 +261,109 @@ class VideoFlowClient:
     def receipt_store(self, root: str | Path) -> ReceiptStore:
         return ReceiptStore(root, namespace=self.receipt_namespace())
 
+    # 查询失败时的退避上限：轮询可以等，但不允许把等待变成无限次重击后端。
+    MAX_POLL_BACKOFF_SECONDS = 60.0
+
+    def wait_for_task(
+        self,
+        task_id: str,
+        *,
+        timeout_seconds: float = 1200,
+        poll_seconds: float = 5,
+    ) -> dict[str, Any]:
+        """阻塞等待任务交付就绪。
+
+        成功条件是 delivery.status == ready——不是 Provider succeeded：
+        生成成功但归档失败时，用户拿不到片，必须报错而不是当成功。
+        查询失败（429/5xx/网络）只重查，绝不重建任务；401/403 立即停止并提示
+        凭证问题；等不到就抛 TaskWaitTimeout，任务本身仍在服务端被跟踪。
+        """
+        deadline = time.monotonic() + max(0.0, float(timeout_seconds))
+        transient_failures = 0
+
+        while True:
+            summary: dict[str, Any] | None = None
+            try:
+                summary = self.get_task(task_id)
+            except httpx.HTTPStatusError as error:
+                status_code = error.response.status_code
+                if status_code in (401, 403):
+                    raise TaskCredentialsRejected(task_id, status_code) from error
+                if status_code == 404:
+                    raise TaskNotFound(task_id) from error
+                if status_code != 429 and status_code < 500:
+                    raise
+                transient_failures += 1
+            except httpx.RequestError:
+                # 网络抖动：任务可能一切正常，下一轮再查。
+                transient_failures += 1
+            else:
+                transient_failures = 0
+                terminal = self._terminal_wait_state(task_id, summary)
+                if terminal is not None:
+                    return terminal
+
+            delay = min(
+                max(0.0, float(poll_seconds)) * (2 ** min(transient_failures, 4)),
+                self.MAX_POLL_BACKOFF_SECONDS,
+            )
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TaskWaitTimeout(task_id, timeout_seconds)
+            time.sleep(min(delay, remaining))
+
+    def _terminal_wait_state(
+        self,
+        task_id: str,
+        summary: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """就绪返回任务摘要；终态错误抛出；仍在进行返回 None。"""
+        delivery = summary.get("delivery") or {}
+        delivery_status = delivery.get("status")
+        task_status = summary.get("taskStatus") or summary.get("status")
+
+        if delivery_status == "ready":
+            return summary
+
+        if delivery_status == "failed":
+            raise TaskDeliveryFailed(
+                task_id,
+                str(delivery.get("errorCode") or "UNKNOWN_DELIVERY_ERROR"),
+            )
+
+        if task_status == "requires_review":
+            raise TaskRequiresReview(
+                task_id,
+                "provider submission needs manual verification",
+            )
+
+        if task_status == "failed":
+            raise TaskProviderFailed(
+                task_id,
+                str(summary.get("errorMsg") or "provider reported a failure"),
+            )
+
+        return None
+
+    def cost_is_unverified(self, summary: dict[str, Any]) -> bool:
+        """费用是否仍未核实。
+
+        usage 缺失时 Backend 会保留预占等人工核查；此时产物仍然可用，
+        只是费用待核实，不能因为费用不确定就把已经生成的片扣住不给。
+        """
+        cost = summary.get("costSummary") or {}
+        return (cost.get("status") or "unavailable") not in {
+            "usage_calculated",
+            "billed",
+        }
+
+    def cost_note(self, summary: dict[str, Any]) -> str:
+        cost = summary.get("costSummary") or {}
+        if self.cost_is_unverified(summary):
+            return "费用待核实（Provider 未返回可核对的 usage，已保留预占待人工核查）"
+        amount = cost.get("billedCny") or cost.get("usageCalculatedCny") or cost.get("settledCny")
+        return f"费用已确认：{amount} CNY（{cost.get('status')}）"
+
     def get_task(self, task_id: str) -> dict[str, Any]:
         response = self.client.get(
             f"{self.config.backend_url}/api/v1/tasks/{task_id}",
@@ -223,21 +401,72 @@ class VideoFlowClient:
         safe_task_id = re.sub(r"[^a-zA-Z0-9._-]", "_", task_id)
         safe_name = re.sub(r"[^a-zA-Z0-9._-]", "_", source_name) or "result.mp4"
         destination = output_root / f"{safe_task_id}-{safe_name}"
-        temporary = destination.with_suffix(destination.suffix + ".part")
+        # 随机临时名：并发或重跑各写各的占位文件，失败时只清理本次的。
+        temporary = output_root / (
+            f".{destination.name}.{os.getpid()}.{secrets.token_hex(4)}.part"
+        )
+
+        declared_size = result.get("sizeBytes")
+        digest = hashlib.sha256()
+        written = 0
+
+        download_url = result.get("downloadUrl")
+        if not download_url:
+            raise ArtifactDownloadError(
+                task_id,
+                "MISSING_DOWNLOAD_URL",
+                "backend did not return a download url for this artifact",
+            )
 
         # OSS 签名 URL 是独立下载地址，不携带 Video Flow actor token。
         try:
-            with self.client.stream("GET", str(result["downloadUrl"])) as response:
+            with self.client.stream("GET", str(download_url)) as response:
                 response.raise_for_status()
                 with temporary.open("wb") as output:
                     for chunk in response.iter_bytes():
                         output.write(chunk)
+                        digest.update(chunk)
+                        written += len(chunk)
+                    output.flush()
+                    os.fsync(output.fileno())
+
+            if written <= 0:
+                raise ArtifactDownloadError(
+                    task_id, "EMPTY_ARTIFACT", "downloaded artifact has no bytes"
+                )
+            if declared_size is not None and int(declared_size) != written:
+                raise ArtifactDownloadError(
+                    task_id,
+                    "ARTIFACT_SIZE_MISMATCH",
+                    f"downloaded {written} bytes but the asset declares {declared_size}",
+                )
+
+            # 校验通过才原子发布：失败时上一份成功的文件保持不变。
             temporary.replace(destination)
         finally:
             if temporary.exists():
                 temporary.unlink()
 
-        return {**result, "localPath": str(destination)}
+        # 产物接口只有文件信息，费用与交付状态在任务摘要里。取摘要失败不能
+        # 影响已经下载成功的文件，最多让费用显示退回"待核实"。
+        try:
+            summary = self.get_task(task_id)
+        except Exception:
+            summary = {}
+
+        # 回执只留产物身份与校验信息，不带下载签名 URL——签名几小时后失效，
+        # 把它当成产物标识存下来，日后必然指向一个打不开的地址。
+        return {
+            "taskId": task_id,
+            "assetId": result.get("assetId"),
+            "objectKey": result.get("objectKey"),
+            "mimeType": result.get("mimeType"),
+            "sizeBytes": written,
+            "sha256": digest.hexdigest(),
+            "localPath": str(destination),
+            "delivery": summary.get("delivery"),
+            "costSummary": summary.get("costSummary"),
+        }
 
     @staticmethod
     def stable_idempotency_key(
