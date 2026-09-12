@@ -10,6 +10,7 @@ from artifact_delivery import (
     validate_artifact_file,
     verify_uploaded_object,
 )
+from audit_log import AuditLog
 from comfyui_client import ComfyUIClient
 from comfyui_executor import (
     ComfyUIDryRunExecutor,
@@ -126,6 +127,34 @@ class JobExecutor:
             f"in {journal.journal_path}; verify against the provider before clearing"
         )
 
+    def _audit(self) -> AuditLog:
+        """结构化事件日志：与提交证据同目录，标准输出同样经过脱敏。"""
+        cached = getattr(self, "_audit_log", None)
+        if cached is not None:
+            return cached
+
+        self._audit_log = AuditLog(self._journal().directory, component="worker")
+        return self._audit_log
+
+    def _audit_event(
+        self,
+        event: str,
+        *,
+        level: str = "info",
+        job: Any = None,
+        **fields: Any,
+    ) -> None:
+        """发一条脱敏事件；审计写入失败不能拖垮正在执行的任务。"""
+        if job is not None:
+            fields.setdefault("taskId", getattr(job, "id", None))
+            fields.setdefault("attemptId", getattr(job, "attemptId", None))
+            fields.setdefault("providerTaskId", getattr(job, "providerTaskId", None))
+
+        try:
+            self._audit().emit(event, level=level, **fields)
+        except Exception as error:  # 审计是旁路，失败也不能影响执行
+            print(f"[video-flow] audit emit failed: {type(error).__name__}")
+
     def _journal(self) -> SubmissionJournal:
         """提交日志：优先写 VIDEO_FLOW_AUDIT_DIR，未配置时退回 output_dir。"""
         cached = getattr(self, "_submission_journal", None)
@@ -196,7 +225,7 @@ class JobExecutor:
             response.raise_for_status()
         except Exception as error:
             self._mark_submission_blocked()
-            print(f"[{job.id}] Provider outcome could not be recorded: {error}")
+            self._audit_event("outcome_report_failed", level="error", job=job, code="SUBMISSION_STATE_UNKNOWN", error=str(error))
             return False
 
         return True
@@ -241,7 +270,7 @@ class JobExecutor:
                 stage="download",
                 error_code=f"ARTIFACT_DOWNLOAD_FAILED: {error}",
             )
-            print(f"[{job.id}] Artifact download failed: {error}")
+            self._audit_event("artifact_download_failed", level="error", job=job, stage="download", error=str(error))
             return False
 
         usable, reason = validate_artifact_file(local_path)
@@ -268,7 +297,7 @@ class JobExecutor:
                 stage="upload",
                 error_code=f"ARTIFACT_UPLOAD_FAILED: {error}",
             )
-            print(f"[{job.id}] Artifact upload failed: {error}")
+            self._audit_event("artifact_upload_failed", level="error", job=job, stage="upload", error=str(error))
             return False
 
         verified, verify_reason = verify_uploaded_object(
@@ -283,7 +312,7 @@ class JobExecutor:
                 stage="verify_upload",
                 error_code=verify_reason,
             )
-            print(f"[{job.id}] Uploaded artifact failed verification: {verify_reason}")
+            self._audit_event("artifact_head_verification_failed", level="error", job=job, stage="verify_upload", code=verify_reason)
             return False
 
         registered = await self.register_artifact(
@@ -297,14 +326,21 @@ class JobExecutor:
                 stage="asset",
                 error_code="ARTIFACT_REGISTRATION_FAILED",
             )
-            print(f"[{job.id}] Artifact registration failed")
+            self._audit_event("artifact_registration_failed", level="error", job=job, stage="asset", code="ARTIFACT_REGISTRATION_FAILED")
             return False
 
         delivered = await self._report_delivery(
             job, attempt_id, "ready", object_key=object_key
         )
         if delivered:
-            print(f"[{job.id}] Artifact delivered: {object_key}")
+            # 记 objectKey 而不是下载地址：签名会过期，objectKey 才是产物身份。
+            self._audit_event(
+                "artifact_delivered",
+                level="info",
+                job=job,
+                stage="delivery",
+                objectKey=object_key,
+            )
         else:
             # 回写失败不改写状态：任务仍是 archiving，下一轮用同一个 key 重试，
             # 重复上传会覆盖自己，不会产生第二份产物记录。
@@ -362,7 +398,7 @@ class JobExecutor:
         except Exception as error:
             # 交付回写失败不暂停新提交：生成与费用已经确认，这里只是搬运产物，
             # 任务留在 archiving 由下一轮重试。
-            print(f"[{job.id}] Delivery report failed ({status}): {error}")
+            self._audit_event("delivery_report_failed", level="warning", job=job, stage="delivery", code=status, error=str(error))
             return False
 
         return True
@@ -437,7 +473,7 @@ class JobExecutor:
                 claimed_jobs.append(Job(**payload))
             except Exception as e:
                 # 网络波动时直接中断该轮，等待下一轮轮询。
-                print(f"Failed to claim jobs: {e}")
+                self._audit_event("claim_failed", level="warning", code=type(e).__name__, error=str(e))
                 break
 
         return claimed_jobs
@@ -456,7 +492,7 @@ class JobExecutor:
             if isinstance(data, list):
                 jobs.extend(Job(**job) for job in data)
         except Exception as e:
-            print(f"Failed to fetch inflight jobs: {e}")
+            self._audit_event("inflight_fetch_failed", level="warning", code=type(e).__name__, error=str(e))
             return []
 
         resumable: list[Job] = []
@@ -494,9 +530,12 @@ class JobExecutor:
                         )
                     else:
                         self._mark_submission_blocked()
-                        print(
-                            f"[{job.id}] In-flight job requires_review update failed "
-                            "and may be replayed"
+                        self._audit_event(
+                            "inflight_review_update_failed",
+                            level="error",
+                            job=job,
+                            code="PERSISTENCE_UNKNOWN",
+                            error="requires_review update failed and may be replayed",
                         )
                     continue
 
@@ -664,7 +703,7 @@ class JobExecutor:
             response.raise_for_status()
             return True
         except Exception as e:
-            print(f"Failed to update job {job_id}: {e}")
+            self._audit_event("status_update_failed", level="warning", taskId=job_id, code=type(e).__name__, error=str(e))
             return False
 
     async def resolve_asset_url(self, asset_id: str) -> str:
@@ -714,7 +753,7 @@ class JobExecutor:
             response.raise_for_status()
             return True
         except Exception as e:
-            print(f"Failed to create asset for job {job_id}: {e}")
+            self._audit_event("artifact_registration_failed", level="warning", taskId=job_id, error=str(e))
             return False
 
     async def execute_job(self, job: Job):
@@ -793,7 +832,13 @@ class JobExecutor:
                         stage="provider_result",
                         error_code="NO_PROVIDER_TASK_ID_FOR_ARCHIVING",
                     )
-                    print(f"[{job.id}] Archiving resume has no provider task id; failed explicitly")
+                    self._audit_event(
+                        "archiving_resume_without_provider_id",
+                        level="error",
+                        job=job,
+                        stage="provider_result",
+                        code="NO_PROVIDER_TASK_ID_FOR_ARCHIVING",
+                    )
                     return
 
                 provider_task_id = job.providerTaskId
@@ -963,7 +1008,7 @@ class JobExecutor:
                 provider_task_id,
                 interval=settings.task_status_check_interval,
             )
-            print(f"[{job.id}] Task completed: {task_status.result_url}")
+            self._audit_event("provider_task_completed", level="info", job=job, stage="provider", url=task_status.result_url)
 
             # 6. 先确认 Provider 终态与 usage 已经落库（Backend 负责结算），
             #    再进入归档。顺序反了会出现"钱已花、费用依据却没人知道"的窗口。
@@ -974,9 +1019,12 @@ class JobExecutor:
                     task_status.usage,
                     provider_task_id=provider_task_id,
                 ):
-                    print(
-                        f"[{job.id}] Provider outcome not recorded; "
-                        "holding artifact delivery for the next recovery round"
+                    self._audit_event(
+                        "artifact_delivery_held",
+                        level="warning",
+                        job=job,
+                        stage="delivery",
+                        code="OUTCOME_NOT_RECORDED",
                     )
                     return
 
@@ -1000,7 +1048,7 @@ class JobExecutor:
                 # Task 永久保存 objectKey；客户端下载时由 Backend 临时签发 URL。
                 # 把 OSS 签名 URL 写入数据库会在数天后失效，不能作为产物身份。
                 uploaded_video_url = object_key
-                print(f"[{job.id}] Uploaded to OSS: {oss_url}")
+                self._audit_event("artifact_uploaded", level="info", job=job, stage="upload", url=oss_url)
 
                 # 8. 创建 Asset 记录（用 objectKey，不用会过期的签名 URL）
                 await self.create_asset(
@@ -1105,7 +1153,7 @@ class JobExecutor:
                 failure_message=error_msg,
                 task_status='failed',
             )
-            print(f"[{job.id}] Failed: {error_msg} (type: {failure_type})")
+            self._audit_event("job_failed", level="error", job=job, code=failure_type.value if hasattr(failure_type, "value") else str(failure_type), error=error_msg)
 
     async def _execute_comfyui_job(self, job: Job):
         """Execute the explicitly enabled local ComfyUI dry-run path.
@@ -1203,7 +1251,7 @@ class JobExecutor:
                 await asyncio.sleep(settings.job_poll_interval)
 
             except Exception as e:
-                print(f"Poll loop error: {e}")
+                self._audit_event("poll_loop_error", level="error", code=type(e).__name__, error=str(e))
                 await asyncio.sleep(settings.job_poll_interval)
 
     async def close(self):

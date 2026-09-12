@@ -923,6 +923,47 @@ class ProviderSubmissionRecoveryTests(unittest.TestCase):
             self.assertEqual(delivery["status"], "failed")
             self.assertEqual(delivery["errorCode"], "NO_PROVIDER_TASK_ID_FOR_ARCHIVING")
 
+    def test_audit_events_never_carry_signed_urls(self):
+        import executor as executor_module
+        from audit_log import AuditLog
+
+        with tempfile.TemporaryDirectory() as directory:
+            adapter = self._completing_adapter(
+                executor_module,
+                usage={"total_tokens": 10},
+                result_url="https://provider.test/v.mp4?X-Signature=provider-secret",
+            )
+            job_executor = self._plan_job_executor(
+                adapter, directory, client=_RecordingClient()
+            )
+            job_executor.oss_uploader = _FakeOssUploader()
+
+            settings = SimpleNamespace(
+                comfyui_enabled=False,
+                running_job_timeout_minutes=10,
+                task_status_check_interval=0,
+                video_flow_audit_dir="",
+            )
+            with patch.object(executor_module, "settings", settings):
+                asyncio.run(job_executor.execute_job(self._plan_job(job_id="job-audit")))
+
+            events = AuditLog(Path(directory) / ".video-flow-journal", echo=False).read()
+
+        blob = json.dumps(events)
+        # 签名 query 与上传票据里的临时地址都不能进普通日志。
+        self.assertNotIn("provider-secret", blob)
+        self.assertNotIn("signature=", blob.lower())
+        self.assertNotIn("https://oss.test", blob)
+
+        delivered = [entry for entry in events if entry.get("event") == "artifact_delivered"]
+        self.assertEqual(len(delivered), 1)
+        # 留下的是产物身份（objectKey），不是会过期的下载地址。
+        self.assertEqual(
+            delivered[0]["objectKey"],
+            "videos/job-audit/attempt-plan-1/result.mp4",
+        )
+        self.assertEqual(delivered[0]["taskId"], "job-audit")
+
     def test_legacy_job_without_execution_plan_keeps_compat_path(self):
         import executor as executor_module
 

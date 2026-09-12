@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Get,
   HttpCode,
   HttpStatus,
   Logger,
@@ -13,8 +14,10 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { AdminTokenGuard } from '../../auth/admin-token.guard';
+import { AuditLogService } from '../../audit/audit-log.service';
 import { PrismaService } from '../../prisma.service';
 import { TaskBudgetService } from '../../tasks/task-budget.service';
+import { TaskReportService } from '../../tasks/task-report.service';
 import { TasksService } from '../../tasks/tasks.service';
 
 type BudgetReviewBody = {
@@ -46,7 +49,19 @@ export class V1TaskOperationsController {
     private readonly prisma: PrismaService,
     private readonly budget: TaskBudgetService,
     private readonly tasks: TasksService,
+    private readonly audit: AuditLogService,
+    private readonly reports: TaskReportService,
   ) {}
+
+  /**
+   * 只读报表：按 taskId 汇总 Task/Attempt/Asset/预算/最后错误与事件关联键。
+   *
+   * 只读是有意为之——排障动作本身不能改变现场，修复必须走显式的受控接口。
+   */
+  @Get(':taskId/report')
+  taskReport(@Param('taskId') taskId: string) {
+    return this.reports.buildReport(taskId);
+  }
 
   /**
    * 人工恢复归档：只让"Provider 已成功、交付失败"的任务重新进入 archiving。
@@ -71,12 +86,30 @@ export class V1TaskOperationsController {
       throw new BadRequestException('evidenceRef is required');
     }
 
+    const before = await this.prisma.task.findUnique({
+      where: { id: taskId },
+      select: { deliveryStatus: true, status: true },
+    });
     const result = await this.tasks.resumeDelivery(taskId);
 
     this.logger.log(
       `Artifact delivery resumed for task ${taskId} by ${body.operator.trim()} ` +
         `(reason: ${body.reason.trim()}, evidence: ${body.evidenceRef.trim()})`,
     );
+    // 人工处置必须留痕：谁、依据什么、把状态从什么改成了什么。
+    await this.audit.emit({
+      event: 'delivery_resumed',
+      level: 'warning',
+      taskId,
+      stage: 'manual',
+      code: 'RESUME_DELIVERY',
+      operator: body.operator.trim(),
+      reason: body.reason.trim(),
+      evidenceRef: body.evidenceRef.trim(),
+      before: before ?? null,
+      after: result,
+      operatorIsDeclaredClaim: true,
+    });
 
     return {
       ...result,
@@ -153,6 +186,19 @@ export class V1TaskOperationsController {
           },
         });
       }
+
+      await this.audit.emit({
+        event: 'budget_reviewed',
+        level: 'warning',
+        taskId,
+        stage: 'manual',
+        code: body.decision === 'settle' ? 'SETTLE' : 'RELEASE',
+        operator: body.operator.trim(),
+        reason: body.evidenceRef.trim(),
+        evidenceRef: body.evidenceRef.trim(),
+        after: { state: review.state, settledCny: review.settledCny },
+        operatorIsDeclaredClaim: true,
+      });
 
       return {
         taskId,

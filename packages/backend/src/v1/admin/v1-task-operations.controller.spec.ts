@@ -4,6 +4,7 @@ jest.mock('@nestjs/common', () => ({
   UseGuards: () => (target: unknown) => target,
   Patch: () => () => {},
   Post: () => () => {},
+  Get: () => () => {},
   HttpCode: () => () => {},
   HttpStatus: { OK: 200 },
   Param: () => () => {},
@@ -30,6 +31,14 @@ const tasks = {
   resumeDelivery: jest.fn(),
 };
 
+const audit = {
+  emit: jest.fn().mockResolvedValue({}),
+};
+
+const reports = {
+  buildReport: jest.fn(),
+};
+
 const validBody = {
   decision: 'settle' as const,
   amountCny: '12.500000',
@@ -41,7 +50,13 @@ describe('V1TaskOperationsController budget review', () => {
   let controller: V1TaskOperationsController;
 
   beforeEach(() => {
-    controller = new V1TaskOperationsController(prisma, budget as never, tasks as never);
+    controller = new V1TaskOperationsController(
+      prisma,
+      budget as never,
+      tasks as never,
+      audit as never,
+      reports as never,
+    );
     prisma.task.findUnique.mockReset();
     prisma.executionAttempt.findFirst.mockReset();
     prisma.executionAttempt.update.mockReset();
@@ -49,6 +64,9 @@ describe('V1TaskOperationsController budget review', () => {
     budget.applyReviewDecisionInTransaction.mockReset();
 
     tasks.resumeDelivery.mockReset();
+    audit.emit.mockReset();
+    audit.emit.mockResolvedValue({});
+    reports.buildReport.mockReset();
     prisma.task.findUnique.mockResolvedValue({ id: 'task-1' });
     prisma.executionAttempt.findFirst.mockResolvedValue({ id: 'attempt-1' });
     prisma.executionAttempt.update.mockResolvedValue({ id: 'attempt-1' });
@@ -92,6 +110,16 @@ describe('V1TaskOperationsController budget review', () => {
       where: { id: 'attempt-1' },
       data: { billedCostCny: 12.5, costStatus: 'billed' },
     });
+    // 额度复核同样要留操作者与依据。
+    expect(audit.emit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'budget_reviewed',
+        taskId: 'task-1',
+        operator: 'steven',
+        evidenceRef: 'ark-bill-2026-09',
+        operatorIsDeclaredClaim: true,
+      }),
+    );
   });
 
   it('releases without claiming a billed amount', async () => {
@@ -162,6 +190,17 @@ describe('V1TaskOperationsController budget review', () => {
     expect(budget.applyReviewDecisionInTransaction).not.toHaveBeenCalled();
   });
 
+  describe('task report', () => {
+    it('returns the read-only report assembled by the report service', async () => {
+      reports.buildReport.mockResolvedValue({ task: { id: 'task-1' }, evidence: { sources: [] } });
+
+      const report = await controller.taskReport('task-1');
+
+      expect(reports.buildReport).toHaveBeenCalledWith('task-1');
+      expect(report.task.id).toBe('task-1');
+    });
+  });
+
   describe('resume-delivery', () => {
     const resumeBody = {
       reason: 'worker crashed mid-archiving',
@@ -201,6 +240,31 @@ describe('V1TaskOperationsController budget review', () => {
       ).rejects.toThrow('evidenceRef is required');
 
       expect(tasks.resumeDelivery).not.toHaveBeenCalled();
+    });
+
+    it('records who resumed delivery and the before/after state', async () => {
+      prisma.task.findUnique.mockResolvedValue({ deliveryStatus: 'failed', status: 'failed' });
+      tasks.resumeDelivery.mockResolvedValue({
+        taskId: 'task-1',
+        deliveryStatus: 'archiving',
+        status: 'archiving',
+      });
+
+      await controller.resumeDelivery('task-1', resumeBody);
+
+      expect(audit.emit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'delivery_resumed',
+          level: 'warning',
+          taskId: 'task-1',
+          operator: 'steven',
+          evidenceRef: 'incident-2026-09-12',
+          before: { deliveryStatus: 'failed', status: 'failed' },
+          after: expect.objectContaining({ deliveryStatus: 'archiving' }),
+          // 管理员共享 token 不能假装识别出个人：声明值必须标注。
+          operatorIsDeclaredClaim: true,
+        }),
+      );
     });
 
     it('propagates refusals for tasks that are not resumable', async () => {

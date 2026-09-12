@@ -425,12 +425,16 @@ def test_runtime_output_override(monkeypatch, tmp_path):
 **新增：** `packages/worker/audit_log.py`、`tests/test_audit_log.py`；`packages/backend/src/tasks/task-report.service.ts`、对应 spec；`scripts/video_flow_task_report.py`、`scripts/tests/test_task_report.py`。
 **接口：** Admin Guard 的 `GET /api/v1/admin/tasks/:taskId/report` 汇总 Task/Attempt/Asset/预算/最后错误/事件关联键。CLI `--task-id ID --base-url URL` 使用 `VIDEO_FLOW_ADMIN_TOKEN_FILE`；默认不打印完整 Prompt/素材签名，只提供有权限的查询线索。报表只读，不隐式修复。
 
-- [ ] 统一事件字段 at、level、event、taskId、attemptId、providerTaskId、stage、code、requestId；脱敏工作在写日志前进行，不依赖日志采集器兜底。
-- [ ] 服务端目录建议 `/data/video-flow/audit`，root/服务用户受限权限；Backend 和 Worker 子目录分开，覆盖准入拒绝、预占/结算、生成提交、归档失败与人工处置。本条是部署目标，不在开发时写生产目录。
-- [ ] 把现有完整 URL/异常响应打印替换为脱敏事件；HTTP status、Provider request ID、错误分类可以保留，URL query、Authorization、Prompt 不入普通日志。
-- [ ] task_report 返回记录关联，不把“没有事件表”写成“没有记录”；对应日志不可读或被轮换时明确 evidence_missing。
-- [ ] 人工恢复、额度核实留下 operator 声明、时间、reason/evidenceRef、前后状态；管理员共享 token 不假装能自动识别个人。
-- [ ] 在测试容器重建后仍能按 taskId 查旧日志；按保留期轮换，未结案 journal 不随普通日志删除。
+- [x] 统一事件字段 at、level、event、taskId、attemptId、providerTaskId、stage、code、requestId；脱敏工作在写日志前进行，不依赖日志采集器兜底。
+- [x] 服务端目录建议 `/data/video-flow/audit`，root/服务用户受限权限；Backend 和 Worker 子目录分开，覆盖准入拒绝、预占/结算、生成提交、归档失败与人工处置。本条是部署目标，不在开发时写生产目录。
+- [x] 把现有完整 URL/异常响应打印替换为脱敏事件；HTTP status、Provider request ID、错误分类可以保留，URL query、Authorization、Prompt 不入普通日志。
+- [x] task_report 返回记录关联，不把“没有事件表”写成“没有记录”；对应日志不可读或被轮换时明确 evidence_missing。
+- [x] 人工恢复、额度核实留下 operator 声明、时间、reason/evidenceRef、前后状态；管理员共享 token 不假装能自动识别个人。
+- [x] 在测试容器重建后仍能按 taskId 查旧日志；按保留期轮换，未结案 journal 不随普通日志删除。
+
+**完成状态（2026-09-13）：** 以上检查项均已实现。Worker 新增 `audit_log.py`：`sanitize_event` 递归处理任意结构——敏感键（按词切分匹配 token/authorization/prompt/signature 等，`idempotencyKey` 这类无害字段不会被误伤）整字段替换为 `[redacted]`，URL 的 query、fragment 与 userinfo 一律剥掉（独立出现或嵌在错误消息里都处理），脱敏在写盘前完成、不依赖下游采集器。`AuditLog` 按天写 `events-YYYY-MM-DD.jsonl`（目录 700/文件 600，同步 flush+fsync），`emit` 的字段固定为 at/level/event/taskId/attemptId/providerTaskId/stage/code/requestId，标准输出同样脱敏（容器日志也是泄漏面）。`read`/`evidence_status`/`rotate` 分别支持按 taskId 查询、说明证据可用性、按保留期轮换；轮换**只删 events-*.jsonl**，`submissions.jsonl` 与 `SUBMISSIONS_BLOCKED` 属于未结案任务的应急证据不受保留期影响。executor 的 17 处打印（完整 Provider 结果 URL、OSS 签名 URL、各类异常响应、认领/恢复失败等）改为 `_audit_event` 事件，保留 HTTP 状态、Provider 任务 ID 与错误分类；新增交付成功事件记 objectKey（不是会过期的下载地址）。Backend 新增 `src/audit/audit-log.service.ts`（后端侧脱敏写入器，与 Worker 同一套规则）与 `src/tasks/task-report.service.ts` + `GET /api/v1/admin/tasks/:taskId/report`（Admin Guard，**只读**）：汇总 task/attempts/assets/budget/lastError/correlation，并在 `evidence.sources` 里逐条说明证据来源与可用性——数据库记录数、worker-audit 的 available/reason（`audit_dir_not_configured`/`evidence_missing`/`audit_dir_not_readable`）与匹配事件数，绝不把"没有事件表"写成"没有记录"。人工处置留痕：`resume-delivery` 与 `budget-review` 都写审计事件（operator 声明、reason、evidenceRef、before/after、`operatorIsDeclaredClaim: true`），不假装共享 token 能识别具体个人。compose 与 `.env.example` 拆成 `VIDEO_FLOW_AUDIT_DIR`（各自子目录）与 `VIDEO_FLOW_WORKER_AUDIT_DIR`（Backend 读 Worker 事件），共用同一个持久卷。新增 `scripts/video_flow_task_report.py`：凭证只从 `VIDEO_FLOW_ADMIN_TOKEN_FILE` 读取，默认只打印摘要（脱敏后再输出），证据缺口写 stderr，只读不修复。
+
+**说明（超出 ROADMAP 列出的文件）：** 为满足"人工处置留痕"与"Backend 和 Worker 子目录分开"，新增了 ROADMAP 未列出的 `src/audit/audit-log.service.ts` 与 `src/audit/audit.module.ts`。测试：Worker 165 通过 / 26 跳过（含 `tests/test_audit_log.py` 12 个用例与"签名 URL 不进审计"的端到端断言），Backend 179 通过（含 task-report 7 个、v1-task-operations 12 个），脚本 8 通过，合同套件 6 specs / 48 tests 通过。
 
 脱敏函数合同：`sanitize_event(event: dict) -> dict` 从 audit_log 导出；全字段递归移除 token/authorization/prompt，并对 URL 去 query。
 

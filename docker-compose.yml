@@ -45,6 +45,11 @@ services:
       OSS_ACCESS_KEY_SECRET: ${OSS_ACCESS_KEY_SECRET}
       OSS_BUCKET: ${OSS_BUCKET}
       OSS_REGION: ${OSS_REGION}
+      # T09: Backend 与 Worker 的事件各写各的子目录；报表读 Worker 子目录。
+      VIDEO_FLOW_AUDIT_DIR: /app/audit/backend
+      VIDEO_FLOW_WORKER_AUDIT_DIR: /app/audit/worker
+    volumes:
+      - video_audit:/app/audit
     ports:
       - "127.0.0.1:3100:3000"
     networks:
@@ -76,8 +81,9 @@ services:
       OSS_REGION: ${OSS_REGION}
       COMFYUI_ENABLED: "false"
       COMFYUI_OUTPUT_DIR: /app/output
-      # T04: Provider 提交日志与阻断标记必须落在受限持久卷，容器重建后仍可核对
-      VIDEO_FLOW_AUDIT_DIR: /app/audit
+      # T04/T09: 提交证据与结构化事件必须落在受限持久卷，容器重建后仍可核对。
+      # 与 Backend 分属不同子目录，互不覆盖。
+      VIDEO_FLOW_AUDIT_DIR: /app/audit/worker
     volumes:
       - video_output:/app/output
       - video_audit:/app/audit
