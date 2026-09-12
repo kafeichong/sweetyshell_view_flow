@@ -73,10 +73,6 @@ model Task {
   status   String  @default("pending") // pending, running, completed, failed
   errorMsg String? @map("error_msg")
 
-  // T02: 执行计划和交付状态
-  executionPlan  Json?   @map("execution_plan")
-  deliveryStatus String? @map("delivery_status")
-
   // 费用
   cost Float? @db.Real
 
