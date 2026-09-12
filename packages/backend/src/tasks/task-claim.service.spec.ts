@@ -10,12 +10,16 @@ describe('TaskClaimService contract', () => {
       findFirst: jest.fn(),
       updateMany: jest.fn(),
       findMany: jest.fn(),
+      count: jest.fn(),
     },
     executionAttempt: {
       findFirst: jest.fn(),
       create: jest.fn(),
     },
     productionGate: {
+      findUnique: jest.fn(),
+    },
+    actorCredential: {
       findUnique: jest.fn(),
     },
     $transaction: jest.fn(),
@@ -28,11 +32,15 @@ describe('TaskClaimService contract', () => {
     prisma.task.findFirst.mockReset();
     prisma.task.updateMany.mockReset();
     prisma.task.findMany.mockReset();
+    prisma.task.count.mockReset();
     prisma.executionAttempt.findFirst.mockReset();
     prisma.executionAttempt.create.mockReset();
     prisma.$transaction.mockReset();
     prisma.productionGate.findUnique.mockReset();
     prisma.productionGate.findUnique.mockResolvedValue({ paused: false });
+    prisma.actorCredential.findUnique.mockReset();
+    prisma.actorCredential.findUnique.mockResolvedValue({ status: 'active' });
+    prisma.task.count.mockResolvedValue(0);
   });
 
   it('claimNext 返回已写入 attempt 的任务', async () => {
@@ -126,6 +134,42 @@ describe('TaskClaimService contract', () => {
 
     expect(result).toBeNull();
     expect(prisma.task.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('已有在途生成达到全局上限时不领取新任务', async () => {
+    prisma.$transaction.mockImplementation(async (cb: any) => cb(prisma));
+    prisma.task.count.mockResolvedValue(1);
+
+    const result = await service.claimNext('worker-1', 'production');
+
+    expect(result).toBeNull();
+    expect(prisma.task.count).toHaveBeenCalledWith({
+      where: { status: { in: ['submitted', 'running'] } },
+    });
+    expect(prisma.task.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('候选任务所属 actor 非 active 时不领取', async () => {
+    const candidate = {
+      id: 'task-1',
+      status: 'pending',
+      taskStatus: null,
+      actorId: 'actor-1',
+      workflowName: 'seedance-main',
+      createdAt: new Date('2026-09-10T00:00:00.000Z'),
+    } as any;
+
+    prisma.$transaction.mockImplementation(async (cb: any) => cb(prisma));
+    prisma.task.findFirst.mockResolvedValue(candidate);
+    prisma.actorCredential.findUnique.mockResolvedValue({ status: 'revoked' });
+
+    const result = await service.claimNext('worker-1', 'production');
+
+    expect(result).toBeNull();
+    expect(prisma.actorCredential.findUnique).toHaveBeenCalledWith({
+      where: { actorId: 'actor-1' },
+    });
+    expect(prisma.task.updateMany).not.toHaveBeenCalled();
   });
 
   it('findRecoverable 会携带最新 attempt 字段', async () => {

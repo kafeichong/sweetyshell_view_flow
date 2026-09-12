@@ -5,6 +5,12 @@ import { Prisma } from '@prisma/client';
 type ClaimMode = 'preview' | 'production' | 'comfyui';
 const CLAIM_LEASE_MS = 5 * 60 * 1000;
 
+// 固定不变量（非 env var）：全局同时只允许 1 个在途生成，避免并发提交多个
+// Provider 任务。用 advisory lock 串行化"数在途 + 领取"这个检查+写序列，
+// classid 2 用来和 task-budget.service.ts 里已占用的 0（全局准入锁）/
+// 1（actor 锁）区分命名空间，避免 key 冲突。
+const MAX_INFLIGHT_GENERATIONS = 1;
+
 // 可领取条件：旧接口创建的 Task 的 taskStatus 为 null，v1 创建的为 'pending'。
 // 两者都必须能被 claim，否则 v1 任务会永久停留在 pending。
 //
@@ -31,6 +37,16 @@ export class TaskClaimService {
           }
         }
 
+        if (typeof tx.$executeRaw === 'function') {
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(2, 0)`;
+        }
+        const inflightCount = await tx.task.count({
+          where: { status: { in: ['submitted', 'running'] } },
+        });
+        if (inflightCount >= MAX_INFLIGHT_GENERATIONS) {
+          return null;
+        }
+
         const claimFilter = this.normalizeMode(mode) === 'production'
           ? {
               ...CLAIMABLE_TASK_WHERE,
@@ -45,6 +61,16 @@ export class TaskClaimService {
 
         if (!candidate) {
           return null;
+        }
+
+        if (this.normalizeMode(mode) === 'production' && candidate.actorId) {
+          const credential = await tx.actorCredential.findUnique({
+            where: { actorId: candidate.actorId },
+          });
+          if (!credential || credential.status !== 'active') {
+            // actor 已被 revoke/inactive：本轮不领取，等下一轮 worker 轮询重试。
+            return null;
+          }
         }
 
         const claimedStatus = {

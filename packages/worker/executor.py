@@ -519,24 +519,12 @@ class JobExecutor:
                     )
                     return
 
-                if job.status == JobStatus.SUBMITTED.value and not job.providerTaskId:
-                    await self.update_job_status(
-                        job.id,
-                        JobStatus.FAILED,
-                        attempt_id=attempt_id,
-                        attempt_status="requires_review",
-                        failure_type=FailureType.UNKNOWN,
-                        failure_code="SUBMISSION_STATE_UNKNOWN",
-                        failure_message="submitted task has no provider task id; manual verification required",
-                        task_status="requires_review",
-                    )
-                    print(f"[{job.id}] Submitted state has no provider task id; refusing new create")
-                    return
-
                 if not isinstance(job.executionPlan, dict):
                     # 新的付费提交必须来自 Backend 固化且批准的执行快照。
                     # 已经有 providerTaskId 的历史任务仍允许走上面的恢复分支，
                     # 避免为补快照而二次创建 Provider 任务。
+                    # submitted 但无 ID 且无快照的 legacy 任务同样落在这里：
+                    # 转 requires_review，绝不调用 Provider。
                     await self.update_job_status(
                         job.id,
                         JobStatus.FAILED,

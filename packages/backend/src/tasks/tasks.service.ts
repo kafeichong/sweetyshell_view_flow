@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { TaskBudgetService } from './task-budget.service';
 import { Prisma } from '@prisma/client';
@@ -175,9 +175,26 @@ export class TasksService {
       ...taskPayload
     } = data as AttemptUpdatePayload & { [key: string]: unknown };
 
+    if (taskStatus !== undefined) {
+      taskPayload.taskStatus = taskStatus;
+    }
+
+    const requestsPendingReset =
+      taskPayload.status === 'pending' || taskPayload.taskStatus === 'pending';
+
     if (!attemptId) {
       if (actualCostCny !== undefined) {
         taskPayload.cost = actualCostCny;
+      }
+
+      if (requestsPendingReset) {
+        const current = await this.prisma.task.findUnique({
+          where: { id },
+          select: { status: true },
+        });
+        if (current && current.status !== 'pending') {
+          throw new ConflictException('CANNOT_RESET_TASK_TO_PENDING');
+        }
       }
 
       return this.prisma.task.update({
@@ -258,11 +275,28 @@ export class TasksService {
       attemptPayload.finishedAt = finishedAt;
     }
 
-    if (taskStatus !== undefined) {
-      taskPayload.taskStatus = taskStatus;
-    }
-
     return this.prisma.$transaction(async (tx: any) => {
+      const attempt = await tx.executionAttempt.findUnique({
+        where: { id: attemptId },
+        select: { taskId: true, status: true },
+      });
+
+      if (!attempt || attempt.taskId !== id) {
+        throw new BadRequestException('ATTEMPT_TASK_MISMATCH');
+      }
+
+      if (requestsPendingReset) {
+        const current = await tx.task.findUnique({
+          where: { id },
+          select: { status: true },
+        });
+        const isAlreadyPending = current?.status === 'pending';
+        const isLegitimateAbandon = attempt.status === 'pending';
+        if (!isAlreadyPending && !isLegitimateAbandon) {
+          throw new ConflictException('CANNOT_RESET_TASK_TO_PENDING');
+        }
+      }
+
       const taskResult = await tx.task.update({
         where: { id },
         data: taskPayload,

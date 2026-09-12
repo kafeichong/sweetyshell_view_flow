@@ -226,12 +226,14 @@ test('does not admit beyond the last available micro-unit', () => {
 **新增：** `packages/backend/test/claim-recovery.contract-spec.ts`。
 **接口：** 保持 claim/recover 路由和 Worker Guard；恢复响应使用第 5.2 节字段。生产 claim 不接受调用方通过 mode 改变 Task 的批准执行类型。
 
-- [ ] 将旧 `POST /api/tasks` 收紧为鉴权后返回 410 `USE_V1_TASKS`，保留旧查询/Worker 接口；同步旧调用脚本和 runbook。无 actor/预占的历史 pending 不执行，列出需管理员处理的任务，不批量删除。
-- [ ] claim 在全局事务锁内检查 ProductionGate（T02 创建）的暂停状态与 active Provider 槽位、任务的执行快照/预占与 actor 当前授权；全局最多 1 个在途生成。Worker 每轮最多领取 1 个，不先 claim 一批再内存串行。
-- [ ] 新 pending 的准入或授权不满足时不调用 Provider；仅当确定没有提交标记/Provider ID，才允许取消并释放预占。已提交任务即使 actor 被撤销也继续恢复归档。
-- [ ] recover 展平 Attempt 字段并返回 archiving 阶段；运行中有 ID 接续查询，submitted 无 ID 转 requires_review。租约超时不是再次 create 的许可。
-- [ ] 补 Task/Attempt 关联验证：任何 Worker 回写必须确认 attempt.taskId 与路径 Task 一致；拒绝把终态/已提交 Task 任意重置 pending。修复不带 attemptId 的 taskStatus 更新遗漏。
-- [ ] 合同测试从真实 Backend recover 响应构造 Worker Job，不手写一份不同的 fixture 替代整个合同。
+- [x] 将旧 `POST /api/tasks` 收紧为鉴权后返回 410 `USE_V1_TASKS`，保留旧查询/Worker 接口；同步旧调用脚本和 runbook。无 actor/预占的历史 pending 不执行，列出需管理员处理的任务，不批量删除。
+- [x] claim 在全局事务锁内检查 ProductionGate（T02 创建）的暂停状态与 active Provider 槽位、任务的执行快照/预占与 actor 当前授权；全局最多 1 个在途生成。Worker 每轮最多领取 1 个，不先 claim 一批再内存串行。
+- [x] 新 pending 的准入或授权不满足时不调用 Provider；仅当确定没有提交标记/Provider ID，才允许取消并释放预占。已提交任务即使 actor 被撤销也继续恢复归档。
+- [x] recover 展平 Attempt 字段并返回 archiving 阶段；运行中有 ID 接续查询，submitted 无 ID 转 requires_review。租约超时不是再次 create 的许可。
+- [x] 补 Task/Attempt 关联验证：任何 Worker 回写必须确认 attempt.taskId 与路径 Task 一致；拒绝把终态/已提交 Task 任意重置 pending。修复不带 attemptId 的 taskStatus 更新遗漏。
+- [x] 合同测试从真实 Backend recover 响应构造 Worker Job，不手写一份不同的 fixture 替代整个合同。
+
+**完成状态（2026-09-12）：** 以上检查项均已实现。后端 `npx jest task-claim tasks.service legacy-tasks-auth v1-tasks task-budget --runInBand`（56 个用例）、`npm run test:contract -- --runInBand`（4 个 spec 共 28 个用例，含新增 claim-recovery 合同：真实 claim → recover → PATCH providerTaskId → 按 models.py 字段合同解析 Job）与 Worker `venv/bin/python -m pytest tests/ -q`（92 通过 / 26 跳过）全部通过。修复了两处交接遗留问题：(1) tasks.service.spec 的 `@nestjs/common` mock 缺少 `ConflictException`/`BadRequestException`，导致新增拒绝路径的单测报 `ConflictException is not a constructor`；(2) Worker 531b70a 的「submitted 无 ID 拒绝重提」分支未检查执行快照，短路了带快照任务经 journal 保护的受控重提（T04 合同测试 3 个失败）——该分支的意图由既有的 `MISSING_EXECUTION_PLAN` 路径完整覆盖（无快照 legacy 任务转 requires_review 且 Provider create 次数为 0），故删除该分支。deploy.sh 的旧创建接口提示已同步指向 v1。archiving 阶段的 recover 覆盖随 T05/T08 引入 TaskStatus 枚举值与归档工作流后生效，展平字段合同（第 5.2 节）已就位。
 
 映射实现核心与代表性测试：
 

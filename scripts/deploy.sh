@@ -100,9 +100,9 @@ echo "  停止服务:     docker compose down"
 echo "  重启服务:     docker compose restart"
 echo ""
 echo "🧪 测试 API："
-echo '  创建任务:     curl -X POST http://localhost:3100/api/tasks \\'
-echo '                  -H "Content-Type: application/json" \\'
-echo '                  -d '"'"'{"createdBy":"测试","prompt":"产品从水面浮现"}'"'"
+echo "  旧创建接口已退役（POST /api/tasks 返回 410 USE_V1_TASKS），"
+echo "  新任务请走 v1 接口（需 actor token 与 Idempotency-Key）："
+echo '  ./scripts/seedance_cli_smoke.sh'
 echo ""
 echo "  查询任务:     curl http://localhost:3100/api/tasks"
 echo ""
