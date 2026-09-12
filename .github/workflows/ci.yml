@@ -5,8 +5,12 @@ on:
     branches: [main]
   pull_request:
 
+# 分层显式化：单元测试与合同测试分开成 job，一眼能看出失败发生在哪一层。
+# 合同层包含跨包用例（真实 Backend/DB/Worker + Fake Provider），
+# 它缺失或失败都必须让 CI 变红，不能靠 skip 蒙混过去。
 jobs:
-  backend:
+  backend-unit:
+    name: backend / unit
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -16,20 +20,38 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
       - run: npm install
       - run: npm run build
       - run: npx jest --runInBand
+
+  backend-contract:
+    name: backend / contract + cross-package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install backend dependencies
+        working-directory: packages/backend
+        run: npm install
       - name: Install contract test dependencies
-        working-directory: .
         run: pip install -r packages/worker/requirements.txt pytest
-      - name: Run isolated HTTP/PostgreSQL contract
-        working-directory: .
+      - name: Refuse to run with real provider credentials
+        # 合同环境不得持有真实凭证：有就失败，而不是"碰巧没用到"。
+        run: |
+          if [ -n "${VOLCENGINE_ACCESS_KEY:-}" ]; then
+            echo "VOLCENGINE_ACCESS_KEY must be empty for contract tests" >&2
+            exit 1
+          fi
+      - name: Run isolated contract and cross-package suites
         run: bash scripts/run_mvp_contract.sh
 
-  worker:
+  worker-unit:
+    name: worker / unit
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -42,12 +64,23 @@ jobs:
           cache: pip
           cache-dependency-path: packages/worker/requirements.txt
       - run: pip install -r requirements.txt pytest
-      - run: python -m pytest -q
-      - name: Test contract fake Provider
-        working-directory: .
-        run: python -m pytest scripts/tests/test_fake_provider.py -q
+      # -rs 列出每条 skip 的原因：需要外部服务的用例应当只有这些，
+      # 出现别的 skip 时能立刻看出来。
+      - run: python -m pytest -q -rs
+
+  scripts-unit:
+    name: scripts / unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r packages/worker/requirements.txt pytest
+      - run: python -m pytest scripts/tests -q
 
   comfyui-client:
+    name: comfyui client / unit
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -60,4 +93,4 @@ jobs:
           cache: pip
           cache-dependency-path: packages/comfyui-video-flow-client/requirements.txt
       - run: pip install -r requirements.txt pytest
-      - run: python -m pytest -q
+      - run: python -m pytest -q -rs

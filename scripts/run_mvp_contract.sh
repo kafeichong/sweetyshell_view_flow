@@ -15,6 +15,13 @@ fi
 FAKE_PROVIDER_PID=""
 FAKE_PROVIDER_LOG="$(mktemp -t video-flow-fake-provider.XXXXXX)"
 
+# 合同环境绝不能持有真实 Provider 凭证：有就直接失败，
+# 而不是"碰巧没用到"。CI 与本地都走这道闸门。
+if test -n "${VOLCENGINE_ACCESS_KEY:-}"; then
+  echo 'VOLCENGINE_ACCESS_KEY must be empty for contract tests' >&2
+  exit 1
+fi
+
 cleanup() {
   if test -n "$FAKE_PROVIDER_PID"; then
     kill "$FAKE_PROVIDER_PID" >/dev/null 2>&1 || true

@@ -51,6 +51,36 @@ def test_installer_copies_client_and_protects_token(tmp_path):
     assert stat.S_IMODE(installed_token.stat().st_mode) == 0o600
 
 
+def test_installer_never_touches_other_custom_nodes(tmp_path):
+    comfy_root = tmp_path / "ComfyUI"
+    python_path = comfy_root / ".venv/bin/python"
+    python_path.parent.mkdir(parents=True)
+    _write_executable(python_path, "#!/bin/sh\nexit 0\n")
+    custom_nodes = comfy_root / "custom_nodes"
+    custom_nodes.mkdir(parents=True)
+
+    # 同事自己的节点：安装器只应动 video_flow_client 与备份目录。
+    colleague = custom_nodes / "colleague_node"
+    colleague.mkdir()
+    (colleague / "node.py").write_text("# colleague's node\n", encoding="utf-8")
+
+    token_source = tmp_path / "actor-token"
+    token_source.write_text("vf_test_token\n", encoding="utf-8")
+    home = tmp_path / "home"
+    home.mkdir()
+
+    subprocess.run(
+        [str(CLIENT_DIR / "install.sh"), str(comfy_root), str(token_source)],
+        check=True,
+        env={**os.environ, "HOME": str(home)},
+        text=True,
+        capture_output=True,
+    )
+
+    assert (colleague / "node.py").read_text(encoding="utf-8") == "# colleague's node\n"
+    assert (custom_nodes / "video_flow_client/client.py").is_file()
+
+
 def test_installer_keeps_previous_version_outside_custom_nodes(tmp_path):
     comfy_root = tmp_path / "ComfyUI"
     python_path = comfy_root / ".venv/bin/python"
