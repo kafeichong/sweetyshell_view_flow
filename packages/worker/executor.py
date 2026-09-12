@@ -13,11 +13,23 @@ from comfyui_executor import (
 )
 from config import get_settings
 from models import FailureType, Job, JobStatus
-from providers.seedance_adapter import ProviderSubmissionUncertainError, SeedanceAdapter
-from recovery import build_cost_audit, cost_status, format_cost, is_stale_job, should_resume_job
+from providers.seedance_adapter import (
+    ProviderSubmissionUncertainError,
+    ProviderTaskFailedError,
+    SeedanceAdapter,
+)
+from recovery import (
+    build_cost_audit,
+    build_provider_outcome,
+    cost_status,
+    format_cost,
+    is_stale_job,
+    should_resume_job,
+)
 from oss_uploader import OssUploader
 from submission_journal import (
     STAGE_DB_CONFIRMED,
+    STAGE_OUTCOME_OBSERVED,
     STAGE_PROVIDER_ACCEPTED,
     SubmissionJournal,
     resolve_journal_directory,
@@ -121,27 +133,100 @@ class JobExecutor:
         self._submission_journal = SubmissionJournal(directory)
         return self._submission_journal
 
+    def requires_backend_outcome(self, job: Job) -> bool:
+        """是否走 Backend 终态结算入口。
+
+        只有拿到固化执行快照、并且已经建立 Attempt 的任务才走新入口；
+        旧任务（没有 executionPlan）保持兼容回写，费用只作展示。
+        """
+        return bool(job.attemptId) and isinstance(job.executionPlan, dict)
+
+    async def report_provider_outcome(
+        self,
+        job: Job,
+        outcome: str,
+        usage: Optional[Dict[str, Any]],
+        *,
+        provider_task_id: Optional[str] = None,
+        error_code: Optional[str] = None,
+    ) -> bool:
+        """把 Provider 终态交回 Backend 结算；成功后才允许进入归档。
+
+        顺序固定：先落盘证据（暂停期间也不丢 usage），再回写 Backend。
+        回写失败时只暂停新提交，不改写任务状态——Attempt 仍是运行中，下一轮
+        恢复会按原 providerTaskId 查回终态并补记，不会重新 create。
+        """
+        attempt_id = job.attemptId
+        if not attempt_id:
+            return False
+
+        try:
+            await self._append_submission_journal(
+                task_id=job.id,
+                attempt_id=attempt_id,
+                provider_task_id=provider_task_id,
+                stage=STAGE_OUTCOME_OBSERVED,
+                outcome=outcome,
+                usage=usage,
+                error_code=error_code,
+            )
+        except Exception as journal_error:
+            # 证据落盘失败不阻断回写：Backend 才是权威记录，而且恢复路径
+            # 可以按原 ID 重新查回 usage。
+            print(f"[{job.id}] Outcome evidence could not be journaled: {journal_error}")
+
+        payload = build_provider_outcome(
+            outcome,
+            usage,
+            provider_task_id=provider_task_id,
+            error_code=error_code,
+        )
+
+        try:
+            response = await self.client.patch(
+                f"{self.backend_url}/api/v1/internal/attempts/{attempt_id}/outcome",
+                json=payload,
+                headers=self._worker_headers(),
+            )
+            response.raise_for_status()
+        except Exception as error:
+            self._mark_submission_blocked()
+            print(f"[{job.id}] Provider outcome could not be recorded: {error}")
+            return False
+
+        return True
+
     async def _append_submission_journal(
         self,
         *,
         task_id: str,
         attempt_id: Optional[str],
-        provider_task_id: str,
+        provider_task_id: Optional[str],
         stage: str = STAGE_PROVIDER_ACCEPTED,
+        outcome: Optional[str] = None,
+        usage: Optional[Dict[str, Any]] = None,
+        error_code: Optional[str] = None,
     ) -> None:
         """把 Provider 提交事实先落盘，再回写 DB。
 
         写入失败必须向上抛出：调用方据此判定"提交已发生但没有证据"，
-        停止后续提交并等人工核对。
+        停止后续提交并等人工核对。usage 只保留整数 token 计数，其余字段
+        由 journal 的白名单与净化逻辑丢弃。
         """
-        self._journal().append(
-            {
-                "taskId": task_id,
-                "attemptId": attempt_id,
-                "providerTaskId": provider_task_id,
-                "stage": stage,
-            }
-        )
+        event: Dict[str, Any] = {
+            "taskId": task_id,
+            "attemptId": attempt_id,
+            "providerTaskId": provider_task_id,
+            "stage": stage,
+        }
+        if outcome is not None:
+            event["status"] = outcome
+        if usage is not None:
+            event["usage"] = usage
+        if error_code is not None:
+            event["errorCode"] = error_code
+
+        self._journal().append(event)
 
     def _submission_block_marker(self) -> Path:
         return self._journal().block_marker
@@ -681,7 +766,22 @@ class JobExecutor:
             )
             print(f"[{job.id}] Task completed: {task_status.result_url}")
 
-            # 6. 下载视频
+            # 6. 先确认 Provider 终态与 usage 已经落库（Backend 负责结算），
+            #    再进入归档。顺序反了会出现"钱已花、费用依据却没人知道"的窗口。
+            if self.requires_backend_outcome(job):
+                if not await self.report_provider_outcome(
+                    job,
+                    "succeeded",
+                    task_status.usage,
+                    provider_task_id=provider_task_id,
+                ):
+                    print(
+                        f"[{job.id}] Provider outcome not recorded; "
+                        "holding artifact delivery for the next recovery round"
+                    )
+                    return
+
+            # 7. 下载视频
             if task_status.result_url:
                 # 使用秒级时间戳命名，降低并发下文件名冲突风险。
                 timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -708,7 +808,23 @@ class JobExecutor:
                     file_type="video",
                 )
 
-            # 9. 只有 Provider 返回 usage 且确认可计费时，才输出实际费用；否则标记 unavailable。
+            if self.requires_backend_outcome(job):
+                # 费用已由 Backend 用固化执行快照结算，这里只上报交付结果，
+                # 不再由 Worker 计算金额。
+                await self.update_job_status(
+                    job.id,
+                    JobStatus.COMPLETED,
+                    attempt_id=attempt_id,
+                    attempt_status="completed",
+                    video_url=uploaded_video_url,
+                    task_status="completed",
+                    finished_at=datetime.now(timezone.utc),
+                )
+                print(f"[{job.id}] Completed successfully; artifact delivered")
+                return
+
+            # 旧任务（没有固化执行快照）没有 Backend 侧的计费依据，保持原有
+            # 兼容展示路径：费用只作展示，不参与预算准入汇总。
             actual_cost = (
                 adapter.calculate_actual_cost(task_status.usage)
                 if cost_status(task_status.usage) == "confirmed"
@@ -755,6 +871,26 @@ class JobExecutor:
                     task_status="requires_review",
                 )
                 print(f"[{job.id}] Provider submission outcome is uncertain; manual review required")
+                return
+
+            if isinstance(e, ProviderTaskFailedError) and self.requires_backend_outcome(job):
+                # Provider 明确失败：仍要把终态与 usage 交回 Backend，
+                # 由它判断这次失败是否已经计费（失败不等于免费）。
+                status = e.status
+                reported = await self.report_provider_outcome(
+                    job,
+                    "failed",
+                    status.usage,
+                    provider_task_id=provider_task_id,
+                    error_code=status.error_message,
+                )
+                if reported:
+                    print(f"[{job.id}] Provider reported failure; outcome recorded for settlement")
+                    return
+                print(
+                    f"[{job.id}] Provider failure outcome not recorded; "
+                    "will be re-reported from the original provider task id"
+                )
                 return
 
             # 自动重试已移除：当前 Backend 与 schema 都没有 retry_count /

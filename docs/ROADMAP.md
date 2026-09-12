@@ -297,13 +297,15 @@ journal 记录示例：
 `{providerTaskId, status: "succeeded"|"failed"|"cancelled", usage: object|null, errorCode?: string}`。
 Backend 从 Attempt 找 Task，以固化 executionPlan 解释 usage，并在一个事务中更新 Attempt、Task 阶段及预占；不信任请求体传入任意单价/结算金额。
 
-- [ ] 合法 usage 按已核实计费规则计算；缺字段、负数、非整数、NaN、模型/价格不匹配标 unavailable/review，不套错误公式。
-- [ ] 成功 outcome 原子写 Attempt.completed、providerUsage、pricingVersion、预算 settled；Task 进入 archiving。重复完全相同 outcome 幂等，不重复计费；冲突终态/usage 进入核查，不覆盖既有依据。
-- [ ] usage 缺失时保留预占/review，但仍允许归档已生成视频；预算未知阻止后续新提交，不能用归档成功掩盖未知费用。
-- [ ] Provider 失败若是否收费无证据，同样保留 review；只在明确未提交或人工核实有凭据时释放，不能由 HTTP failed 推断免费。
-- [ ] 日后账单核实通过 Admin 受控动作更新 billed 值并记录操作者/依据；MVP 不实现自动账单抓取。新增 `PATCH /api/v1/admin/tasks/:taskId/budget-review`，body 为 decision（settle/release）、amountCny（settle 必填）、evidenceRef、operator；operator 为管理操作声明，不能冒称 token 已识别具体员工。
-- [ ] Worker 必须确认 outcome 写入成功后才进入归档；失败先留 journal，再按原 ID 查询补记。暂停期间不得丢弃 Provider 返回的必要 usage 证据。
-- [ ] 验证“生成已花钱但 OSS 故障”“没有 usage 仍可拿视频”“同终态回写两次”“跨 Task 的 Attempt 被拒”。
+- [x] 合法 usage 按已核实计费规则计算；缺字段、负数、非整数、NaN、模型/价格不匹配标 unavailable/review，不套错误公式。
+- [x] 成功 outcome 原子写 Attempt.completed、providerUsage、pricingVersion、预算 settled；Task 进入 archiving。重复完全相同 outcome 幂等，不重复计费；冲突终态/usage 进入核查，不覆盖既有依据。
+- [x] usage 缺失时保留预占/review，但仍允许归档已生成视频；预算未知阻止后续新提交，不能用归档成功掩盖未知费用。
+- [x] Provider 失败若是否收费无证据，同样保留 review；只在明确未提交或人工核实有凭据时释放，不能由 HTTP failed 推断免费。
+- [x] 日后账单核实通过 Admin 受控动作更新 billed 值并记录操作者/依据；MVP 不实现自动账单抓取。新增 `PATCH /api/v1/admin/tasks/:taskId/budget-review`，body 为 decision（settle/release）、amountCny（settle 必填）、evidenceRef、operator；operator 为管理操作声明，不能冒称 token 已识别具体员工。
+- [x] Worker 必须确认 outcome 写入成功后才进入归档；失败先留 journal，再按原 ID 查询补记。暂停期间不得丢弃 Provider 返回的必要 usage 证据。
+- [x] 验证“生成已花钱但 OSS 故障”“没有 usage 仍可拿视频”“同终态回写两次”“跨 Task 的 Attempt 被拒”。
+
+**完成状态（2026-09-12）：** 以上检查项均已实现。Backend 新增 `src/tasks/task-cost.ts`：`tokenCostCny` 用 Decimal 向上取整到 6 位（样例 `tokenCostCny(123456, '1.25') === '0.154320'` 已断言），`interpretUsage` 只认已登记 pricingVersion + 模型匹配的规则，缺字段/负数/小数/NaN/未知价格版本/模型不匹配一律 unavailable（`MISSING_USAGE`/`MISSING_TOTAL_TOKENS`/`INVALID_TOTAL_TOKENS`/`MISSING_PRICING_VERSION`/`UNKNOWN_PRICING_VERSION`/`MODEL_PRICING_MISMATCH`），不套错误公式。新增 `PATCH /api/v1/internal/attempts/:attemptId/outcome`（Worker Guard）：从 Attempt 找 Task、用固化 executionPlan 解释 usage，单事务写 Attempt 终态 + providerUsage + pricingVersion + 预占 settled（有证据）或 review（无证据）+ Task 阶段（成功→archiving/archiving，失败→failed/failed/not_started）；请求体只接受原始事实，金额一律由 Backend 核算。重复完全相同 outcome 幂等返回且不重复计费；冲突终态/usage 转 review 且不覆盖既有 usage 与已结算金额；跨 attempt 的 providerTaskId 被 409 拒绝（`PROVIDER_TASK_MISMATCH`/`PROVIDER_TASK_OWNED_BY_ANOTHER_ATTEMPT`）。新增 `PATCH /api/v1/admin/tasks/:taskId/budget-review`（Admin Guard）+ migration `20260912000000_budget_review_audit`：settle 需正数金额并写 Attempt.billedCostCny/costStatus=billed，release 明确禁止带金额，两者都记录 operator/evidenceRef/reviewedAt，响应以 `operatorIsDeclaredClaim: true` 标明 operator 是管理员声明而非 token 识别的身份。Worker 侧：`ProviderTaskFailedError` 携带完整终态（失败任务也可能计费，usage 不再被丢弃）、`recovery.build_provider_outcome` 只构造原始事实载荷、executor 在归档前先写 journal（净化后的 usage 证据）再上报 outcome，上报失败则暂停新提交且不交付产物，等下一轮按原 providerTaskId 查回补记；没有 executionPlan 的旧任务保持兼容回写路径。顺带修复 schema 中 Task 的 executionPlan/deliveryStatus 重复定义——它使 `prisma generate` 完全无法执行（构建用的客户端一直是旧产物），删除重复块后已可正常生成。测试：后端单测 147 通过（含 task-cost 24、executions 新增 12、task-operations 7），Worker 137 通过 / 26 跳过，合同套件 5 specs / 38 tests 通过（新增 provider-outcome，覆盖同终态回写两次、冲突 usage 保留原证据、无 usage 仍进 archiving、失败有/无证据分别 settle/review、跨 attempt 拒绝、budget-review 审计与校验）。
 
 精度函数与测试合同（仅适用于经核实为按 tokens 计费的规格，测试价格不是线上价格）：
 

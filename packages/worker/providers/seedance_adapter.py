@@ -12,6 +12,18 @@ class ProviderSubmissionUncertainError(Exception):
     """Provider submission outcome is unknown and must not be retried automatically."""
 
 
+class ProviderTaskFailedError(Exception):
+    """Provider 明确以失败/取消结束任务。
+
+    必须携带 ProviderTaskStatus：失败任务也可能已经消耗 tokens，usage 是判断
+    "是否被计费"的唯一证据，不能只抛一句错误消息把它丢掉。
+    """
+
+    def __init__(self, status: ProviderTaskStatus):
+        super().__init__(f"Task failed: {status.error_message}")
+        self.status = status
+
+
 def is_submission_uncertain(status_code: Optional[int], has_task_id: bool) -> bool:
     """提交结果是否不可判定（因此禁止自动重提）。
 
@@ -262,7 +274,8 @@ class SeedanceAdapter:
             if status.status == "completed":
                 return status
             elif status.status == "failed":
-                raise Exception(f"Task failed: {status.error_message}")
+                # 带上完整终态：usage 是"是否被计费"的证据，不能在这里丢弃。
+                raise ProviderTaskFailedError(status)
 
             # 仍在运行时 sleep 后重试，避免无限循环阻塞 worker。
             await asyncio.sleep(interval)

@@ -10,6 +10,7 @@ from submission_journal import (
     BLOCKED_REASON,
     JOURNAL_FILE_NAME,
     STAGE_DB_CONFIRMED,
+    STAGE_OUTCOME_OBSERVED,
     STAGE_PROVIDER_ACCEPTED,
     SubmissionJournal,
     resolve_journal_directory,
@@ -60,6 +61,45 @@ class SubmissionJournalTests(unittest.TestCase):
         self.assertEqual(record["taskId"], "task-1")
         for forbidden in ("prompt", "token", "response", "url"):
             self.assertNotIn(forbidden, record)
+
+    def test_append_keeps_only_sanitized_usage_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = SubmissionJournal(Path(directory) / "audit")
+
+            journal.append(
+                {
+                    "stage": STAGE_OUTCOME_OBSERVED,
+                    "taskId": "task-1",
+                    "status": "succeeded",
+                    "usage": {
+                        "total_tokens": 1000,
+                        "video_url": "https://provider.test/v.mp4",
+                        "debug": {"signed": "https://oss.test/x?signature=abc"},
+                    },
+                }
+            )
+
+            record = json.loads(journal.journal_path.read_text(encoding="utf-8").strip())
+
+        self.assertEqual(record["status"], "succeeded")
+        self.assertEqual(record["usage"], {"total_tokens": 1000})
+        self.assertNotIn("video_url", record["usage"])
+
+    def test_append_omits_usage_when_nothing_is_verifiable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = SubmissionJournal(Path(directory) / "audit")
+
+            journal.append(
+                {
+                    "stage": STAGE_OUTCOME_OBSERVED,
+                    "taskId": "task-1",
+                    "usage": {"video_url": "https://provider.test/v.mp4"},
+                }
+            )
+
+            record = json.loads(journal.journal_path.read_text(encoding="utf-8").strip())
+
+        self.assertNotIn("usage", record)
 
     def test_append_accumulates_one_record_per_line(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -39,6 +39,28 @@ def build_cost_audit(
     }
 
 
+def build_provider_outcome(
+    status: str,
+    usage: Mapping[str, Any] | None,
+    *,
+    provider_task_id: str | None = None,
+    error_code: str | None = None,
+) -> dict[str, Any]:
+    """构造 Backend 终态接口的请求体。
+
+    只放原始事实（终态、原始 usage、Provider 任务 ID、错误码）。单价和结算
+    金额一律由 Backend 用固化执行快照核算，Worker 不提供也不应被信任。
+    """
+    payload: dict[str, Any] = {"status": status}
+    if provider_task_id:
+        payload["providerTaskId"] = provider_task_id
+    if usage is not None:
+        payload["usage"] = dict(usage)
+    if error_code:
+        payload["errorCode"] = error_code
+    return payload
+
+
 def should_resume_job(job: Mapping[str, Any]) -> bool:
     """Return whether a job has enough state to resume provider polling."""
     # 允许恢复的最小条件：状态是已提交/运行且有 provider_task_id。

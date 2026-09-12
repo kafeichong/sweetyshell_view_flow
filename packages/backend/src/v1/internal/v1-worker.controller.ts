@@ -70,6 +70,24 @@ export class V1WorkerController {
     return this.executions.recordUsage(attemptId, body.usage);
   }
 
+  /**
+   * Provider 终态回写：Backend 用固化执行快照解释 usage 并结算预算。
+   * 请求体只带原始事实，不接受任何单价/结算金额。
+   */
+  @Patch(':attemptId/outcome')
+  recordOutcome(
+    @Param('attemptId') attemptId: string,
+    @Body()
+    body: {
+      providerTaskId?: string;
+      status: 'succeeded' | 'failed' | 'cancelled';
+      usage?: Record<string, unknown> | null;
+      errorCode?: string;
+    },
+  ) {
+    return this.executions.recordProviderOutcome(attemptId, body);
+  }
+
   @Patch(':attemptId/requires-review')
   requiresReview(@Param('attemptId') attemptId: string, @Body() body: { code: string; message: string }) {
     return this.executions.markRequiresReview(attemptId, body.code, body.message);

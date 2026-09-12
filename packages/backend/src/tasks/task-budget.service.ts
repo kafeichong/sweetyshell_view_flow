@@ -165,6 +165,55 @@ export class TaskBudgetService {
     this.logger.log(`Held task ${taskId} for review`);
   }
 
+  /**
+   * 人工账单复核：只有 Admin 受控动作能改动 review 中的预占，且必须记录
+   * 操作者声明与依据引用，便于事后追溯是谁根据什么凭据改了金额。
+   */
+  async applyReviewDecisionInTransaction(
+    tx: Prisma.TransactionClient,
+    taskId: string,
+    decision: {
+      decision: 'settle' | 'release';
+      amountCny?: string | null;
+      evidenceRef: string;
+      operator: string;
+    },
+  ): Promise<{
+    state: string;
+    settledCny: string | null;
+    reviewedAt: Date;
+  }> {
+    const reviewedAt = new Date();
+    const settledCny =
+      decision.decision === 'settle' && decision.amountCny
+        ? new Prisma.Decimal(decision.amountCny)
+        : null;
+
+    const updated = await tx.taskBudgetReservation.update({
+      where: { taskId },
+      data: {
+        state: decision.decision === 'settle' ? 'settled' : 'released',
+        settledCny,
+        reviewDecision: decision.decision,
+        reviewAmountCny: settledCny,
+        reviewEvidenceRef: decision.evidenceRef,
+        reviewOperator: decision.operator,
+        reviewedAt,
+        updatedAt: reviewedAt,
+      },
+    });
+
+    this.logger.log(
+      `Budget review ${decision.decision} for task ${taskId} by ${decision.operator} (evidence: ${decision.evidenceRef})`,
+    );
+
+    return {
+      state: updated.state,
+      settledCny: updated.settledCny?.toFixed(6) ?? null,
+      reviewedAt,
+    };
+  }
+
   async releaseInTransaction(
     tx: Prisma.TransactionClient,
     taskId: string,

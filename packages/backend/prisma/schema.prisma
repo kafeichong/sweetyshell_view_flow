@@ -182,6 +182,12 @@ model TaskBudgetReservation {
   dayKey          String   @map("day_key")
   monthKey        String   @map("month_key")
   pricingVersion  String   @map("pricing_version")
+  // T05: 人工账单复核痕迹。operator 是管理员声明的操作者，不是 token 识别出的员工身份。
+  reviewDecision   String?   @map("review_decision")
+  reviewAmountCny  Decimal?  @map("review_amount_cny") @db.Decimal(18, 6)
+  reviewEvidenceRef String?  @map("review_evidence_ref")
+  reviewOperator   String?   @map("review_operator")
+  reviewedAt       DateTime? @map("reviewed_at")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 

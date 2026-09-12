@@ -27,10 +27,42 @@ BLOCKED_REASON = "manual_review_required"
 # 表示"这段事实已成功回写 DB"。两者之间的窗口就是需要重启后核对的部分。
 STAGE_PROVIDER_ACCEPTED = "provider_accepted"
 STAGE_DB_CONFIRMED = "db_confirmed"
+# 观察到 Provider 终态：回写 Backend 之前先落盘，暂停期间也不丢 usage 证据。
+STAGE_OUTCOME_OBSERVED = "outcome_observed"
 
 # 白名单而非黑名单：只有这些键会落盘。调用方多传的字段（哪怕是 prompt、
 # 完整响应或 URL）会被丢弃，安全属性由结构保证，而不靠调用方自觉。
-PERSISTED_KEYS = ("at", "stage", "taskId", "attemptId", "providerTaskId", "reason")
+PERSISTED_KEYS = (
+    "at",
+    "stage",
+    "taskId",
+    "attemptId",
+    "providerTaskId",
+    "status",
+    "errorCode",
+    "reason",
+    "usage",
+)
+
+# usage 只保留计费需要的整数字段：Provider 可能回传任意结构，
+# 整份响应不能进 journal，但缺了这几个数就没法核对费用。
+USAGE_KEYS = ("total_tokens", "completion_tokens", "prompt_tokens")
+
+
+def sanitize_usage(usage: Any) -> Optional[Dict[str, Any]]:
+    """只留下可核对的整数 token 计数，其余一律丢弃。"""
+    if not isinstance(usage, dict):
+        return None
+
+    cleaned = {
+        key: value
+        for key, value in usage.items()
+        if key in USAGE_KEYS
+        and isinstance(value, int)
+        and not isinstance(value, bool)
+        and value >= 0
+    }
+    return cleaned or None
 
 
 class SubmissionJournal:
@@ -65,8 +97,14 @@ class SubmissionJournal:
             "at": event.get("at") or datetime.now(timezone.utc).isoformat(),
         }
         for key in PERSISTED_KEYS:
-            if key != "at" and key in event:
-                record[key] = event[key]
+            if key == "at" or key not in event:
+                continue
+            if key == "usage":
+                usage = sanitize_usage(event["usage"])
+                if usage is not None:
+                    record["usage"] = usage
+                continue
+            record[key] = event[key]
 
         with self.journal_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, separators=(",", ":")) + "\n")
