@@ -129,7 +129,9 @@ export class TaskClaimService {
       where: {
         taskStatus: 'in_progress',
         status: {
-          in: ['submitted', 'running'],
+          // archiving 必须能被 Worker 找回：归档是独立分支，进程中断一次
+          // 就再也没有人把已经花钱生成的产物交出去。
+          in: ['submitted', 'running', 'archiving'],
         },
       },
       orderBy: { createdAt: 'asc' },

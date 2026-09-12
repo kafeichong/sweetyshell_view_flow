@@ -5,6 +5,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from artifact_delivery import (
+    artifact_object_key,
+    validate_artifact_file,
+    verify_uploaded_object,
+)
 from comfyui_client import ComfyUIClient
 from comfyui_executor import (
     ComfyUIDryRunExecutor,
@@ -192,6 +197,172 @@ class JobExecutor:
         except Exception as error:
             self._mark_submission_blocked()
             print(f"[{job.id}] Provider outcome could not be recorded: {error}")
+            return False
+
+        return True
+
+    async def deliver_artifact(
+        self,
+        job: Job,
+        attempt_id: Optional[str],
+        task_status: Any,
+    ) -> bool:
+        """把 Provider 产物搬到 OSS 并如实报告交付结果。
+
+        顺序固定：下载 → 本地非空校验 → 上传 → HEAD 校验 → 登记 Asset →
+        确认交付就绪。任何一步失败都写 deliveryStatus=failed 并带上阶段错误，
+        不把"归档失败"伪装成"还在生成"，也不改写已经确认的 Provider 成功与费用。
+        """
+        if not attempt_id:
+            return False
+
+        object_key = artifact_object_key(job.id, attempt_id)
+
+        if not task_status.result_url:
+            await self._report_delivery(
+                job,
+                attempt_id,
+                "failed",
+                stage="provider_result",
+                error_code="PROVIDER_RESULT_URL_MISSING",
+            )
+            print(f"[{job.id}] Provider completed without a result url; delivery failed")
+            return False
+
+        local_path = self.output_dir / f"{job.id}-{attempt_id}.mp4"
+
+        try:
+            await self.adapter_for(job).download_video(task_status.result_url, str(local_path))
+        except Exception as error:
+            await self._report_delivery(
+                job,
+                attempt_id,
+                "failed",
+                stage="download",
+                error_code=f"ARTIFACT_DOWNLOAD_FAILED: {error}",
+            )
+            print(f"[{job.id}] Artifact download failed: {error}")
+            return False
+
+        usable, reason = validate_artifact_file(local_path)
+        if not usable:
+            await self._report_delivery(
+                job,
+                attempt_id,
+                "failed",
+                stage="verify_local",
+                error_code=reason,
+            )
+            print(f"[{job.id}] Local artifact rejected: {reason}")
+            return False
+
+        local_size = os.path.getsize(local_path)
+
+        try:
+            self.oss_uploader.upload(str(local_path), object_key)
+        except Exception as error:
+            await self._report_delivery(
+                job,
+                attempt_id,
+                "failed",
+                stage="upload",
+                error_code=f"ARTIFACT_UPLOAD_FAILED: {error}",
+            )
+            print(f"[{job.id}] Artifact upload failed: {error}")
+            return False
+
+        verified, verify_reason = verify_uploaded_object(
+            self.oss_uploader.head_object(object_key),
+            expected_size=local_size,
+        )
+        if not verified:
+            await self._report_delivery(
+                job,
+                attempt_id,
+                "failed",
+                stage="verify_upload",
+                error_code=verify_reason,
+            )
+            print(f"[{job.id}] Uploaded artifact failed verification: {verify_reason}")
+            return False
+
+        registered = await self.register_artifact(
+            job.id, object_key, str(local_path), attempt_id=attempt_id
+        )
+        if not registered:
+            await self._report_delivery(
+                job,
+                attempt_id,
+                "failed",
+                stage="asset",
+                error_code="ARTIFACT_REGISTRATION_FAILED",
+            )
+            print(f"[{job.id}] Artifact registration failed")
+            return False
+
+        delivered = await self._report_delivery(
+            job, attempt_id, "ready", object_key=object_key
+        )
+        if delivered:
+            print(f"[{job.id}] Artifact delivered: {object_key}")
+        else:
+            # 回写失败不改写状态：任务仍是 archiving，下一轮用同一个 key 重试，
+            # 重复上传会覆盖自己，不会产生第二份产物记录。
+            print(f"[{job.id}] Delivery confirmation failed; will retry archiving")
+        return delivered
+
+    def adapter_for(self, job: Job) -> Any:
+        provider = getattr(job, "attemptProvider", None)
+        if provider and provider in self.adapters:
+            return self.adapters[provider]
+        return self.adapters["seedance"]
+
+    async def register_artifact(
+        self,
+        task_id: str,
+        object_key: str,
+        local_path: str,
+        *,
+        attempt_id: str,
+    ) -> bool:
+        """登记产物 Asset；同 key 重复登记由 Backend 幂等返回既有行。"""
+        return await self.create_asset(
+            task_id,
+            object_key,
+            local_path,
+            attempt_id=attempt_id,
+            file_type="video",
+        )
+
+    async def _report_delivery(
+        self,
+        job: Job,
+        attempt_id: str,
+        status: str,
+        *,
+        object_key: Optional[str] = None,
+        error_code: Optional[str] = None,
+        stage: Optional[str] = None,
+    ) -> bool:
+        payload: Dict[str, Any] = {"status": status}
+        if object_key:
+            payload["objectKey"] = object_key
+        if error_code:
+            payload["errorCode"] = error_code
+        if stage:
+            payload["stage"] = stage
+
+        try:
+            response = await self.client.patch(
+                f"{self.backend_url}/api/v1/internal/attempts/{attempt_id}/delivery",
+                json=payload,
+                headers=self._worker_headers(),
+            )
+            response.raise_for_status()
+        except Exception as error:
+            # 交付回写失败不暂停新提交：生成与费用已经确认，这里只是搬运产物，
+            # 任务留在 archiving 由下一轮重试。
+            print(f"[{job.id}] Delivery report failed ({status}): {error}")
             return False
 
         return True
@@ -515,22 +686,26 @@ class JobExecutor:
         attempt_id: Optional[str] = None,
         file_type: str = "video",
     ) -> bool:
-        """登记产物 Asset；失败只记录日志，不阻断任务完成。"""
-        # asset size 是回放/成本核算和排障的关键信息，先算好文件体积。
-        file_size = os.path.getsize(local_path)
+        """登记产物 Asset；返回是否成功，由调用方决定交付状态。
 
-        payload = {
-            "taskId": job_id,
-            "objectKey": object_key,
-            "bucket": self.oss_uploader.bucket_name,
-            "mediaType": file_type,
-            "mimeType": "video/mp4" if file_type == "video" else None,
-            "sizeBytes": file_size,
-        }
-        if attempt_id:
-            payload["attemptId"] = attempt_id
-
+        任何失败（含本地文件消失、对象存储元信息取不到）都必须返回 False 而不是
+        抛出去：归档失败要如实写成 deliveryStatus=failed，不能被上游当成
+        "任务执行异常"处理。
+        """
         try:
+            # asset size 是回放/成本核算和排障的关键信息，先算好文件体积。
+            file_size = os.path.getsize(local_path)
+            payload = {
+                "taskId": job_id,
+                "objectKey": object_key,
+                "bucket": self.oss_uploader.bucket_name,
+                "mediaType": file_type,
+                "mimeType": "video/mp4" if file_type == "video" else None,
+                "sizeBytes": file_size,
+            }
+            if attempt_id:
+                payload["attemptId"] = attempt_id
+
             response = await self.client.post(
                 f"{self.backend_url}/api/v1/internal/attempts/assets",
                 json=payload,
@@ -601,7 +776,31 @@ class JobExecutor:
                 "submitted_at": job.attemptSubmittedAt or job.submittedAt,
             }
 
-            if should_resume_job(job_state):
+            # 归档分支必须走在提交分支前面：Provider 已经成功、费用已经结算，
+            # 这里只负责把已知的产物取回来。落进下面的 create 分支会凭空再造
+            # 一个付费任务，属于最严重的一类重复扣费。
+            archiving_resume = (
+                job.status == JobStatus.ARCHIVING.value
+                or job.deliveryStatus == "archiving"
+            )
+            if archiving_resume:
+                if not job.providerTaskId:
+                    # 没有 Provider ID 就没有可恢复的原任务；明确失败，不做替代品。
+                    await self._report_delivery(
+                        job,
+                        attempt_id,
+                        "failed",
+                        stage="provider_result",
+                        error_code="NO_PROVIDER_TASK_ID_FOR_ARCHIVING",
+                    )
+                    print(f"[{job.id}] Archiving resume has no provider task id; failed explicitly")
+                    return
+
+                provider_task_id = job.providerTaskId
+                print(
+                    f"[{job.id}] Resuming artifact delivery for provider task: {provider_task_id}"
+                )
+            elif should_resume_job(job_state):
                 if is_stale_job(
                     job_state,
                     timeout_minutes=settings.running_job_timeout_minutes,
@@ -769,7 +968,7 @@ class JobExecutor:
             # 6. 先确认 Provider 终态与 usage 已经落库（Backend 负责结算），
             #    再进入归档。顺序反了会出现"钱已花、费用依据却没人知道"的窗口。
             if self.requires_backend_outcome(job):
-                if not await self.report_provider_outcome(
+                if not archiving_resume and not await self.report_provider_outcome(
                     job,
                     "succeeded",
                     task_status.usage,
@@ -781,7 +980,11 @@ class JobExecutor:
                     )
                     return
 
-            # 7. 下载视频
+                # 归档是独立分支：只搬运产物并如实报告交付结果。
+                await self.deliver_artifact(job, attempt_id, task_status)
+                return
+
+            # 7. 下载视频（旧任务兼容路径，没有固化执行快照）
             if task_status.result_url:
                 # 使用秒级时间戳命名，降低并发下文件名冲突风险。
                 timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -807,21 +1010,6 @@ class JobExecutor:
                     attempt_id=attempt_id,
                     file_type="video",
                 )
-
-            if self.requires_backend_outcome(job):
-                # 费用已由 Backend 用固化执行快照结算，这里只上报交付结果，
-                # 不再由 Worker 计算金额。
-                await self.update_job_status(
-                    job.id,
-                    JobStatus.COMPLETED,
-                    attempt_id=attempt_id,
-                    attempt_status="completed",
-                    video_url=uploaded_video_url,
-                    task_status="completed",
-                    finished_at=datetime.now(timezone.utc),
-                )
-                print(f"[{job.id}] Completed successfully; artifact delivered")
-                return
 
             # 旧任务（没有固化执行快照）没有 Backend 侧的计费依据，保持原有
             # 兼容展示路径：费用只作展示，不参与预算准入汇总。

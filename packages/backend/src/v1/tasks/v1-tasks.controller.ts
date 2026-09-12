@@ -220,7 +220,7 @@ export class V1TasksController {
 
   @Get(':id')
   async findOne(@CurrentActor() actor: { actorId: string }, @Param('id') id: string) {
-    const task = await this.tasks.findOneForActor(id, actor.actorId);
+    const task = await this.tasks.findSummaryForActor(id, actor.actorId);
     if (!task) throw new NotFoundException('Task not found');
     return task;
   }

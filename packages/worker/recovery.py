@@ -63,8 +63,9 @@ def build_provider_outcome(
 
 def should_resume_job(job: Mapping[str, Any]) -> bool:
     """Return whether a job has enough state to resume provider polling."""
-    # 允许恢复的最小条件：状态是已提交/运行且有 provider_task_id。
-    return job.get("status") in {"submitted", "running"} and bool(
+    # 允许恢复的最小条件：状态是已提交/运行/归档中，且有 provider_task_id。
+    # archiving 也必须能恢复，否则进程中断一次就再也没有人把产物交出去。
+    return job.get("status") in {"submitted", "running", "archiving"} and bool(
         job.get("provider_task_id")
     )
 

@@ -302,6 +302,15 @@ export class ExecutionsService {
     });
   }
 
+  /** 交付回写只需要知道这个 Attempt 属于哪个 Task。 */
+  async findAttemptTask(attemptId: string) {
+    const attempt = await (this.prisma as any).executionAttempt.findUnique({
+      where: { id: attemptId },
+      select: { id: true, taskId: true, status: true },
+    });
+    return attempt ?? null;
+  }
+
   async recordProviderSubmission(attemptId: string, providerTaskId: string) {
     const prismaExecutionAttempt = this.prisma as unknown as {
       executionAttempt: {

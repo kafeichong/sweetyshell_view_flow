@@ -1,4 +1,6 @@
 import asyncio
+import json
+import os
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -7,6 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from models import Job, ProviderTaskStatus
+from artifact_delivery import artifact_object_key
 
 
 def approved_execution_plan():
@@ -23,6 +26,47 @@ def approved_execution_plan():
         "generateAudio": False,
         "watermark": True,
     }
+
+
+class _FakeOssUploader:
+    """最小 OSS 替身：记录上传，并让 HEAD 返回真实对象大小。
+
+    归档流程要求"上传后 HEAD 校验通过才登记"，所以替身必须能回答 HEAD，
+    否则测不到真实路径。
+    """
+
+    def __init__(self, bucket_name="test-bucket"):
+        self.uploaded: list[tuple[str, int]] = []
+        self.bucket_name = bucket_name
+
+    def upload(self, local_path, object_key):
+        self.uploaded.append((object_key, os.path.getsize(local_path)))
+        return f"https://oss.test/{object_key}?signature=test"
+
+    def head_object(self, object_key):
+        for key, size in self.uploaded:
+            if key == object_key:
+                return SimpleNamespace(content_length=size)
+        return None
+
+
+class _RecordingClient:
+    """记录 Worker 发往 Backend 的请求体，用来断言回写内容。"""
+
+    def __init__(self):
+        self.calls: list[dict] = []
+
+    async def patch(self, url, json=None, headers=None):
+        self.calls.append({"url": url, "json": json, "method": "PATCH"})
+        return SimpleNamespace(raise_for_status=lambda: None)
+
+    async def post(self, url, json=None, headers=None):
+        # 产物登记也走这个客户端，归档链路才完整。
+        self.calls.append({"url": url, "json": json, "method": "POST"})
+        return SimpleNamespace(
+            raise_for_status=lambda: None,
+            json=lambda: {"assetId": "asset-1", "objectKey": (json or {}).get("objectKey")},
+        )
 
 
 class ProviderSubmissionRecoveryTests(unittest.TestCase):
@@ -271,22 +315,29 @@ class ProviderSubmissionRecoveryTests(unittest.TestCase):
                 return_value="https://oss.test/input-signed-url"
             )
             job_executor.output_dir = Path(directory)
-            job_executor.oss_uploader = SimpleNamespace(
-                upload=lambda _path, _key: "https://oss.test/signed-expiring-url",
-            )
+            job_executor.oss_uploader = _FakeOssUploader()
+            job_executor.backend_url = "http://backend.test"
+            job_executor.client = _RecordingClient()
             settings = SimpleNamespace(
                 comfyui_enabled=False,
                 running_job_timeout_minutes=10,
                 task_status_check_interval=0,
+                video_flow_audit_dir="",
             )
 
             with patch.object(executor_module, "settings", settings):
                 asyncio.run(job_executor.execute_job(job))
 
-        terminal = job_executor.update_job_status.await_args_list[-1]
-        self.assertTrue(terminal.kwargs["video_url"].startswith("videos/"))
-        self.assertFalse(terminal.kwargs["video_url"].startswith("https://"))
-        job_executor.create_asset.assert_awaited_once()
+        expected_key = artifact_object_key("job-output-1", "attempt-output-1")
+        # 上传与登记都落在同一个稳定 key 上：重跑归档只会覆盖自己。
+        self.assertEqual(job_executor.oss_uploader.uploaded[0][0], expected_key)
+        self.assertEqual(job_executor.create_asset.await_args.args[1], expected_key)
+
+        # 回写的是 objectKey，不是会过期的签名 URL。
+        delivery = job_executor.client.calls[-1]
+        self.assertEqual(delivery["json"]["status"], "ready")
+        self.assertEqual(delivery["json"]["objectKey"], expected_key)
+        self.assertNotIn("signature", json.dumps(delivery["json"]))
 
     def test_existing_provider_task_id_only_polls_without_creating_again(self):
         import executor as executor_module
@@ -350,7 +401,11 @@ class ProviderSubmissionRecoveryTests(unittest.TestCase):
                 return_value=ProviderTaskStatus(
                     id="provider-task-2",
                     status="completed",
+                    result_url="https://provider.test/v.mp4",
                 )
+            ),
+            download_video=AsyncMock(
+                side_effect=lambda _url, output_path: Path(output_path).write_bytes(b"video")
             ),
             calculate_actual_cost=lambda _usage: None,
             pricing_version="seedance-token-v1",
@@ -364,6 +419,9 @@ class ProviderSubmissionRecoveryTests(unittest.TestCase):
             return_value="https://oss.test/input-signed-url"
         )
         job_executor.output_dir = Path(tempfile.mkdtemp(prefix="worker-recovery-"))
+        job_executor.oss_uploader = _FakeOssUploader()
+        job_executor.client = _RecordingClient()
+        job_executor.backend_url = "http://backend.test"
 
         job = Job(
             id="job-new-1",
@@ -398,8 +456,9 @@ class ProviderSubmissionRecoveryTests(unittest.TestCase):
         )
         self.assertIsInstance(provider_id_update.kwargs["submitted_at"], datetime)
 
-        terminal_update = job_executor.update_job_status.await_args_list[-1]
-        self.assertIsInstance(terminal_update.kwargs["finished_at"], datetime)
+        # 生命周期收尾现在由 Backend 在确认交付时落库（Worker 只报交付结果），
+        # 所以这里断言的是"Provider 成功 + 交付就绪"这条链路已经走完。
+        self.assertEqual(job_executor.client.calls[-1]["json"]["status"], "ready")
 
     def test_uncertain_provider_submission_is_quarantined_without_retry(self):
         import executor as executor_module
@@ -600,6 +659,7 @@ class ProviderSubmissionRecoveryTests(unittest.TestCase):
         job_executor.create_asset = AsyncMock(return_value=True)
         job_executor.resolve_asset_url = AsyncMock(return_value="https://oss.test/input")
         job_executor.output_dir = Path(directory)
+        job_executor.backend_url = "http://backend.test"
         for key, value in overrides.items():
             setattr(job_executor, key, value)
         return job_executor
@@ -671,10 +731,10 @@ class ProviderSubmissionRecoveryTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             adapter = self._completing_adapter(executor_module, usage=None)
-            job_executor = self._plan_job_executor(adapter, directory)
-            job_executor.oss_uploader = SimpleNamespace(
-                upload=lambda _path, _key: "https://oss.test/signed"
+            job_executor = self._plan_job_executor(
+                adapter, directory, client=_RecordingClient()
             )
+            job_executor.oss_uploader = _FakeOssUploader()
 
             settings = SimpleNamespace(
                 comfyui_enabled=False,
@@ -690,12 +750,9 @@ class ProviderSubmissionRecoveryTests(unittest.TestCase):
             self.assertIsNone(job_executor.report_provider_outcome.await_args.args[2])
             job_executor.create_asset.assert_awaited_once()
 
-            completed_calls = [
-                call
-                for call in job_executor.update_job_status.await_args_list
-                if call.kwargs.get("task_status") == "completed"
-            ]
-            self.assertEqual(len(completed_calls), 1)
+            # 产物照常交付就绪，费用状态与交付状态互不牵连。
+            delivery = job_executor.client.calls[-1]
+            self.assertEqual(delivery["json"]["status"], "ready")
 
     def test_artifact_delivery_is_held_when_outcome_cannot_be_recorded(self):
         import executor as executor_module
@@ -718,9 +775,7 @@ class ProviderSubmissionRecoveryTests(unittest.TestCase):
             )
             # 走真实的 report_provider_outcome：这里要验的正是它在失败时的行为。
             del job_executor.report_provider_outcome
-            job_executor.oss_uploader = SimpleNamespace(
-                upload=lambda _path, _key: "https://oss.test/signed"
-            )
+            job_executor.oss_uploader = _FakeOssUploader()
 
             settings = SimpleNamespace(
                 comfyui_enabled=False,
@@ -791,6 +846,83 @@ class ProviderSubmissionRecoveryTests(unittest.TestCase):
             for call in job_executor.update_job_status.await_args_list:
                 self.assertNotEqual(call.kwargs.get("task_status"), "failed")
 
+    def test_archiving_resume_never_creates_another_provider_task(self):
+        import executor as executor_module
+
+        with tempfile.TemporaryDirectory() as directory:
+            adapter = self._completing_adapter(executor_module, usage={"total_tokens": 10})
+            job_executor = self._plan_job_executor(
+                adapter, directory, client=_RecordingClient()
+            )
+            job_executor.oss_uploader = _FakeOssUploader()
+
+            archiving = Job(
+                id="job-archiving",
+                status="archiving",
+                delivery_status="archiving",
+                created_by="alice",
+                prompt="a product video",
+                created_at="2026-09-10T00:00:00+00:00",
+                provider_profile="seedance-main",
+                attempt_id="attempt-archiving",
+                provider_task_id="provider-archiving",
+                execution_plan=approved_execution_plan(),
+            )
+
+            settings = SimpleNamespace(
+                comfyui_enabled=False,
+                running_job_timeout_minutes=10,
+                task_status_check_interval=0,
+                video_flow_audit_dir="",
+            )
+            with patch.object(executor_module, "settings", settings):
+                asyncio.run(job_executor.execute_job(archiving))
+
+            # 归档分支绝不能提交新的付费任务，也不能再报一次终态结算。
+            adapter.create_task.assert_not_awaited()
+            job_executor.report_provider_outcome.assert_not_awaited()
+            adapter.poll_until_complete.assert_awaited_once_with(
+                "provider-archiving", interval=0
+            )
+            self.assertEqual(job_executor.client.calls[-1]["json"]["status"], "ready")
+
+    def test_archiving_without_provider_id_fails_explicitly(self):
+        import executor as executor_module
+
+        with tempfile.TemporaryDirectory() as directory:
+            adapter = self._completing_adapter(executor_module, usage={"total_tokens": 10})
+            job_executor = self._plan_job_executor(
+                adapter, directory, client=_RecordingClient()
+            )
+            job_executor.oss_uploader = _FakeOssUploader()
+
+            orphan = Job(
+                id="job-archiving-orphan",
+                status="archiving",
+                delivery_status="archiving",
+                created_by="alice",
+                prompt="a product video",
+                created_at="2026-09-10T00:00:00+00:00",
+                provider_profile="seedance-main",
+                attempt_id="attempt-archiving-orphan",
+                execution_plan=approved_execution_plan(),
+            )
+
+            settings = SimpleNamespace(
+                comfyui_enabled=False,
+                running_job_timeout_minutes=10,
+                task_status_check_interval=0,
+                video_flow_audit_dir="",
+            )
+            with patch.object(executor_module, "settings", settings):
+                asyncio.run(job_executor.execute_job(orphan))
+
+            # 没有原任务可查就明确失败，不做替代品、也不新建 Provider 任务。
+            adapter.create_task.assert_not_awaited()
+            delivery = job_executor.client.calls[-1]["json"]
+            self.assertEqual(delivery["status"], "failed")
+            self.assertEqual(delivery["errorCode"], "NO_PROVIDER_TASK_ID_FOR_ARCHIVING")
+
     def test_legacy_job_without_execution_plan_keeps_compat_path(self):
         import executor as executor_module
 
@@ -799,9 +931,7 @@ class ProviderSubmissionRecoveryTests(unittest.TestCase):
                 executor_module, usage={"total_tokens": 1000}
             )
             job_executor = self._plan_job_executor(adapter, directory)
-            job_executor.oss_uploader = SimpleNamespace(
-                upload=lambda _path, _key: "https://oss.test/signed"
-            )
+            job_executor.oss_uploader = _FakeOssUploader()
 
             legacy_job = Job(
                 id="job-legacy",
@@ -873,8 +1003,13 @@ class ProviderSubmissionRecoveryTests(unittest.TestCase):
                     create_task=AsyncMock(),
                     poll_until_complete=AsyncMock(
                         return_value=ProviderTaskStatus(
-                            id="provider-crashed", status="completed"
+                            id="provider-crashed",
+                            status="completed",
+                            result_url="https://provider.test/crashed.mp4",
                         )
+                    ),
+                    download_video=AsyncMock(
+                        side_effect=lambda _url, output_path: Path(output_path).write_bytes(b"video")
                     ),
                     calculate_actual_cost=lambda _usage: None,
                     pricing_version="seedance-token-v1",
@@ -884,6 +1019,10 @@ class ProviderSubmissionRecoveryTests(unittest.TestCase):
                 restarted.update_job_status = AsyncMock(return_value=True)
                 restarted.report_provider_outcome = AsyncMock(return_value=True)
                 restarted.resolve_asset_url = AsyncMock(return_value="https://oss.test/input")
+                restarted.backend_url = "http://backend.test"
+                restarted.client = _RecordingClient()
+                restarted.oss_uploader = _FakeOssUploader()
+                restarted.create_asset = AsyncMock(return_value=True)
 
                 inflight = Job(
                     id="task-crashed",
@@ -898,8 +1037,9 @@ class ProviderSubmissionRecoveryTests(unittest.TestCase):
                 )
                 asyncio.run(restarted.execute_job(inflight))
 
+            # 暂停只拦新提交：已有任务的恢复与交付照常完成。
             adapter.create_task.assert_not_awaited()
-            self.assertIsNotNone(restarted.update_job_status.await_args)
+            self.assertEqual(restarted.client.calls[-1]["json"]["status"], "ready")
             self.assertNotIn(
                 "requires_review",
                 [

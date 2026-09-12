@@ -7,6 +7,9 @@ class JobStatus(str, Enum):
     PENDING = "pending"
     SUBMITTED = "submitted"
     RUNNING = "running"
+    # Provider 已成功、产物还没交付：归档分支的入口状态，
+    # 只能凭已知 providerTaskId 取回产物，不能再走提交。
+    ARCHIVING = "archiving"
     COMPLETED = "completed"
     FAILED = "failed"
 

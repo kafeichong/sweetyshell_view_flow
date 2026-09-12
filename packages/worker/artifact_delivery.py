@@ -1,0 +1,78 @@
+"""产物归档的稳定标识与本地校验。
+
+归档和生成是两条独立的分支：生成决定"Provider 上有没有产物"，归档只负责把
+已知的产物搬到 OSS 并登记。这里定义的稳定 object key 是归档幂等的基础——
+同一 task + attempt 永远指向同一个对象，重跑归档只会覆盖自己，不会产生第二份
+产物记录，也不靠秒级时间戳碰运气去避免文件名冲突。
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, Optional, Tuple
+
+
+def artifact_object_key(task_id: str, attempt_id: str) -> str:
+    """产物在对象存储中的固定位置：videos/{taskId}/{attemptId}/result.mp4。"""
+    if not task_id or not attempt_id:
+        raise ValueError("task_id and attempt_id are required for an artifact key")
+    return f"videos/{task_id}/{attempt_id}/result.mp4"
+
+
+def validate_artifact_file(local_path: str | Path) -> Tuple[bool, Optional[str]]:
+    """归档前的本地校验：文件必须存在且非空。
+
+    返回 (是否可用, 失败原因)。空文件或缺失文件上传上去等于交付一个坏产物，
+    必须在调用 Provider/OSS 之前就判定为归档失败。
+    """
+    path = Path(local_path)
+    if not path.exists():
+        return False, "ARTIFACT_FILE_MISSING"
+    if not path.is_file():
+        return False, "ARTIFACT_NOT_A_FILE"
+    try:
+        if path.stat().st_size <= 0:
+            return False, "ARTIFACT_FILE_EMPTY"
+    except OSError:
+        return False, "ARTIFACT_FILE_UNREADABLE"
+    return True, None
+
+
+def object_size_from_head(head: Any) -> Optional[int]:
+    """从 OSS HEAD 结果里取对象大小，取不到就返回 None。"""
+    if head is None:
+        return None
+
+    # oss2 用 content_length（下划线）；部分 SDK 的字典形态用连字符，
+    # 两种都认，避免因为取不到大小而把已存在的对象判成缺失。
+    for attribute in ("content_length", "content-length"):
+        value = getattr(head, attribute, None)
+        if value is None and isinstance(head, dict):
+            value = head.get(attribute)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str) and value.isdigit():
+            return int(value)
+    return None
+
+
+def verify_uploaded_object(
+    head: Any,
+    *,
+    expected_size: Optional[int] = None,
+) -> Tuple[bool, Optional[str]]:
+    """上传后确认对象真的存在且非空，避免登记一条指向空气的产物记录。"""
+    if head is None:
+        return False, "ARTIFACT_OBJECT_MISSING"
+
+    size = object_size_from_head(head)
+    if size is None:
+        # HEAD 没给出大小：至少对象是存在的，不再断言大小。
+        return True, None
+    if size <= 0:
+        return False, "ARTIFACT_OBJECT_EMPTY"
+    if expected_size is not None and size != expected_size:
+        return False, "ARTIFACT_OBJECT_SIZE_MISMATCH"
+    return True, None

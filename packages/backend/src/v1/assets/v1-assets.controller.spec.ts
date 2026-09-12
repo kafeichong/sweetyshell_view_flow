@@ -10,6 +10,12 @@ jest.mock('@nestjs/common', () => ({
   BadRequestException: class BadRequestException extends Error { status = 400; },
   NotFoundException: class NotFoundException extends Error { status = 404; },
   ServiceUnavailableException: class ServiceUnavailableException extends Error { status = 503; },
+  ConflictException: class ConflictException extends Error {
+    status = 409;
+    constructor(public response: unknown) {
+      super(typeof response === 'string' ? response : (response as { message: string })?.message);
+    }
+  },
 }));
 jest.mock('ali-oss', () => class OSS {});
 
@@ -33,7 +39,9 @@ describe('V1AssetsController ownership', () => {
       }),
     };
     const tasks = {
-      findOneForActor: jest.fn().mockResolvedValue({ id: 'task-1' }),
+      findOneForActor: jest
+        .fn()
+        .mockResolvedValue({ id: 'task-1', deliveryStatus: 'ready' }),
     };
     const controller = new V1AssetsController(
       assets as never,
@@ -78,6 +86,31 @@ describe('V1AssetsController ownership', () => {
     ).rejects.toMatchObject({ status: 404 });
     expect(assets.findLatestOwnedOutputForTask).not.toHaveBeenCalled();
     expect(presign.createDownloadUrl).not.toHaveBeenCalled();
+  });
+
+  it('distinguishes still-generating, delivery-failed and review results', async () => {
+    const buildController = (task: Record<string, unknown>) =>
+      new V1AssetsController(
+        { findLatestOwnedOutputForTask: jest.fn() } as never,
+        { createDownloadUrl: jest.fn() } as never,
+        { findOneForActor: jest.fn().mockResolvedValue(task) } as never,
+      );
+
+    const cases: Array<[Record<string, unknown>, string]> = [
+      [{ id: 'task-1', deliveryStatus: 'archiving', taskStatus: 'in_progress' }, 'RESULT_NOT_READY'],
+      [{ id: 'task-1', deliveryStatus: 'not_started', taskStatus: 'pending' }, 'RESULT_NOT_READY'],
+      [{ id: 'task-1', deliveryStatus: 'failed', taskStatus: 'failed' }, 'DELIVERY_FAILED'],
+      [
+        { id: 'task-1', deliveryStatus: 'not_started', taskStatus: 'requires_review' },
+        'RESULT_REQUIRES_REVIEW',
+      ],
+    ];
+
+    for (const [task, expectedCode] of cases) {
+      await expect(
+        buildController(task).taskResult({ actorId: 'actor-a' }, 'task-1'),
+      ).rejects.toMatchObject({ status: 409, response: { message: expectedCode } });
+    }
   });
 
   it('does not create a download URL for an asset owned by another actor', async () => {

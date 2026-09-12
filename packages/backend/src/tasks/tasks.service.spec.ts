@@ -13,6 +13,7 @@ describe('TasksService contract', () => {
       findMany: jest.fn(),
       findUnique: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
     },
     executionAttempt: {
       findUnique: jest.fn(),
@@ -213,6 +214,145 @@ describe('TasksService contract', () => {
     expect(prisma.executionAttempt.update).toHaveBeenCalledWith({
       where: { id: 'attempt-1' },
       data: expect.objectContaining({ status: 'failed', failureCode: 'ABANDONED_BEFORE_SUBMIT' }),
+    });
+  });
+
+  describe('delivery transitions', () => {
+    beforeEach(() => {
+      prisma.task.updateMany.mockReset();
+      prisma.task.findUnique.mockReset();
+    });
+
+    it('completes delivery only from the archiving state', async () => {
+      prisma.task.updateMany.mockResolvedValue({ count: 1 });
+
+      const result = await service.completeDelivery(
+        'task-1',
+        'videos/task-1/attempt-1/result.mp4',
+      );
+
+      expect(prisma.task.updateMany).toHaveBeenCalledWith({
+        where: { id: 'task-1', deliveryStatus: 'archiving' },
+        data: expect.objectContaining({
+          status: 'completed',
+          taskStatus: 'completed',
+          deliveryStatus: 'ready',
+          videoUrl: 'videos/task-1/attempt-1/result.mp4',
+        }),
+      });
+      expect(result).toEqual({ deliveryStatus: 'ready', applied: true });
+    });
+
+    it('treats a repeated ready delivery as idempotent', async () => {
+      prisma.task.updateMany.mockResolvedValue({ count: 0 });
+      prisma.task.findUnique.mockResolvedValue({
+        deliveryStatus: 'ready',
+        videoUrl: 'videos/task-1/attempt-1/result.mp4',
+      });
+
+      const result = await service.completeDelivery(
+        'task-1',
+        'videos/task-1/attempt-1/result.mp4',
+      );
+
+      expect(result).toEqual({ deliveryStatus: 'ready', applied: false });
+    });
+
+    it('refuses to mark a task ready when its delivery is not archiving', async () => {
+      prisma.task.updateMany.mockResolvedValue({ count: 0 });
+      prisma.task.findUnique.mockResolvedValue({
+        deliveryStatus: 'not_started',
+        videoUrl: null,
+      });
+
+      // CAS 失败且不是幂等重放：说明有人越过了 Provider 结算直接要求交付。
+      await expect(
+        service.completeDelivery('task-1', 'videos/task-1/attempt-1/result.mp4'),
+      ).rejects.toThrow('DELIVERY_NOT_APPLICABLE');
+    });
+
+    it('records the failing stage so users can tell archiving apart from generating', async () => {
+      prisma.task.updateMany.mockResolvedValue({ count: 1 });
+
+      await service.failDelivery('task-1', 'ARTIFACT_UPLOAD_FAILED', 'upload');
+
+      expect(prisma.task.updateMany).toHaveBeenCalledWith({
+        where: { id: 'task-1', deliveryStatus: 'archiving' },
+        data: expect.objectContaining({
+          status: 'failed',
+          taskStatus: 'failed',
+          deliveryStatus: 'failed',
+          errorMsg: 'upload:ARTIFACT_UPLOAD_FAILED',
+        }),
+      });
+    });
+
+    it('keeps a delivery failure idempotent for the same stage error', async () => {
+      prisma.task.updateMany.mockResolvedValue({ count: 0 });
+      prisma.task.findUnique.mockResolvedValue({
+        deliveryStatus: 'failed',
+        errorMsg: 'upload:ARTIFACT_UPLOAD_FAILED',
+      });
+
+      const result = await service.failDelivery(
+        'task-1',
+        'ARTIFACT_UPLOAD_FAILED',
+        'upload',
+      );
+
+      expect(result).toEqual({ deliveryStatus: 'failed', applied: false });
+    });
+
+    it('resumes only provider-succeeded tasks whose delivery already failed', async () => {
+      prisma.task.findUnique.mockResolvedValue({
+        id: 'task-1',
+        status: 'failed',
+        deliveryStatus: 'failed',
+        executionAttempts: [{ status: 'completed' }],
+      });
+      prisma.task.updateMany.mockResolvedValue({ count: 1 });
+
+      const result = await service.resumeDelivery('task-1');
+
+      expect(prisma.task.updateMany).toHaveBeenCalledWith({
+        where: { id: 'task-1', deliveryStatus: 'failed' },
+        data: expect.objectContaining({
+          status: 'archiving',
+          taskStatus: 'in_progress',
+          deliveryStatus: 'archiving',
+          errorMsg: null,
+        }),
+      });
+      expect(result).toMatchObject({ taskId: 'task-1', deliveryStatus: 'archiving' });
+    });
+
+    it('refuses to resume a task whose provider run never succeeded', async () => {
+      prisma.task.findUnique.mockResolvedValue({
+        id: 'task-1',
+        status: 'failed',
+        deliveryStatus: 'failed',
+        executionAttempts: [{ status: 'failed' }],
+      });
+
+      // 没有 Provider 产物可搬运，恢复归档只会制造替代品。
+      await expect(service.resumeDelivery('task-1')).rejects.toThrow(
+        'PROVIDER_SUCCESS_REQUIRED',
+      );
+      expect(prisma.task.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('refuses to resume a delivery that is still archiving', async () => {
+      prisma.task.findUnique.mockResolvedValue({
+        id: 'task-1',
+        status: 'archiving',
+        deliveryStatus: 'archiving',
+        executionAttempts: [{ status: 'completed' }],
+      });
+      prisma.task.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(service.resumeDelivery('task-1')).rejects.toThrow(
+        'DELIVERY_NOT_RESUMABLE',
+      );
     });
   });
 });

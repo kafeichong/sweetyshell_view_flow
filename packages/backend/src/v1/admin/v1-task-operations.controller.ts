@@ -2,15 +2,20 @@ import {
   BadRequestException,
   Body,
   Controller,
+  HttpCode,
+  HttpStatus,
+  Logger,
   NotFoundException,
   Param,
   Patch,
+  Post,
   UseGuards,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { AdminTokenGuard } from '../../auth/admin-token.guard';
 import { PrismaService } from '../../prisma.service';
 import { TaskBudgetService } from '../../tasks/task-budget.service';
+import { TasksService } from '../../tasks/tasks.service';
 
 type BudgetReviewBody = {
   decision: 'settle' | 'release';
@@ -35,10 +40,53 @@ function nonEmptyString(value: unknown): value is string {
 @Controller('v1/admin/tasks')
 @UseGuards(AdminTokenGuard)
 export class V1TaskOperationsController {
+  private readonly logger = new Logger(V1TaskOperationsController.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly budget: TaskBudgetService,
+    private readonly tasks: TasksService,
   ) {}
+
+  /**
+   * 人工恢复归档：只让"Provider 已成功、交付失败"的任务重新进入 archiving。
+   *
+   * 不创建新的 Attempt 或 Provider 任务——产物在 Provider 侧已经存在，
+   * 重跑的是搬运而不是生成。归档仍在进行中的任务由 Worker 自动重试，
+   * 这里会拒绝，避免两边同时搬运同一份产物。
+   */
+  @Post(':taskId/resume-delivery')
+  @HttpCode(HttpStatus.OK)
+  async resumeDelivery(
+    @Param('taskId') taskId: string,
+    @Body() body: { reason?: string; operator?: string; evidenceRef?: string },
+  ) {
+    if (!nonEmptyString(body?.reason)) {
+      throw new BadRequestException('reason is required');
+    }
+    if (!nonEmptyString(body?.operator)) {
+      throw new BadRequestException('operator is required');
+    }
+    if (!nonEmptyString(body?.evidenceRef)) {
+      throw new BadRequestException('evidenceRef is required');
+    }
+
+    const result = await this.tasks.resumeDelivery(taskId);
+
+    this.logger.log(
+      `Artifact delivery resumed for task ${taskId} by ${body.operator.trim()} ` +
+        `(reason: ${body.reason.trim()}, evidence: ${body.evidenceRef.trim()})`,
+    );
+
+    return {
+      ...result,
+      reason: body.reason.trim(),
+      evidenceRef: body.evidenceRef.trim(),
+      // 声明值：管理员自报的操作者，未经身份验证。
+      operator: body.operator.trim(),
+      operatorIsDeclaredClaim: true,
+    };
+  }
 
   /**
    * 账单核实后的受控动作：把 review 中的预占结算或释放。

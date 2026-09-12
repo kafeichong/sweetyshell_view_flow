@@ -3,10 +3,15 @@ jest.mock('@nestjs/common', () => ({
   Controller: () => (target: unknown) => target,
   UseGuards: () => (target: unknown) => target,
   Patch: () => () => {},
+  Post: () => () => {},
+  HttpCode: () => () => {},
+  HttpStatus: { OK: 200 },
   Param: () => () => {},
   Body: () => () => {},
+  Logger: class Logger { log() {} warn() {} error() {} },
   BadRequestException: class BadRequestException extends Error { status = 400; },
   NotFoundException: class NotFoundException extends Error { status = 404; },
+  ConflictException: class ConflictException extends Error { status = 409; },
 }));
 
 import { V1TaskOperationsController } from './v1-task-operations.controller';
@@ -21,6 +26,10 @@ const budget = {
   applyReviewDecisionInTransaction: jest.fn(),
 };
 
+const tasks = {
+  resumeDelivery: jest.fn(),
+};
+
 const validBody = {
   decision: 'settle' as const,
   amountCny: '12.500000',
@@ -32,13 +41,14 @@ describe('V1TaskOperationsController budget review', () => {
   let controller: V1TaskOperationsController;
 
   beforeEach(() => {
-    controller = new V1TaskOperationsController(prisma, budget as never);
+    controller = new V1TaskOperationsController(prisma, budget as never, tasks as never);
     prisma.task.findUnique.mockReset();
     prisma.executionAttempt.findFirst.mockReset();
     prisma.executionAttempt.update.mockReset();
     prisma.$transaction.mockReset();
     budget.applyReviewDecisionInTransaction.mockReset();
 
+    tasks.resumeDelivery.mockReset();
     prisma.task.findUnique.mockResolvedValue({ id: 'task-1' });
     prisma.executionAttempt.findFirst.mockResolvedValue({ id: 'attempt-1' });
     prisma.executionAttempt.update.mockResolvedValue({ id: 'attempt-1' });
@@ -150,5 +160,57 @@ describe('V1TaskOperationsController budget review', () => {
       'Task not found',
     );
     expect(budget.applyReviewDecisionInTransaction).not.toHaveBeenCalled();
+  });
+
+  describe('resume-delivery', () => {
+    const resumeBody = {
+      reason: 'worker crashed mid-archiving',
+      operator: 'steven',
+      evidenceRef: 'incident-2026-09-12',
+    };
+
+    it('resumes delivery through the task CAS without creating provider work', async () => {
+      tasks.resumeDelivery.mockResolvedValue({
+        taskId: 'task-1',
+        deliveryStatus: 'archiving',
+        status: 'archiving',
+      });
+
+      const result = await controller.resumeDelivery('task-1', resumeBody);
+
+      expect(tasks.resumeDelivery).toHaveBeenCalledWith('task-1');
+      expect(result).toMatchObject({
+        taskId: 'task-1',
+        deliveryStatus: 'archiving',
+        reason: 'worker crashed mid-archiving',
+        evidenceRef: 'incident-2026-09-12',
+        operator: 'steven',
+        operatorIsDeclaredClaim: true,
+      });
+    });
+
+    it('requires a reason, operator and evidence reference', async () => {
+      await expect(
+        controller.resumeDelivery('task-1', { ...resumeBody, reason: '  ' }),
+      ).rejects.toThrow('reason is required');
+      await expect(
+        controller.resumeDelivery('task-1', { ...resumeBody, operator: '' }),
+      ).rejects.toThrow('operator is required');
+      await expect(
+        controller.resumeDelivery('task-1', { ...resumeBody, evidenceRef: '' }),
+      ).rejects.toThrow('evidenceRef is required');
+
+      expect(tasks.resumeDelivery).not.toHaveBeenCalled();
+    });
+
+    it('propagates refusals for tasks that are not resumable', async () => {
+      tasks.resumeDelivery.mockRejectedValue(
+        Object.assign(new Error('PROVIDER_SUCCESS_REQUIRED'), { status: 409 }),
+      );
+
+      await expect(controller.resumeDelivery('task-1', resumeBody)).rejects.toMatchObject({
+        status: 409,
+      });
+    });
   });
 });

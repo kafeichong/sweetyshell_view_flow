@@ -202,7 +202,8 @@ describe('TaskClaimService contract', () => {
       where: {
         taskStatus: 'in_progress',
         status: {
-          in: ['submitted', 'running'],
+          // archiving 也要能被找回，否则归档中断就再没人交付产物。
+          in: ['submitted', 'running', 'archiving'],
         },
       },
       orderBy: { createdAt: 'asc' },

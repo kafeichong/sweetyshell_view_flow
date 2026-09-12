@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, NotFoundException, Param, Post, ServiceUnavailableException, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, Get, NotFoundException, Param, Post, ServiceUnavailableException, UseGuards } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { ApiCredentialGuard } from '../../auth/api-credential.guard';
@@ -16,22 +16,57 @@ export class V1AssetsController {
     private readonly tasks?: TasksService,
   ) {}
 
+  /**
+   * 结果查询：本人任务的产物下载入口。
+   *
+   * 错误语义按第 5.2 节区分三种"暂时拿不到"，让用户能分辨还在生成、归档失败
+   * 还是需要人工核查；不存在的任务和别人的任务一律 404，不泄漏任务是否存在。
+   * 下载链接按需签发，不作为永久产物标识返回。
+   */
   @Get('tasks/:taskId/result')
   async taskResult(
     @CurrentActor() actor: { actorId: string },
     @Param('taskId') taskId: string,
   ) {
-    const task = await this.tasks?.findOneForActor(taskId, actor.actorId);
+    const task = (await this.tasks?.findOneForActor(taskId, actor.actorId)) as
+      | { deliveryStatus?: string | null; taskStatus?: string | null; status?: string | null }
+      | null
+      | undefined;
     if (!task) {
       throw new NotFoundException('Task result not found');
     }
+
+    if (task.deliveryStatus === 'failed') {
+      throw new ConflictException({
+        statusCode: 409,
+        message: 'DELIVERY_FAILED',
+        error: 'Conflict',
+      });
+    }
+
+    if (task.deliveryStatus !== 'ready') {
+      const requiresReview =
+        task.taskStatus === 'requires_review' || task.status === 'requires_review';
+      throw new ConflictException({
+        statusCode: 409,
+        message: requiresReview ? 'RESULT_REQUIRES_REVIEW' : 'RESULT_NOT_READY',
+        error: 'Conflict',
+      });
+    }
+
     const asset = await this.assets.findLatestOwnedOutputForTask(
       taskId,
       actor.actorId,
     );
     if (!asset) {
-      throw new NotFoundException('Task result not found');
+      // 交付标记为 ready 却没有产物记录：这是内部不一致，不能让用户拿到空结果。
+      throw new ConflictException({
+        statusCode: 409,
+        message: 'DELIVERY_FAILED',
+        error: 'Conflict',
+      });
     }
+
     return {
       taskId,
       assetId: asset.id,

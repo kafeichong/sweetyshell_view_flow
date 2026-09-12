@@ -21,3 +21,16 @@ class OssUploader:
         # 返回 OSS 签名链接，默认 7 天有效，符合“产物私有化+时效访问”策略。
         self.bucket.put_object_from_file(object_key, local_path)
         return self.bucket.sign_url("GET", object_key, SIGNED_URL_EXPIRE_SECONDS)
+
+    def head_object(self, object_key: str):
+        """读取对象元信息；对象不存在时返回 None。
+
+        上传成功后必须能 HEAD 到对象才算真的交付成功——只凭 put 返回值或本地
+        文件存在就登记，会留下一条指向空气的产物记录。
+        """
+        try:
+            return self.bucket.head_object(object_key)
+        except oss2.exceptions.NoSuchKey:
+            return None
+        except oss2.exceptions.NotFound:
+            return None

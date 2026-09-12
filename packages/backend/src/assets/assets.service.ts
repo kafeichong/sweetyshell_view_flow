@@ -1,4 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 
 export enum AssetRole {
@@ -27,6 +31,32 @@ export type UploadedAssetMetadata = {
   sizeBytes: number;
   mimeType: string;
 };
+
+export type RegisterOutputOnceInput = {
+  taskId: string;
+  attemptId?: string | null;
+  objectKey: string;
+  bucket?: string;
+  mediaType?: string;
+  mimeType?: string;
+  sizeBytes?: number;
+  fileHash?: string;
+};
+
+export type RegisterOutputOnceResult = {
+  asset: {
+    id: string;
+    ownerId: string | null;
+    taskId: string | null;
+    attemptId: string | null;
+    objectKey: string;
+    inspectionStatus: string | null;
+  };
+  deduplicated: boolean;
+};
+
+// 归档登记的 advisory lock 命名空间：0/1 已被预算准入占用、2 被任务领取占用。
+const DELIVERY_LOCK_CLASS = 3;
 
 @Injectable()
 export class AssetsService {
@@ -84,6 +114,100 @@ export class AssetsService {
     });
   }
 
+  /**
+   * 登记产物 Asset —— 所有输出登记的唯一入口。
+   *
+   * 不变量：
+   * - owner 继承 Task（不采信调用方传的 ownerId，避免越权挂到别人名下）；
+   * - Attempt 必须属于该 Task；
+   * - 同一 objectKey 重复登记返回既有行（归档重跑不得产生第二条产物记录）。
+   *
+   * 并发安全靠 taskId+attemptId 的事务级 advisory lock 串行化"查重+插入"，
+   * 而不是先查再插。
+   */
+  async registerOutputOnce(
+    data: RegisterOutputOnceInput,
+  ): Promise<RegisterOutputOnceResult> {
+    return this.prisma.$transaction(async (tx: any) => {
+      const task = await tx.task.findUnique({
+        where: { id: data.taskId },
+        select: { id: true, actorId: true, createdBy: true },
+      });
+      if (!task) {
+        throw new NotFoundException('Task not found');
+      }
+
+      if (data.attemptId) {
+        const attempt = await tx.executionAttempt.findUnique({
+          where: { id: data.attemptId },
+          select: { taskId: true },
+        });
+        if (!attempt || attempt.taskId !== data.taskId) {
+          throw new BadRequestException('ATTEMPT_TASK_MISMATCH');
+        }
+      }
+
+      const lockKey = `${data.taskId}:${data.attemptId ?? 'none'}`;
+      if (typeof tx.$executeRaw === 'function') {
+        // 必须显式 ::int：Prisma 会把 JS number 作为 bigint 传参，
+        // 而 pg_advisory_xact_lock 没有 (bigint, integer) 重载，会直接报 42883。
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(${DELIVERY_LOCK_CLASS}::int, hashtext(${lockKey})::int)`;
+      }
+
+      const existing = await tx.asset.findFirst({
+        where: {
+          taskId: data.taskId,
+          role: AssetRole.OUTPUT,
+          objectKey: data.objectKey,
+        },
+      });
+      if (existing) {
+        return { asset: existing, deduplicated: true };
+      }
+
+      const created = await tx.asset.create({
+        data: {
+          ownerId: task.actorId ?? task.createdBy,
+          taskId: data.taskId,
+          attemptId: data.attemptId ?? null,
+          role: AssetRole.OUTPUT,
+          mediaType: data.mediaType,
+          bucket: data.bucket,
+          objectKey: data.objectKey,
+          mimeType: data.mimeType,
+          // Asset.sizeBytes 是 BigInt 列：Worker 用 JSON 传数字，直接写会被
+          // Prisma 拒绝。非整数或负数说明调用方给错了值，宁可拒绝也不猜。
+          sizeBytes: this.toBigIntSize(data.sizeBytes),
+          fileHash: data.fileHash,
+          inspectionStatus: 'uploaded',
+        },
+      });
+
+      return { asset: created, deduplicated: false };
+    });
+  }
+
+  private toBigIntSize(sizeBytes: unknown): bigint | null | undefined {
+    if (sizeBytes === null || sizeBytes === undefined) {
+      return sizeBytes as null | undefined;
+    }
+    if (typeof sizeBytes === 'bigint') {
+      return sizeBytes >= 0n ? sizeBytes : this.invalidSize();
+    }
+    if (
+      typeof sizeBytes !== 'number' ||
+      !Number.isSafeInteger(sizeBytes) ||
+      sizeBytes < 0
+    ) {
+      return this.invalidSize();
+    }
+    return BigInt(sizeBytes);
+  }
+
+  private invalidSize(): never {
+    throw new BadRequestException('sizeBytes must be a non-negative integer');
+  }
+
   findByTask(taskId: string) {
     const prismaAsset = this.prisma as unknown as {
       asset: {
@@ -96,6 +220,18 @@ export class AssetsService {
     return assets.findMany({
       where: { taskId },
       orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  findOutputForAttempt(taskId: string, attemptId: string, objectKey: string) {
+    const prismaAsset = this.prisma as unknown as { asset: { findFirst: any } };
+    return prismaAsset.asset.findFirst({
+      where: {
+        taskId,
+        attemptId,
+        role: AssetRole.OUTPUT,
+        objectKey,
+      },
     });
   }
 

@@ -1,4 +1,9 @@
-import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { TaskBudgetService } from './task-budget.service';
 import { Prisma } from '@prisma/client';
@@ -115,6 +120,68 @@ export class TasksService {
 
   async findOneForActor(id: string, actorId: string) {
     return this.prisma.task.findFirst({ where: { id, actorId } });
+  }
+
+  /**
+   * 用户可见的任务摘要：保留既有字段，另外给出执行、交付与费用三段。
+   *
+   * 三段分开是刻意的：Provider 成功不代表交付成功（archiving/failed），
+   * 交付成功也不代表费用已知（usage 缺失时仍是 review）。客户端要能分辨
+   * "还在生成""归档失败""需核查"，而不是只看一个 status 猜。
+   */
+  async findSummaryForActor(id: string, actorId: string) {
+    const task = (await this.prisma.task.findFirst({
+      where: { id, actorId },
+      include: {
+        executionAttempts: { orderBy: { attemptNo: 'desc' }, take: 1 },
+        budgetReservation: true,
+      },
+    })) as any;
+
+    if (!task) return null;
+
+    const attempt = task.executionAttempts?.[0] ?? null;
+    const reservation = task.budgetReservation ?? null;
+    const amount = (value: unknown) =>
+      value === null || value === undefined ? null : Number(value).toFixed(6);
+
+    // 只有交付就绪才回传产物标识；还在归档时给 null，让客户端知道"还没有可下载的片"。
+    const output =
+      task.deliveryStatus === 'ready'
+        ? await (this.prisma as any).asset.findFirst({
+            where: { taskId: id, role: 'output' },
+            orderBy: { createdAt: 'desc' },
+            select: { id: true },
+          })
+        : null;
+
+    return {
+      ...task,
+      execution: attempt
+        ? {
+            attemptId: attempt.id,
+            provider: attempt.provider ?? null,
+            model: attempt.model ?? null,
+            providerTaskId: attempt.providerTaskId ?? null,
+            status: attempt.status ?? null,
+          }
+        : null,
+      delivery: {
+        status: task.deliveryStatus ?? 'not_started',
+        assetId: output?.id ?? null,
+        errorCode: task.deliveryStatus === 'failed' ? (task.errorMsg ?? null) : null,
+      },
+      costSummary: {
+        status: attempt?.costStatus ?? 'unavailable',
+        estimatedCny: amount(attempt?.estimatedCostCny),
+        usageCalculatedCny: amount(attempt?.usageCalculatedCostCny),
+        billedCny: amount(attempt?.billedCostCny),
+        pricingVersion: attempt?.pricingVersion ?? null,
+        reservedCny: reservation ? reservation.reservedCny?.toFixed(6) ?? null : null,
+        settledCny: reservation ? reservation.settledCny?.toFixed(6) ?? null : null,
+        reservationState: reservation?.state ?? null,
+      },
+    };
   }
 
   async findAll(filters?: { status?: string; createdBy?: string }) {
@@ -309,6 +376,131 @@ export class TasksService {
 
       return taskResult;
     });
+  }
+
+  /**
+   * 交付就绪：只有产物登记成功后才能调用。
+   *
+   * 用 CAS（deliveryStatus 必须仍是 archiving）保证人工恢复与 Worker 自动恢复
+   * 只有一个能真正把任务推进到 completed；重复调用按幂等成功处理。Provider 的
+   * 成功与费用证据不在这个路径上，任何交付失败都不会回头改写它们。
+   */
+  async completeDelivery(taskId: string, objectKey: string) {
+    const completedAt = new Date();
+    const applied = await this.prisma.task.updateMany({
+      where: { id: taskId, deliveryStatus: 'archiving' },
+      data: {
+        status: 'completed',
+        taskStatus: 'completed',
+        deliveryStatus: 'ready',
+        videoUrl: objectKey,
+        errorMsg: null,
+        completedAt,
+      },
+    });
+
+    if (applied.count > 0) {
+      return { deliveryStatus: 'ready', applied: true };
+    }
+
+    const current = await this.prisma.task.findUnique({
+      where: { id: taskId },
+      select: { deliveryStatus: true, videoUrl: true },
+    });
+
+    if (current?.deliveryStatus === 'ready' && current.videoUrl === objectKey) {
+      return { deliveryStatus: 'ready', applied: false };
+    }
+
+    throw new ConflictException('DELIVERY_NOT_APPLICABLE');
+  }
+
+  /**
+   * 交付失败：写清阶段错误，让用户能区分"还在生成"和"归档失败"。
+   *
+   * 只动交付相关字段：Attempt 的 Provider 终态、usage 与预占结算保持原样，
+   * 归档失败不能把已经确认的花费抹掉。
+   */
+  async failDelivery(
+    taskId: string,
+    errorCode: string,
+    stage?: string,
+  ) {
+    const message = stage ? `${stage}:${errorCode}` : errorCode;
+    const applied = await this.prisma.task.updateMany({
+      where: { id: taskId, deliveryStatus: 'archiving' },
+      data: {
+        status: 'failed',
+        taskStatus: 'failed',
+        deliveryStatus: 'failed',
+        errorMsg: message,
+        completedAt: new Date(),
+      },
+    });
+
+    if (applied.count > 0) {
+      return { deliveryStatus: 'failed', applied: true };
+    }
+
+    const current = await this.prisma.task.findUnique({
+      where: { id: taskId },
+      select: { deliveryStatus: true, errorMsg: true },
+    });
+
+    if (current?.deliveryStatus === 'failed' && current.errorMsg === message) {
+      return { deliveryStatus: 'failed', applied: false };
+    }
+
+    throw new ConflictException('DELIVERY_NOT_APPLICABLE');
+  }
+
+  /**
+   * 人工恢复归档：只针对"Provider 已成功但交付失败"的任务重新进入 archiving。
+   *
+   * 不创建新的 Attempt 或 Provider 任务——产物已经存在，重跑的是搬运而不是生成。
+   */
+  async resumeDelivery(taskId: string) {
+    const task = await this.prisma.task.findUnique({
+      where: { id: taskId },
+      select: {
+        id: true,
+        status: true,
+        deliveryStatus: true,
+        executionAttempts: {
+          orderBy: { attemptNo: 'desc' },
+          take: 1,
+          select: { status: true },
+        },
+      },
+    });
+
+    if (!task) {
+      throw new NotFoundException('Task not found');
+    }
+
+    const providerSucceeded = task.executionAttempts?.[0]?.status === 'completed';
+    if (!providerSucceeded) {
+      throw new ConflictException('PROVIDER_SUCCESS_REQUIRED');
+    }
+
+    // 只有交付已经停下（failed）才需要人工恢复；仍在 archiving 的任务
+    // 由 Worker 自动重试，抢同一个归档会让两边重复搬运。
+    const applied = await this.prisma.task.updateMany({
+      where: { id: taskId, deliveryStatus: 'failed' },
+      data: {
+        status: 'archiving',
+        taskStatus: 'in_progress',
+        deliveryStatus: 'archiving',
+        errorMsg: null,
+        completedAt: null,
+      },
+    });
+
+    if (!applied.count) {
+      throw new ConflictException('DELIVERY_NOT_RESUMABLE');
+    }
+
+    return { taskId, deliveryStatus: 'archiving', status: 'archiving' };
   }
 
   async findPending() {
