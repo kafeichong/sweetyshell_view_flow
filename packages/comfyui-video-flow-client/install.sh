@@ -21,12 +21,17 @@ cleanup() {
 trap cleanup EXIT
 
 mkdir "$TEMP_DIR"
-for file in __init__.py client.py config.py nodes.py requirements.txt README.md; do
+# 逐个文件列出而不是目录整体拷贝：多带一个本地调试文件进同事环境，
+# 比漏更新一个模块更难排查。新增模块时必须同步这份清单。
+for file in __init__.py client.py config.py nodes.py receipts.py requirements.txt README.md; do
   cp "$SOURCE_DIR/$file" "$TEMP_DIR/$file"
 done
-if test -d "$SOURCE_DIR/workflows"; then
-  cp -R "$SOURCE_DIR/workflows" "$TEMP_DIR/workflows"
-fi
+# 资源目录：工作流模板、可直接导入的示例、前端展示脚本。
+for directory in workflows examples web; do
+  if test -d "$SOURCE_DIR/$directory"; then
+    cp -R "$SOURCE_DIR/$directory" "$TEMP_DIR/$directory"
+  fi
+done
 
 "$PYTHON_BIN" -m pip install -r "$TEMP_DIR/requirements.txt"
 

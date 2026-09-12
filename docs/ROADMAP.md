@@ -490,6 +490,11 @@ def test_review_task_is_actionable_without_metrics_platform():
 **接口：** 跨包测试复用 T00 服务，不 mock 掉真实 Backend/DB/Worker 序列；fake Provider 记录每个测试关联 key 的 create 次数。installer 复制 receipts.py、examples、web 等新资源，不能只更新旧文件白名单。
 
 - [ ] 将下方矩阵逐项实现为跨包自动用例，provider_count、Task/Attempt/Asset/预算、日志都必须断言；测试异常不能被预期 skip 吞掉。
+
+**进行中（2026-09-13）：** 跨包用例骨架已落地但**未通过**，不能据此签收 T11。
+已完成且已验证的部分：Fake Provider 按提示词统计 `createCountsByKey`（跨包用例据此断言"同一意图只创建一次"）；新增 `packages/worker/tests/test_mvp_live_contract.py`（真实 Worker 代码 + 真实 Backend/DB + Fake Provider，覆盖"预览不创建 Provider 任务"与"重跑不产生第二次 create"），默认由 pytest marker 排除、缺环境直接失败而不是 skip；`scripts/run_mvp_contract.sh` 增加独立 Backend 实例与素材/凭证/准入准备，并把该段放在 `VIDEO_FLOW_RUN_LIVE_CONTRACT=1` 开关之后（默认关闭，避免未通过的用例把整套合同染色成绿）。装载器 `install.sh` 已补 `receipts.py`、`examples/`、`web/`，并有安装测试断言这些资源确实送达且备份仍在 `custom_nodes` 之外；两份手册已补"ComfyUI 出片路径与 generation_version 的付费含义""超时恢复/费用未知/报障 taskId"与"管理员查询/恢复/暂停/迁移备份回滚"。
+
+**尚未通过：** `test_single_intent_creates_the_provider_task_exactly_once` 在本机仍失败——Worker 的 Provider create 没有真正打到 Fake Provider（"Provider submission outcome is uncertain"），已排除代理与事件循环两个原因，仍需继续排查连接层。因此 E01–E13 矩阵尚未全部实现为通过的跨包用例，宿主机/Docker 两种 Provider 寻址的显式验证也尚未做。启用命令：`VIDEO_FLOW_RUN_LIVE_CONTRACT=1 bash scripts/run_mvp_contract.sh`。
 - [ ] Worker restart 用真正退出/启动测试进程验证；用读取数据库持久化 providerTaskId 作为中断触发点，不依赖固定 sleep 猜时机。
 - [ ] 安装测试覆盖新增 Python 模块与前端资源、两个模板、备份位于 custom_nodes 之外；不改同事其他自定义节点。
 - [ ] CI 分开显示单元、合同、预期外部 workflow skip；跨包合同不得使用真实 Provider 凭证，漏跑应失败而不是跳过。

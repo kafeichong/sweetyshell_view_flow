@@ -15,7 +15,10 @@ async def test_fake_provider_counts_create_and_returns_same_task():
     ) as client:
         created = await client.post(
             "/api/v3/contents/generations/tasks",
-            json={"model": "test-model", "content": []},
+            json={
+                "model": "test-model",
+                "content": [{"type": "text", "text": "cross-package scenario"}],
+            },
         )
         task_id = created.json()["id"]
         fetched = await client.get(
@@ -25,7 +28,12 @@ async def test_fake_provider_counts_create_and_returns_same_task():
 
     assert fetched.json()["id"] == task_id
     assert fetched.json()["status"] == "succeeded"
-    assert stats.json() == {"createCount": 1, "taskIds": [task_id]}
+    # 按关联 key 计数：跨包用例要断言"同一个意图只创建一次"。
+    assert stats.json() == {
+        "createCount": 1,
+        "createCountsByKey": {"cross-package scenario": 1},
+        "taskIds": [task_id],
+    }
 
 
 @pytest.mark.asyncio

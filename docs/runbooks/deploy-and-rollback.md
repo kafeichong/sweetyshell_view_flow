@@ -185,6 +185,48 @@ python3 scripts/video_flow_monitor.py --base-url https://ai.sweetyshell.com
 **宿主计划任务**：巡检/备份本身失效要靠宿主的定时任务检查回执是否超时；
 整机失联必须另用已有的外部可用性渠道，不能靠机器自己的巡检发现。
 
+## 6.2 管理员查询、恢复与暂停（T09/T10）
+
+```bash
+# 一条 taskId 的完整报表（只读；默认脱敏，不含完整 Prompt 与签名地址）
+export VIDEO_FLOW_ADMIN_TOKEN_FILE=~/.video-flow/admin-token
+python3 scripts/video_flow_task_report.py --task-id <TASK_ID> --base-url https://ai.sweetyshell.com
+
+# 运维健康与全局开关
+curl -s -H "X-Admin-Token: $ADMIN" https://ai.sweetyshell.com/api/v1/admin/operations/health
+curl -s -X PATCH -H "X-Admin-Token: $ADMIN" -H 'Content-Type: application/json' \
+  -d '{"paused":true,"reason":"provider incident-42"}' \
+  https://ai.sweetyshell.com/api/v1/admin/operations/production-gate
+
+# 恢复生产必须带依据（会写审计）
+curl -s -X PATCH -H "X-Admin-Token: $ADMIN" -H 'Content-Type: application/json' \
+  -d '{"paused":false,"reason":"provider quota confirmed","operator":"steven","evidenceRef":"ticket-42"}' \
+  https://ai.sweetyshell.com/api/v1/admin/operations/production-gate
+
+# 归档失败的受控恢复（只对"Provider 已成功且交付失败"的任务有效，不新建 Provider 任务）
+curl -s -X POST -H "X-Admin-Token: $ADMIN" -H 'Content-Type: application/json' \
+  -d '{"reason":"oss incident","operator":"steven","evidenceRef":"incident-2026-09-13"}' \
+  https://ai.sweetyshell.com/api/v1/admin/tasks/<TASK_ID>/resume-delivery
+
+# 费用人工核实（settle 需金额，release 禁止带金额）
+curl -s -X PATCH -H "X-Admin-Token: $ADMIN" -H 'Content-Type: application/json' \
+  -d '{"decision":"settle","amountCny":"3.500000","evidenceRef":"ark-bill-2026-09","operator":"steven"}' \
+  https://ai.sweetyshell.com/api/v1/admin/tasks/<TASK_ID>/budget-review
+```
+
+- `operator` 是**管理员自报**的操作者，接口会明确标注 `operatorIsDeclaredClaim`，
+  不能当成 token 识别出的个人身份。
+- 所有人工动作都会写审计事件（谁、依据、前后状态）。
+- 报表是不可读/被轮换的日志会明确标注 `evidence_missing`：**查不到不等于没发生**。
+
+### 迁移、备份与回滚
+
+- 迁移：`npx prisma migrate deploy`（合同脚本已验证"从空库全量"与"历史库向前升级"两条链路）。
+- 回滚的优先顺序：先 `PATCH production-gate {paused:true}` 停止新准入，
+  再回滚应用镜像；**保留新增表与资金记录**，不要用 `migrate reset` 抹掉预占与结算。
+- 备份：数据库每日备份并定期恢复到隔离库验证；审计目录与未结案 journal 单独保留，
+  清理策略必须先保护未归档产物与未结案证据。
+
 ---
 
 ## 7. 风险与跟进

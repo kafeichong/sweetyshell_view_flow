@@ -223,6 +223,28 @@ curl -sS 'https://ai.sweetyshell.com/api/v1/assets/tasks/<TASK_ID>/result' \
 
 ---
 
+## 8. 在 ComfyUI 里出片（推荐路径）
+
+用 `Seedance Production` 节点提交，`Wait` 等它可交付，`LoadResult` 取片：
+
+- **`generation_version` 是付费开关**：默认 `1`。同参数同版本重跑沿用**同一个任务**，
+  不会重复扣费；把它改成 `2` 才是"再生成一版"，会产生**新的付费任务**。
+  不确定时不要改这个数字。
+- `Wait` 节点只输出 `taskId`，把它接到 `LoadResult` 的 `task_id` 输入即可，
+  不要手工粘贴任务 JSON。
+- 产物落在 ComfyUI 自己的输出目录下 `video-flow/`；`LoadResult` 的第二个输出
+  会显示费用是否已确认。
+
+**超时**：`Wait` 等超时会报 `WAIT_TIMEOUT` 并带上 taskId。**不要重新提交**——
+用 `examples/seedance-resume.json` 把 taskId 填进去重新等待与取片即可，
+原任务仍在服务端被跟踪。
+
+**费用待核实**：如果 Provider 没返回可核对的 usage，片照样能给，但费用会显示
+"费用待核实"，管理员核实后才会结算。这不影响你下载，但会让新的提交排队。
+
+**报障**：带上 taskId。凭 taskId 能查到阶段、费用状态和失败原因；
+没有 taskId 时，任何一方都只能猜。
+
 ## 7. 安全约束
 
 - 不要把 token 写进 Workflow JSON、截图、文档或聊天记录。

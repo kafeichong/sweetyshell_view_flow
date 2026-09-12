@@ -7,11 +7,24 @@ from uuid import uuid4
 from fastapi import FastAPI, HTTPException
 
 
+def correlation_key(payload: dict[str, Any]) -> str:
+    """按提示词给本次 create 归组，供跨包用例断言"每个意图只创建一次"。
+
+    真实 Provider 并不知道我们的 taskId，所以用请求体里唯一的文本做关联键；
+    这是测试专用约定，不改变被测代码的请求内容。
+    """
+    for item in payload.get("content") or []:
+        if item.get("type") == "text" and item.get("text"):
+            return str(item["text"])
+    return "<no-prompt>"
+
+
 @dataclass
 class FakeProviderState:
     create_status: int = 200
     task_status: str = "succeeded"
     create_count: int = 0
+    create_counts_by_key: dict[str, int] = field(default_factory=dict)
     tasks: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def create_task(self, payload: dict[str, Any]) -> dict[str, str]:
@@ -23,6 +36,8 @@ class FakeProviderState:
 
         task_id = f"fake-{uuid4()}"
         self.create_count += 1
+        key = correlation_key(payload)
+        self.create_counts_by_key[key] = self.create_counts_by_key.get(key, 0) + 1
         self.tasks[task_id] = {
             "id": task_id,
             "status": self.task_status,
@@ -53,6 +68,7 @@ def create_app(state: FakeProviderState | None = None) -> FastAPI:
     async def stats():
         return {
             "createCount": provider.create_count,
+            "createCountsByKey": dict(provider.create_counts_by_key),
             "taskIds": list(provider.tasks),
         }
 

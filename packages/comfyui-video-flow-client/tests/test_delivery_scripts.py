@@ -40,6 +40,11 @@ def test_installer_copies_client_and_protects_token(tmp_path):
     target = comfy_root / "custom_nodes/video_flow_client"
     assert (target / "client.py").is_file()
     assert (target / "requirements.txt").is_file()
+    # T07/T08 新增的模块与资源必须一起送达：漏装会让同事的节点直接 import 失败。
+    assert (target / "receipts.py").is_file()
+    assert (target / "examples/seedance-production.json").is_file()
+    assert (target / "examples/seedance-resume.json").is_file()
+    assert (target / "web/js/video_flow_status.js").is_file()
     assert "-m\npip\ninstall\n-r" in install_log.read_text(encoding="utf-8")
     installed_token = home / ".video-flow/token"
     assert installed_token.read_text(encoding="utf-8").strip() == "vf_test_token"
