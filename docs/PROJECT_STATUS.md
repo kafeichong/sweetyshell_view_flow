@@ -76,6 +76,56 @@
 - 2026-09-11 T01 提交前复验：Backend build + 75/75；Worker 86 通过 / 26 预期跳过；ComfyUI 客户端 19/19；合同测试 10/10、Fake Provider 2/2。合同脚本同时验证空库 migration、模拟现有库升级，以及 Fake Provider 隔离地址。
 - 上述仅是开发分支离线证据，未推送、未部署、未开放 Production、未创建真实 Provider 任务。
 
+#### 2026-09-12 ~ 09-13 第二轮执行事实（T02–T11）
+
+按 ROADMAP 逐任务推进，每项单独提交；证据字段沿用 task / commit / checks / scope / production / remaining。
+**production 一栏全部为"未操作"**：本轮没有部署、没有开放白名单、没有创建真实 Provider 任务。
+
+| task | commit | checks（命令与结果） | scope |
+| --- | --- | --- | --- |
+| T02 额度预占 | `0d30d36` | 后端单测 105→含预算 22 用例；合同 `budget` 10 场景 | 全局/actor 双 advisory lock、日任务数上限、`limits` 接口白名单字段 |
+| T03 领取边界 | `a1544ab` | `jest task-claim tasks.service legacy-tasks-auth`；合同 `claim-recovery` 9 用例 | claim 在途锁、actor 授权、`ATTEMPT_TASK_MISMATCH`、拒重置 pending |
+| T04 提交不确定 | `bc0c1b3` | Worker `test_submission_journal` 13 用例 + 重启对账 | `submission_journal.py`、journal 白名单、启动对账保持暂停 |
+| （缺陷修复） | `ecc1497` | `prisma validate` / `generate` | Task 的 `executionPlan`/`deliveryStatus` 重复定义 |
+| T05 终态与结算 | `461d791` | `jest task-cost executions`；合同 `provider-outcome` 10 用例 | `task-cost.ts`、outcome 接口原子结算、admin `budget-review` |
+| T06 可恢复归档 | `b2483f8` | 合同 `artifact-delivery`；Worker `artifact_delivery` | 稳定产物键、Asset 登记幂等、delivery CAS、`resume-delivery` |
+| T07 生成意图回执 | `7acf9c1` | 客户端 56 用例 | 回执命名空间、重试沿用原 key/原 body、`ReceiptUpdateError` |
+| T08 等待与模板 | `610ebfe` | 客户端 56 用例（含状态序列） | `wait_for_task`、节点只输出 taskId、`IS_CHANGED`、稳定下载 |
+| T09 持久日志 | `3da7e2a` | Worker 165；后端 179；脚本 8 | `audit_log.py` 脱敏、`GET .../report` 只读报表、人工处置留痕 |
+| T10 心跳与巡检 | `7eb5fad` | Worker 182；后端 185；脚本 21 | `health_state.py`、`/ready`、`operations/health`、`production-gate`、monitor |
+| T11 跨包回归 | `8077d29` `bf76a5d` `ae7e1b8` `7276a94` `f55d43b` `caa35c5` `3d47893` | 合同 6 specs/48 tests + 跨包 5 用例 | 跨包用例、对象存储替身、Worker 重启恢复、Docker 寻址、CI 分层、手册 |
+
+**本轮在实现过程中发现并修复的真实缺陷**（都不是测试问题，都会影响生产行为）：
+
+1. 预算准入事务用 Serializable 隔离级别与 advisory lock 冲突：后拿到锁的事务用旧快照做预算检查，COMMIT 时才报 serialization 失败，被当成 500 而不是 429。
+2. Worker 的「submitted 无 ID 拒绝重提」分支没检查执行快照，短路了带快照任务经 journal 保护的受控重提。
+3. `prisma/schema.prisma` 里 Task 的 `executionPlan` / `deliveryStatus` 重复定义，`prisma generate` 完全无法执行（构建一直沿用旧生成产物）。
+4. `findRecoverable` 不含 `archiving`，Worker 从 recover 拿到归档中的任务会落进 create 分支**重复扣费**。
+5. `Asset.sizeBytes` 是 BigInt 列而 Worker 传 JSON number，产物登记必然 500（此前无测试覆盖）。
+6. advisory lock 参数需显式 `::int`，否则 Prisma 按 bigint 传参直接报 42883。
+7. 适配器在密钥为空时仍拼出 `Authorization: Bearer `（非法头），httpx 本地拒绝 → **每次提交都被误判成"结果不确定"**，真实原因"没配密钥"被完全掩盖。
+8. Fake Provider 在容器内只监听 `127.0.0.1`，同网络的其它容器能解析服务名却永远连不上。
+
+**当前实测（本轮实跑，非历史数字）**：
+
+```bash
+cd packages/backend && npx jest --runInBand          # 19 套件 / 185 通过
+cd packages/worker && venv/bin/python -m pytest -q   # 185 通过 / 26 跳过 / 5 跨包用例默认排除
+cd packages/comfyui-video-flow-client && .venv/bin/python -m pytest -q   # 57 通过
+packages/worker/venv/bin/python -m pytest scripts/tests -q               # 22 通过
+bash scripts/run_mvp_contract.sh                     # 6 specs / 48 tests + 跨包 5 用例
+bash scripts/run_docker_provider_addressing.sh       # Docker 服务名寻址
+```
+
+**remaining（未完成，且不能靠开发环境完成）**：
+
+- T08 三项：节点展示扩展未经真实 ComfyUI 验证；两份模板目前是 API 格式而非真实导出的 UI 格式；未在自定义 output 路径与重启后的主实例做导入/执行/重新取片。**卡点**：需要一个可运行、可安装节点、可重启的 ComfyUI（本机 Comfy Desktop 的数据根 `~/mylab/ComfyUI` 没有 `.venv`，`install.sh` 需要 ComfyUI 自带 Python；且安装会改动正在使用的环境，待 Steven 确认目标环境与授权）。
+- T10 两项：宿主计划任务检查巡检/备份回执超时、外部可用性渠道验证"整机失联可告警"——依赖实际宿主与通知渠道；"上线时触发一条无付费测试告警并由责任人确认收到"同属部署动作。
+- T11 一项：E01–E13 中 E03/E04/E05/E08/E10/E11/E12 仍由各包用例覆盖，未做成跨包用例。
+- T12 全部：部署与真实创意验收，需生产操作授权。
+
+**本轮所有提交均未推送、未部署。** main 领先 origin/main 41 个提交。
+
 ### 3.1 Backend
 
 | 能力 | 证据 |
@@ -161,6 +211,15 @@
 | R10 | 删除唯一 `.env.backup-token-*`，生产 `.env` 改为 `600` | 文件名计数为 0；权限检查为 `600` |
 | R12 | profile / duration / ratio 纳入稳定幂等键，mode 保持独立作用域 | 客户端幂等测试 |
 
+### 2026-09-13 仍未完成（阻塞在开发环境之外）
+
+- **T08 三项**：节点展示扩展未经真实 ComfyUI 验证；两份模板是 API 格式而非真实导出的 UI 格式；自定义 output 路径与重启后主实例的导入/执行/重新取片未验证。需要一台可运行、可安装节点、可重启的 ComfyUI。
+- **T10 两项**：宿主计划任务检查巡检/备份回执超时、外部可用性渠道验证"整机失联可告警"；以及"上线时触发一条无付费测试告警并由责任人确认收到"。需要实际宿主与通知渠道。
+- **T11 一项**：E03/E04/E05/E08/E10/E11/E12 仍由各包用例覆盖，未做成跨包用例。
+- **T12 全部**：部署与真实创意验收，需生产操作授权。
+
+其中 T08 的三项是本轮唯一"有环境就能立刻做"的：本机 Comfy Desktop 的数据根为 `~/mylab/ComfyUI`，但没有 `.venv`（`install.sh` 要求 ComfyUI 自带 Python），且安装会改动正在使用的环境，需先确认目标环境与授权。
+
 ### P2（工程债，按需清理）
 
 - 双状态源 `status` / `taskStatus` 可能漂移（completed 后仍留 `in_progress`）。
@@ -221,3 +280,5 @@ cd packages/comfyui-video-flow-client && python -m pip install -r requirements.t
 - Worker 的 26 项 skip 覆盖了真实 ComfyUI workflow 解析；这些路径目前**没有**自动回归保护。
 - `packages/comfyui-video-flow-client/tests/test_nodes.py` 使用假客户端与临时目录，不证明真实节点图等待、ComfyUI 自定义 output、下载后播放可用。
 - `scripts/seedance_production_acceptance.py` 以 completed 与非空 `videoUrl` 判断通过，不足以证明视频已下载并可解码；默认时间戳幂等键也不能用于不加区分地重跑付费验收。
+- 跨包用例已经覆盖"预览不创建 Provider 任务""同意图只创建一次""重跑沿用原 ID""完整交付链路""准入被拒不产生费用""Worker 重启恢复""Docker 服务名寻址"，但**仍未覆盖真实 ComfyUI 与真实 Provider**：对象存储与 Provider 都是替身，真实网络、真实配额、真实计费均未验证。
+- 合同环境按规约不得持有真实 Provider 凭证（脚本与 CI 都有硬闸门），因此"用真实凭证跑一次"这件事**只能**在 T12 的授权下进行。
