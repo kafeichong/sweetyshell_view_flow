@@ -42,12 +42,22 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """健康检查接口：返回依赖配置的关键链路参数。"""
-    return {
-        "status": "healthy",
-        "backend_url": settings.backend_url,
-        "poll_interval": settings.job_poll_interval
-    }
+    """进程存活探针：只说明进程还在，不承诺业务链路可用。
+
+    真实可用性看 /ready。这里刻意不回后端地址、轮询间隔这类配置，
+    探针是最容易被外部扫到的端点，没必要顺带暴露部署细节。
+    """
+    return {"status": "alive"}
+
+
+@app.get("/ready")
+async def readiness():
+    """就绪探针：主循环与执行进展分开判断。
+
+    仅供内部网络访问（compose 不给 Worker 发布宿主端口）。返回字段里
+    不含任何 token 或敏感配置，只有健康判定所需的时间戳与 id。
+    """
+    return executor.health().snapshot(admission_paused=executor.is_admission_paused())
 
 
 @app.post("/tasks/execute")

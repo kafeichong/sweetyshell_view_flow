@@ -148,6 +148,45 @@ docker compose up -d
 
 ---
 
+## 6.1 巡检与准入开关（T10）
+
+**健康端点分工**（都是只读的）：
+
+| 端点 | 含义 | 说明 |
+| --- | --- | --- |
+| Worker `/health` | 进程存活 | 只返回 `{"status":"alive"}`，不回报配置 |
+| Worker `/ready` | 主循环 + 执行进展 | `ready`、`loopAlive`、`backendLastOkAt`、`providerPollLastOkAt`、`activeTaskId`、`admissionPaused` |
+| Backend `GET /api/v1/admin/operations/health` | 库状态、队列年龄、待处置数量、全局暂停原因 | Admin Guard |
+
+`/ready` 只允许内部访问：Worker 不发布宿主端口。巡检脚本默认走 compose 网络内的
+`http://video-worker:8001/ready`；若巡检必须从宿主机执行，请**只绑定回环**
+（`127.0.0.1:8101:8001`，与 backend 的 `127.0.0.1:3100:3000` 一致），
+不要做全网卡映射。
+
+**巡检脚本** `scripts/video_flow_monitor.py`（建议每分钟由宿主计划任务执行）：
+
+```bash
+export VIDEO_FLOW_ADMIN_TOKEN_FILE=~/.video-flow/admin-token   # 600，内容为 Admin token
+export VIDEO_FLOW_ALERT_WEBHOOK_FILE=~/.video-flow/alert-webhook  # 600，内容为通知渠道 URL
+python3 scripts/video_flow_monitor.py --base-url https://ai.sweetyshell.com
+```
+
+- 未配置 `VIDEO_FLOW_ALERT_WEBHOOK_FILE` 时**只做 dry-run**，不能据此签收真实告警（脚本会明确提示）。
+- 阈值见 ROADMAP 第 6 节：连续 2 次检查失败、pending > 2 分钟、生成 > 15 分钟、
+  requires_review ≥ 1、交付失败、费用不确定、磁盘 80% 告警 / 90% 停止准入。
+- **脚本只自动暂停，绝不自动解除**：`PATCH /api/v1/admin/operations/production-gate`
+  解除暂停必须带 `reason`/`operator`/`evidenceRef` 并会写审计。
+- 通知失败时脚本非零退出，并把待通知记录留在
+  `VIDEO_FLOW_MONITOR_STATE`（默认 `~/.video-flow/monitor-state.json`）里，下一轮继续重试；
+  **非零退出必须有人看**，否则等于没有告警。
+
+**暂停的边界**：暂停只拦新准入与未提交的领取，已有任务的查询、轮询与归档不受影响。
+
+**宿主计划任务**：巡检/备份本身失效要靠宿主的定时任务检查回执是否超时；
+整机失联必须另用已有的外部可用性渠道，不能靠机器自己的巡检发现。
+
+---
+
 ## 7. 风险与跟进
 
 - 运行风险：

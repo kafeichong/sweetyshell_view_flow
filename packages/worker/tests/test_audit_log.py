@@ -188,5 +188,33 @@ class AuditLogTests(unittest.TestCase):
         self.assertEqual(records[0]["providerTaskId"], "provider-1")
 
 
+
+class EmbeddedUrlSanitizingTests(unittest.TestCase):
+    def test_urls_embedded_in_error_messages_are_stripped(self):
+        # 真实形态是「一句话 + 一条带签名的 URL」。
+        cleaned = strip_url_secrets(
+            "HTTPStatusError: https://backend.test/api?Signature=secret-token failed"
+        )
+
+        self.assertNotIn("secret-token", cleaned)
+        self.assertIn("https://backend.test/api", cleaned)
+
+    def test_multiple_urls_are_all_stripped(self):
+        cleaned = strip_url_secrets(
+            "first https://a.test/x?sig=1 then https://b.test/y?token=2 end"
+        )
+
+        self.assertNotIn("sig=1", cleaned)
+        self.assertNotIn("token=2", cleaned)
+        self.assertIn("https://a.test/x", cleaned)
+        self.assertIn("https://b.test/y", cleaned)
+
+    def test_error_events_sanitize_embedded_urls(self):
+        event = sanitize_event(
+            {"taskId": "t1", "error": "failed to GET https://oss.test/a?Signature=secret"}
+        )
+
+        self.assertNotIn("secret", json.dumps(event))
+
 if __name__ == "__main__":
     unittest.main()

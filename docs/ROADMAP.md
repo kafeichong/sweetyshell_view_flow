@@ -459,13 +459,17 @@ def test_sensitive_material_does_not_reach_logs():
 **新增：** `packages/worker/health_state.py`、`tests/test_health_state.py`；`scripts/video_flow_monitor.py`、`scripts/tests/test_monitor.py`。
 **接口：** Worker /health 为进程存活；新增仅内部可达的 /ready，返回 loopAlive、backendLastOkAt、providerPollLastOkAt、activeTaskId、admissionPaused，不暴露 token/敏感配置。Backend Admin `GET /api/v1/admin/operations/health` 返回 DB 状态、队列年龄、review/交付失败数量、全局暂停原因。
 
-- [ ] 心跳与实际执行进展分开：后台执行 task 已结束/异常则 ready=false，不能独立每秒更新时间伪装执行正常；长任务正常轮询视为存活。
-- [ ] 引入最小持久 ProductionGate（T02 migration 一并创建）：id=production、paused、reason、updatedAt；默认暂停。Admin `PATCH /api/v1/admin/operations/production-gate` 控制开关，暂停只拦新准入/未提交领取，不阻断原任务查询归档。
-- [ ] 监控脚本只自动暂停，不自动解除暂停；解除须管理员核实原因并留审计。每分钟读取内部健康与受控统计，按第 6 节阈值告警；磁盘严重不足或费用不确定时暂停。监控凭证从文件读取，网络面不增加公开可执行接口。
-- [ ] 同一问题首次通知、持续问题去重、恢复通知；回执记录 taskId/告警类型/时间/通知结果。通知失败明确非零退出并保留待通知记录。
-- [ ] 配置 `VIDEO_FLOW_ALERT_WEBHOOK_FILE`，实际渠道由 Steven 指定；未配置只可 dry-run，不允许据此签收真实告警。开关更新与通知操作记录审计。
+- [x] 心跳与实际执行进展分开：后台执行 task 已结束/异常则 ready=false，不能独立每秒更新时间伪装执行正常；长任务正常轮询视为存活。
+- [x] 引入最小持久 ProductionGate（T02 migration 一并创建）：id=production、paused、reason、updatedAt；默认暂停。Admin `PATCH /api/v1/admin/operations/production-gate` 控制开关，暂停只拦新准入/未提交领取，不阻断原任务查询归档。
+- [x] 监控脚本只自动暂停，不自动解除暂停；解除须管理员核实原因并留审计。每分钟读取内部健康与受控统计，按第 6 节阈值告警；磁盘严重不足或费用不确定时暂停。监控凭证从文件读取，网络面不增加公开可执行接口。
+- [x] 同一问题首次通知、持续问题去重、恢复通知；回执记录 taskId/告警类型/时间/通知结果。通知失败明确非零退出并保留待通知记录。
+- [x] 配置 `VIDEO_FLOW_ALERT_WEBHOOK_FILE`，实际渠道由 Steven 指定；未配置只可 dry-run，不允许据此签收真实告警。开关更新与通知操作记录审计。
 - [ ] 宿主计划任务检查巡检/备份回执是否超时；另用已有外部可用性渠道检查整机失联。没有外部接收渠道时不把“整机失联可告警”勾成完成。
 - [ ] 测试正常长生成不误判、主循环崩溃、DB 不通、review、磁盘阈值、通知失败、恢复通知；上线时触发一条无付费测试告警并由责任人确认收到。
+
+**完成状态（2026-09-13，代码部分）：** 具备代码的检查项均已实现。Worker 新增 `health_state.py`：主循环存活（崩溃/取消即 false）、循环推进（停滞超窗即不健康）、活跃任务的 Provider 轮询（停滞即不健康，**循环空转不能掩盖执行卡住**）三者分开记录，长任务只要轮询正常推进就视为存活；`mark_backend_error` 的原文在快照里先脱敏（顺带修掉 `strip_url_secrets` 只处理"整串是 URL"的缺陷，嵌在错误消息里的 URL 现在也会去 query）。`main.py` 的 `/health` 只返回进程存活且不再回报配置，新增内部 `/ready` 返回 ready/loopAlive/backendLastOkAt/providerPollLastOkAt/activeTaskId/admissionPaused 等字段（不含 token 或配置）；executor 在循环、任务开始/结束（finally 保证清理）、Backend 调用、Provider 轮询四处打点。Backend 新增 `src/v1/admin/v1-operations.controller.ts`：`GET /api/v1/admin/operations/health`（库状态、队列数量与最老 pending 年龄、requires_review/交付失败/费用待核实数量、全局暂停原因；库不通时仍返回结构，便于区分"服务挂了"与"库连不上"）与 `PATCH /api/v1/admin/operations/production-gate`（暂停只需 reason；**解除必须带 reason/operator/evidenceRef** 并写审计事件，before/after 一并留痕）。新增 `scripts/video_flow_monitor.py`：`evaluate_checks(snapshot)` 为纯函数，按第 6 节阈值输出 code/severity/action/taskId；`GENERATION_STALLED` 只标记关注并要求查询原任务（不宣告免费失败、不自动再生成），费用不确定与磁盘 ≥90% 直接 `pause_admission`；只自动暂停、**从不自动解除**；首次/持续/恢复三类通知 + 回执（含 taskId 与送达结果），通知失败非零退出并把待通知记录写入状态文件供下一轮重试；webhook 未配置时只 dry-run 且明确提示不能据此签收。凭证与渠道 URL 都从文件读取，巡检脚本不新增任何公网可执行接口。`.env.example` 与 runbook 同步（含 `/ready` 只允许内部访问、宿主巡检与整机失联的边界）。测试：Worker 182 通过 / 26 跳过（health_state 10 个、readiness 4 个），Backend 185 通过（v1-operations 6 个），脚本 21 通过（monitor 12 个，覆盖长生成不误判、主循环崩溃、DB 不通、review、磁盘阈值、通知失败、恢复通知、只暂停不解除）。
+
+**尚未完成（需部署环境与外部渠道）：** 宿主计划任务检查巡检/备份回执超时、以及用外部可用性渠道验证"整机失联可告警"这两项依赖实际宿主与通知渠道，未在开发环境勾选；上线时"触发一条无付费测试告警并由责任人确认收到"同样待部署后执行。
 
 纯检查函数合同：`evaluate_checks(snapshot: dict) -> list[dict]` 由 monitor 导出，不负责写状态或发送请求；每项返回 code/taskId/severity/action。
 

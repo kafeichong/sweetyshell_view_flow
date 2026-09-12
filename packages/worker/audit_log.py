@@ -71,18 +71,18 @@ def is_sensitive_key(key: str) -> bool:
     return key.replace("_", "").replace("-", "").lower() in {"apikey", "accesstoken"}
 
 
-def strip_url_secrets(value: str) -> str:
-    """URL 只保留 scheme/host/path：query 与 fragment 常带签名与 token。"""
-    if "://" not in value:
-        return value
+_URL_PATTERN = re.compile(r"https?://[^\s\"']+")
 
+
+def _strip_one_url(match: "re.Match[str]") -> str:
+    raw = match.group(0)
     try:
-        parts = urlsplit(value)
+        parts = urlsplit(raw)
     except ValueError:
         return REDACTED
 
-    if not parts.scheme or not parts.netloc:
-        return value
+    if not parts.netloc:
+        return raw
 
     netloc = parts.netloc
     if "@" in netloc:
@@ -90,6 +90,18 @@ def strip_url_secrets(value: str) -> str:
         netloc = netloc.rsplit("@", 1)[1]
 
     return urlunsplit((parts.scheme, netloc, parts.path, "", ""))
+
+
+def strip_url_secrets(value: str) -> str:
+    """URL 只保留 scheme/host/path：query 与 fragment 常带签名与 token。
+
+    错误消息里常常是「一句话 + 一条 URL」，所以按子串逐个处理，
+    而不是只处理整串就是 URL 的情况。
+    """
+    if "://" not in value:
+        return value
+
+    return _URL_PATTERN.sub(_strip_one_url, value)
 
 
 def sanitize_event(event: Any) -> Any:

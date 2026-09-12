@@ -11,6 +11,7 @@ from artifact_delivery import (
     verify_uploaded_object,
 )
 from audit_log import AuditLog
+from health_state import HealthState
 from comfyui_client import ComfyUIClient
 from comfyui_executor import (
     ComfyUIDryRunExecutor,
@@ -225,6 +226,7 @@ class JobExecutor:
             response.raise_for_status()
         except Exception as error:
             self._mark_submission_blocked()
+            self.health().mark_backend_error(f"{type(error).__name__}: {error}")
             self._audit_event("outcome_report_failed", level="error", job=job, code="SUBMISSION_STATE_UNKNOWN", error=str(error))
             return False
 
@@ -491,7 +493,9 @@ class JobExecutor:
             data = response.json()
             if isinstance(data, list):
                 jobs.extend(Job(**job) for job in data)
+            self.health().mark_backend_ok()
         except Exception as e:
+            self.health().mark_backend_error(f"{type(e).__name__}: {e}")
             self._audit_event("inflight_fetch_failed", level="warning", code=type(e).__name__, error=str(e))
             return []
 
@@ -759,6 +763,15 @@ class JobExecutor:
     async def execute_job(self, job: Job):
         """执行单个任务"""
         print(f"[{job.id}] Starting execution")
+        self.health().task_started(job.id)
+        try:
+            await self._execute_job_inner(job)
+        finally:
+            # 无论成功、失败还是异常退出，活跃任务都要被清掉；
+            # 否则 /ready 会一直以为有任务在跑。
+            self.health().task_finished(job.id)
+
+    async def _execute_job_inner(self, job: Job):
 
         if settings.comfyui_enabled is True:
             quarantined_ids = (
@@ -1008,6 +1021,7 @@ class JobExecutor:
                 provider_task_id,
                 interval=settings.task_status_check_interval,
             )
+            self.health().mark_provider_poll_ok()
             self._audit_event("provider_task_completed", level="info", job=job, stage="provider", url=task_status.result_url)
 
             # 6. 先确认 Provider 终态与 usage 已经落库（Backend 负责结算），
@@ -1226,6 +1240,18 @@ class JobExecutor:
                 "ComfyUI prompt was accepted but submission state could not be persisted"
             )
 
+    def is_admission_paused(self) -> bool:
+        """新提交是否被暂停（磁盘/证据/人工核对导致的暂停）。"""
+        return bool(getattr(self, "_submission_blocked", False))
+
+    def health(self) -> HealthState:
+        """健康状态：主循环与执行进展分开记录，供 /ready 读取。"""
+        cached = getattr(self, "_health_state", None)
+        if cached is None:
+            cached = HealthState()
+            self._health_state = cached
+        return cached
+
     async def poll_loop(self):
         """主轮询循环"""
         import sys
@@ -1233,26 +1259,43 @@ class JobExecutor:
         print(f"🚀 Worker poll_loop started, polling every {settings.job_poll_interval}s")
         sys.stdout.flush()
 
-        while True:
-            try:
-                # 先处理 in-flight 恢复任务，再 claim 新任务。顺序反了会把本轮
-                # 刚 claim、尚未生成 provider_task_id 的任务误判成"在途异常任务"。
-                jobs = await self.fetch_inflight_jobs()
-                jobs.extend(await self.fetch_pending_jobs())
+        health = self.health()
+        health.mark_loop_started()
+        try:
+            while True:
+                try:
+                    # 先处理 in-flight 恢复任务，再 claim 新任务。顺序反了会把本轮
+                    # 刚 claim、尚未生成 provider_task_id 的任务误判成"在途异常任务"。
+                    jobs = await self.fetch_inflight_jobs()
+                    jobs.extend(await self.fetch_pending_jobs())
 
-                # 同一 task 可能同时来自两个来源，按 id 去重，避免并发重复提交。
-                unique_jobs = list({job.id: job for job in jobs}.values())
+                    # 同一 task 可能同时来自两个来源，按 id 去重，避免并发重复提交。
+                    unique_jobs = list({job.id: job for job in jobs}.values())
+                    health.mark_loop_tick()
 
-                if unique_jobs:
-                    print(f"Found {len(unique_jobs)} jobs to execute")
-                    # 使用 gather 并发执行，单任务失败不应阻塞队列中的其他任务。
-                    await asyncio.gather(*[self.execute_job(job) for job in unique_jobs])
+                    if unique_jobs:
+                        print(f"Found {len(unique_jobs)} jobs to execute")
+                        # 使用 gather 并发执行，单任务失败不应阻塞队列中的其他任务。
+                        await asyncio.gather(*[self.execute_job(job) for job in unique_jobs])
 
-                await asyncio.sleep(settings.job_poll_interval)
+                    await asyncio.sleep(settings.job_poll_interval)
 
-            except Exception as e:
-                self._audit_event("poll_loop_error", level="error", code=type(e).__name__, error=str(e))
-                await asyncio.sleep(settings.job_poll_interval)
+                except Exception as e:
+                    self._audit_event("poll_loop_error", level="error", code=type(e).__name__, error=str(e))
+                    health.mark_loop_tick()
+                    await asyncio.sleep(settings.job_poll_interval)
+        except asyncio.CancelledError:
+            # 正常关停：进程不在了，/ready 也不该再报健康。
+            health.mark_loop_stopped("poll loop cancelled")
+            raise
+        except BaseException as error:
+            # 未捕获异常意味着循环彻底退出：健康状态必须跟着变红，而不是
+            # 让一个不再工作的进程继续被当成活的。
+            health.mark_loop_stopped(f"poll loop crashed: {type(error).__name__}")
+            self._audit_event(
+                "poll_loop_crashed", level="error", code=type(error).__name__, error=str(error)
+            )
+            raise
 
     async def close(self):
         await self.client.aclose()
