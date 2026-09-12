@@ -261,12 +261,14 @@ def test_provider_id_survives_backend_payload():
 **新增：** `packages/worker/submission_journal.py`、`tests/test_submission_journal.py`。
 **接口：** `is_submission_uncertain(status_code: int | None, has_task_id: bool) -> bool`；`SubmissionJournal(directory: Path).append(event: dict) -> None` 同步追加、flush/fsync。目录配置 `VIDEO_FLOW_AUDIT_DIR` 绑定服务器受限持久目录；Worker 配置字段名显式映射该环境变量。
 
-- [ ] Provider create 前先提交 Attempt.submitted 标记并确认成功；标记失败不调用 Provider。
-- [ ] 网络异常、HTTP 5xx、2xx 无 ID/响应无法解析均进入不确定分支；明确拒绝类响应保持拒绝原因，不默认任何失败都可自动重提。
-- [ ] 获得 Provider ID 后立即写 taskId/attemptId/providerTaskId/UTC/stage 到 journal，再回写 DB；journal 不放完整响应 URL/Prompt/token。
-- [ ] DB 回写失败或 journal 不可写时停止新 claim/create，保留现有任务查询能力；重启时发现未完成应急项仍保持暂停，不能只靠内存集合。
-- [ ] 原已知 ID 与待核实意图人工处理前核对 Provider，禁止凭同 Prompt/大致时间推断唯一任务；不能匹配就维持 requires_review。
-- [ ] 测试提交响应丢失、500、无 ID、DB 回写失败、journal 满/不可写、进程重启后仍停新提交。
+- [x] Provider create 前先提交 Attempt.submitted 标记并确认成功；标记失败不调用 Provider。
+- [x] 网络异常、HTTP 5xx、2xx 无 ID/响应无法解析均进入不确定分支；明确拒绝类响应保持拒绝原因，不默认任何失败都可自动重提。
+- [x] 获得 Provider ID 后立即写 taskId/attemptId/providerTaskId/UTC/stage 到 journal，再回写 DB；journal 不放完整响应 URL/Prompt/token。
+- [x] DB 回写失败或 journal 不可写时停止新 claim/create，保留现有任务查询能力；重启时发现未完成应急项仍保持暂停，不能只靠内存集合。
+- [x] 原已知 ID 与待核实意图人工处理前核对 Provider，禁止凭同 Prompt/大致时间推断唯一任务；不能匹配就维持 requires_review。
+- [x] 测试提交响应丢失、500、无 ID、DB 回写失败、journal 满/不可写、进程重启后仍停新提交。
+
+**完成状态（2026-09-12）：** 以上检查项均已实现。新增 `submission_journal.py` 承载 journal 与阻断标记：`append` 同步写入并 flush/fsync，文件 0600、目录 0700；落盘字段走白名单（at/stage/taskId/attemptId/providerTaskId/reason），prompt、完整响应、token、签名 URL 结构性地写不进去；`unresolved_submissions()` 给出"已提交 Provider 但从未确认落库"的记录供人工核对。`is_submission_uncertain(status_code, has_task_id)` 只在 4xx 判定为明确拒绝，其余（无状态码、5xx、2xx 无 ID、响应不可解析）一律不可判定；adapter 按此路由，异常消息不再回显响应体。executor 新增启动对账 `_reconcile_submission_journal()`：磁盘上存在未确认提交时继续保持暂停（内存状态重启即丢，不作为判据），恢复/查询已有任务的能力不受影响；提交确认落库后补写 db_confirmed，使证据在重启对账时闭环。审计目录由 `VIDEO_FLOW_AUDIT_DIR` 指定（compose 挂载持久卷 `/app/audit`），未配置时退回 output_dir。测试：`venv/bin/python -m pytest tests/ -q`（123 通过 / 26 跳过），含新增 `tests/test_submission_journal.py`（13 个用例）与 adapter 参数化用例、重启对账用例。顺带修复测试隔离缺陷：`test_mvp_backend_contract` 与 recovery 用例原共用 `/tmp/video-worker-output`，持久 journal 会让上一次运行的残留改变本次启动行为，现每次使用独立临时目录。
 
 最小代表性测试（同文件导出/导入该函数，不替代异步集成用例）：
 

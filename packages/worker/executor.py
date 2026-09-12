@@ -1,6 +1,5 @@
 import asyncio
 import httpx
-import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,6 +16,12 @@ from models import FailureType, Job, JobStatus
 from providers.seedance_adapter import ProviderSubmissionUncertainError, SeedanceAdapter
 from recovery import build_cost_audit, cost_status, format_cost, is_stale_job, should_resume_job
 from oss_uploader import OssUploader
+from submission_journal import (
+    STAGE_DB_CONFIRMED,
+    STAGE_PROVIDER_ACCEPTED,
+    SubmissionJournal,
+    resolve_journal_directory,
+)
 
 settings = get_settings()
 
@@ -57,6 +62,7 @@ class JobExecutor:
         self._submission_blocked = (
             self._submission_block_marker().exists()
         )
+        self._reconcile_submission_journal()
         self.oss_uploader = OssUploader()
         # 记录已经在提交后落库失败的 ComfyUI 任务，防止重复重跑造成脏状态。
         self._comfyui_quarantined_job_ids: set[str] = set()
@@ -81,39 +87,64 @@ class JobExecutor:
         token = getattr(settings, "worker_service_token", "")
         return {"X-Worker-Token": token} if token else {}
 
+    def _reconcile_submission_journal(self) -> None:
+        """启动对账：磁盘上有未确认落库的提交时继续保持暂停。
+
+        journal 里存在 provider_accepted 却没有配对 db_confirmed 的记录，
+        说明上一个进程在写日志与回写 DB 之间中断。此时必须继续暂停新提交，
+        等人工核对 Provider 侧任务：内存状态重启即丢，不能作为判定依据，
+        也不允许凭 prompt/时间相近去推断哪个 Provider 任务属于它。
+        """
+        if getattr(self, "_submission_blocked", False):
+            return
+
+        journal = self._journal()
+        unresolved = journal.unresolved_submissions()
+        if not unresolved:
+            return
+
+        self._mark_submission_blocked()
+        print(
+            f"Provider submissions stay blocked: {len(unresolved)} unresolved submission(s) "
+            f"in {journal.journal_path}; verify against the provider before clearing"
+        )
+
+    def _journal(self) -> SubmissionJournal:
+        """提交日志：优先写 VIDEO_FLOW_AUDIT_DIR，未配置时退回 output_dir。"""
+        cached = getattr(self, "_submission_journal", None)
+        if cached is not None:
+            return cached
+
+        configured = getattr(settings, "video_flow_audit_dir", "")
+        fallback = getattr(self, "output_dir", Path(".")) / ".video-flow-journal"
+        directory = resolve_journal_directory(configured, fallback)
+        self._submission_journal = SubmissionJournal(directory)
+        return self._submission_journal
+
     async def _append_submission_journal(
         self,
         *,
         task_id: str,
         attempt_id: Optional[str],
         provider_task_id: str,
-        stage: str,
+        stage: str = STAGE_PROVIDER_ACCEPTED,
     ) -> None:
-        """Persist a redacted Provider submission fact before DB callbacks.
+        """把 Provider 提交事实先落盘，再回写 DB。
 
-        The journal deliberately contains identifiers and lifecycle stage only;
-        it must remain useful after a response timeout without becoming a
-        second secret/prompt store.
+        写入失败必须向上抛出：调用方据此判定"提交已发生但没有证据"，
+        停止后续提交并等人工核对。
         """
-        journal_dir = self.output_dir / ".video-flow-journal"
-        journal_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        journal_path = journal_dir / "submissions.jsonl"
-        record = {
-            "at": datetime.now(timezone.utc).isoformat(),
-            "taskId": task_id,
-            "attemptId": attempt_id,
-            "providerTaskId": provider_task_id,
-            "stage": stage,
-        }
-        with journal_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record, separators=(",", ":")) + "\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        journal_path.chmod(0o600)
+        self._journal().append(
+            {
+                "taskId": task_id,
+                "attemptId": attempt_id,
+                "providerTaskId": provider_task_id,
+                "stage": stage,
+            }
+        )
 
     def _submission_block_marker(self) -> Path:
-        output_dir = getattr(self, "output_dir", Path("."))
-        return output_dir / ".video-flow-journal" / "SUBMISSIONS_BLOCKED"
+        return self._journal().block_marker
 
     def _mark_submission_blocked(self) -> None:
         if not hasattr(self, "output_dir"):
@@ -121,10 +152,7 @@ class JobExecutor:
             # output_dir，生产路径必须持久化阻断标记。
             self._submission_blocked = True
             return
-        marker = self._submission_block_marker()
-        marker.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        marker.write_text("manual_review_required\n", encoding="utf-8")
-        marker.chmod(0o600)
+        self._journal().mark_blocked()
         self._submission_blocked = True
 
     async def fetch_pending_jobs(self, limit: int = 10) -> list[Job]:
@@ -620,6 +648,21 @@ class JobExecutor:
                         task_status="requires_review",
                     )
                     return
+
+                # Provider ID 已经确认落库：补一条确认记录，使这条应急证据在
+                # 重启对账时不再被算作"待核实意图"。确认记录写失败不影响本次
+                # 执行（DB 已是权威），只是下次启动会多要一次人工核对。
+                try:
+                    await self._append_submission_journal(
+                        task_id=job.id,
+                        attempt_id=attempt_id,
+                        provider_task_id=provider_task_id,
+                        stage=STAGE_DB_CONFIRMED,
+                    )
+                except Exception as journal_error:
+                    print(
+                        f"[{job.id}] Submission confirmation could not be journaled: {journal_error}"
+                    )
 
                 print(f"[{job.id}] Submitted to provider, task_id: {provider_task_id}")
 

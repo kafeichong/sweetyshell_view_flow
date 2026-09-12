@@ -306,7 +306,7 @@ class ProviderSubmissionRecoveryTests(unittest.TestCase):
         job_executor.resolve_asset_url = AsyncMock(
             return_value="https://oss.test/input-signed-url"
         )
-        job_executor.output_dir = Path("/tmp/video-worker-output")
+        job_executor.output_dir = Path(tempfile.mkdtemp(prefix="worker-recovery-"))
 
         job = Job(
             id="job-recovery-1",
@@ -361,7 +361,7 @@ class ProviderSubmissionRecoveryTests(unittest.TestCase):
         job_executor.resolve_asset_url = AsyncMock(
             return_value="https://oss.test/input-signed-url"
         )
-        job_executor.output_dir = Path("/tmp/video-worker-output")
+        job_executor.output_dir = Path(tempfile.mkdtemp(prefix="worker-recovery-"))
 
         job = Job(
             id="job-new-1",
@@ -467,6 +467,210 @@ class ProviderSubmissionRecoveryTests(unittest.TestCase):
         kwargs = job_executor.update_job_status.await_args.kwargs
         self.assertEqual(kwargs["attempt_status"], "requires_review")
         self.assertEqual(kwargs["task_status"], "requires_review")
+
+    def test_provider_error_statuses_are_quarantined_without_new_create(self):
+        import executor as executor_module
+
+        # 5xx：Provider 可能已经建好任务，只是响应没回来。
+        # 这里用真实 adapter 的错误路径，确认 executor 不重提、只转人工核对。
+        async def handler(_request):
+            import httpx
+
+            return httpx.Response(503, text="upstream unavailable")
+
+        import httpx
+
+        from providers.seedance_adapter import SeedanceAdapter
+
+        adapter = SeedanceAdapter(api_key="test-only")
+        adapter.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+        job_executor = executor_module.JobExecutor.__new__(executor_module.JobExecutor)
+        job_executor.adapters = {"seedance": adapter}
+        job_executor.update_job_status = AsyncMock(return_value=True)
+        job_executor.resolve_asset_url = AsyncMock(return_value="https://oss.test/input")
+        job_executor.output_dir = Path(tempfile.mkdtemp(prefix="worker-uncertain-"))
+
+        job = Job(
+            id="job-uncertain-status",
+            status="pending",
+            created_by="alice",
+            prompt="a product video",
+            created_at="2026-09-10T00:00:00+00:00",
+            provider_profile="seedance-main",
+            attempt_id="attempt-uncertain-status",
+            execution_plan=approved_execution_plan(),
+        )
+
+        settings = SimpleNamespace(
+            comfyui_enabled=False,
+            running_job_timeout_minutes=10,
+            task_status_check_interval=0,
+        )
+        try:
+            with patch.object(executor_module, "settings", settings):
+                asyncio.run(job_executor.execute_job(job))
+        finally:
+            asyncio.run(adapter.client.aclose())
+
+        kwargs = job_executor.update_job_status.await_args_list[-1].kwargs
+        self.assertEqual(kwargs["failure_code"], "SUBMISSION_UNCERTAIN")
+        self.assertEqual(kwargs["attempt_status"], "requires_review")
+        self.assertEqual(kwargs["task_status"], "requires_review")
+
+        # 不确定提交不写"已确认落库"，重启后仍会被对账拦住。
+        from submission_journal import SubmissionJournal
+
+        journal = SubmissionJournal(job_executor.output_dir / ".video-flow-journal")
+        self.assertEqual(journal.entries(), [])
+        self.assertFalse(job_executor._submission_block_marker().exists())
+
+    def test_successful_submission_records_confirmation_for_restart(self):
+        import executor as executor_module
+        from submission_journal import SubmissionJournal
+
+        adapter = SimpleNamespace(
+            default_model="doubao-seedance-2-5-260628",
+            create_task=AsyncMock(return_value={"task_id": "provider-confirmed"}),
+            poll_until_complete=AsyncMock(
+                return_value=ProviderTaskStatus(id="provider-confirmed", status="completed")
+            ),
+            calculate_actual_cost=lambda _usage: None,
+            pricing_version="seedance-token-v1",
+            classify_failure=lambda _message: executor_module.FailureType.UNKNOWN,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            job_executor = executor_module.JobExecutor.__new__(executor_module.JobExecutor)
+            job_executor.adapters = {"seedance": adapter}
+            job_executor.update_job_status = AsyncMock(return_value=True)
+            job_executor.resolve_asset_url = AsyncMock(return_value="https://oss.test/input")
+            job_executor.output_dir = Path(directory)
+
+            job = Job(
+                id="job-confirmed-1",
+                status="pending",
+                created_by="alice",
+                prompt="a product video",
+                created_at="2026-09-10T00:00:00+00:00",
+                provider_profile="seedance-main",
+                attempt_id="attempt-confirmed-1",
+                execution_plan=approved_execution_plan(),
+            )
+
+            settings = SimpleNamespace(
+                comfyui_enabled=False,
+                running_job_timeout_minutes=10,
+                task_status_check_interval=0,
+                video_flow_audit_dir="",
+            )
+            with patch.object(executor_module, "settings", settings):
+                asyncio.run(job_executor.execute_job(job))
+
+            journal = SubmissionJournal(Path(directory) / ".video-flow-journal")
+            stages = [entry["stage"] for entry in journal.entries()]
+
+            self.assertEqual(stages.count("provider_accepted"), 1)
+            self.assertEqual(stages.count("db_confirmed"), 1)
+            # 落库已确认：这条提交不会在重启时被算作待核实的应急项。
+            self.assertEqual(journal.unresolved_submissions(), [])
+
+            restarted = executor_module.JobExecutor.__new__(executor_module.JobExecutor)
+            restarted.output_dir = Path(directory)
+            restarted.adapters = {"seedance": adapter}
+            restarted.update_job_status = AsyncMock(return_value=True)
+            restarted.resolve_asset_url = AsyncMock(return_value="https://oss.test/input")
+            restarted._submission_blocked = restarted._submission_block_marker().exists()
+            with patch.object(executor_module, "settings", settings):
+                restarted._reconcile_submission_journal()
+
+            self.assertFalse(restarted._submission_blocked)
+            self.assertFalse(restarted._submission_block_marker().exists())
+
+    def test_restart_after_crash_stays_blocked_until_manual_review(self):
+        import executor as executor_module
+        from submission_journal import SubmissionJournal
+
+        with tempfile.TemporaryDirectory() as directory:
+            # 模拟上一个进程：写完 journal 就被强杀，DB 回写从未发生。
+            journal = SubmissionJournal(Path(directory) / ".video-flow-journal")
+            journal.append(
+                {
+                    "stage": "provider_accepted",
+                    "taskId": "task-crashed",
+                    "attemptId": "attempt-crashed",
+                    "providerTaskId": "provider-crashed",
+                }
+            )
+
+            settings = SimpleNamespace(
+                comfyui_enabled=False,
+                running_job_timeout_minutes=10,
+                task_status_check_interval=0,
+                video_flow_audit_dir="",
+            )
+
+            restarted = executor_module.JobExecutor.__new__(executor_module.JobExecutor)
+            restarted.output_dir = Path(directory)
+            restarted._submission_blocked = restarted._submission_block_marker().exists()
+            self.assertFalse(restarted._submission_blocked)
+
+            with patch.object(executor_module, "settings", settings):
+                with patch("builtins.print") as print_mock:
+                    restarted._reconcile_submission_journal()
+
+                # 内存状态不足以判定安全：标记必须落盘，供下一次启动继续生效。
+                self.assertTrue(restarted._submission_blocked)
+                self.assertTrue(restarted._submission_block_marker().exists())
+                printed = " ".join(str(call) for call in print_mock.call_args_list)
+                self.assertIn("verify against the provider", printed)
+
+                # 新提交被拦住，且不再调用 Provider。
+                self.assertEqual(asyncio.run(restarted.fetch_pending_jobs()), [])
+
+                # 但已有任务的查询与恢复能力保留：带 providerTaskId 的任务继续轮询。
+                adapter = SimpleNamespace(
+                    default_model="doubao-seedance-2-5-260628",
+                    create_task=AsyncMock(),
+                    poll_until_complete=AsyncMock(
+                        return_value=ProviderTaskStatus(
+                            id="provider-crashed", status="completed"
+                        )
+                    ),
+                    calculate_actual_cost=lambda _usage: None,
+                    pricing_version="seedance-token-v1",
+                    classify_failure=lambda _message: executor_module.FailureType.UNKNOWN,
+                )
+                restarted.adapters = {"seedance": adapter}
+                restarted.update_job_status = AsyncMock(return_value=True)
+                restarted.resolve_asset_url = AsyncMock(return_value="https://oss.test/input")
+
+                inflight = Job(
+                    id="task-crashed",
+                    status="running",
+                    created_by="alice",
+                    prompt="a product video",
+                    created_at="2026-09-10T00:00:00+00:00",
+                    provider_profile="seedance-main",
+                    attempt_id="attempt-crashed",
+                    provider_task_id="provider-crashed",
+                    execution_plan=approved_execution_plan(),
+                )
+                asyncio.run(restarted.execute_job(inflight))
+
+            adapter.create_task.assert_not_awaited()
+            self.assertIsNotNone(restarted.update_job_status.await_args)
+            self.assertNotIn(
+                "requires_review",
+                [
+                    call.kwargs.get("attempt_status")
+                    for call in restarted.update_job_status.await_args_list
+                ],
+            )
+
+            # 只有人工核对并显式解封后，新的提交才会恢复。
+            journal.clear_block()
+            self.assertFalse(restarted._submission_block_marker().exists())
 
 
 if __name__ == "__main__":

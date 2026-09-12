@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     video_flow_test_mode: bool = False
     video_flow_provider_base_url: str = ARK_PROVIDER_BASE_URL
 
+    # 应急审计目录：Provider 提交日志与阻断标记必须落在受限且持久的目录。
+    # 留空时退回 COMFYUI_OUTPUT_DIR 下的默认位置（仅本地调试用）。
+    video_flow_audit_dir: str = ""
+
     # OSS
     # oss region/bucket/credential 用于落库产物上传与签名回放。
     oss_region: str = "oss-cn-beijing"

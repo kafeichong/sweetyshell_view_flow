@@ -76,8 +76,11 @@ services:
       OSS_REGION: ${OSS_REGION}
       COMFYUI_ENABLED: "false"
       COMFYUI_OUTPUT_DIR: /app/output
+      # T04: Provider 提交日志与阻断标记必须落在受限持久卷，容器重建后仍可核对
+      VIDEO_FLOW_AUDIT_DIR: /app/audit
     volumes:
       - video_output:/app/output
+      - video_audit:/app/audit
     networks:
       - video-network
     logging:
@@ -89,6 +92,7 @@ services:
 volumes:
   video_postgres_data:
   video_output:
+  video_audit:
 
 networks:
   video-network:

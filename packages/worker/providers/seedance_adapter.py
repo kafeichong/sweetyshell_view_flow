@@ -12,6 +12,21 @@ class ProviderSubmissionUncertainError(Exception):
     """Provider submission outcome is unknown and must not be retried automatically."""
 
 
+def is_submission_uncertain(status_code: Optional[int], has_task_id: bool) -> bool:
+    """提交结果是否不可判定（因此禁止自动重提）。
+
+    只有 4xx 才算"Provider 明确拒绝、确定没有创建任务"。其余情况都必须按
+    不确定处理：连接中断（无状态码）时请求可能已到达；5xx 时服务端可能已
+    创建任务只是响应没回来；2xx 但没有任务 ID、或响应无法解析，同理。
+    已经拿到任务 ID 说明提交确定成功，与状态码无关。
+    """
+    if has_task_id:
+        return False
+    if status_code is None:
+        return True
+    return not (400 <= status_code < 500)
+
+
 class SeedanceAdapter:
     """火山方舟 Ark API 适配器 - 视频生成任务"""
 
@@ -120,37 +135,50 @@ class SeedanceAdapter:
                 headers=headers,
                 json=payload
             )
-            response.raise_for_status()
-            data = response.json()
-
-            # Ark API 返回格式: {"id": "task-xxx"}
-            task_id = data.get("id")
-            if not task_id:
-                raise Exception(f"No task ID in response: {data}")
-
-            return {
-                "task_id": task_id,
-                "status": "submitted"
-            }
-
-        except httpx.HTTPStatusError as e:
-            status_code = e.response.status_code
-            error_text = e.response.text
-
-            # 明确分支化错误码，便于 executor 做重试分类。
-            if status_code == 429:
-                raise Exception(f"Rate limit exceeded: {error_text}")
-            elif status_code == 400:
-                raise Exception(f"Invalid request: {error_text}")
-            elif status_code == 401 or status_code == 403:
-                raise Exception(f"Authentication failed: {error_text}")
-            else:
-                raise Exception(f"HTTP {status_code}: {error_text}")
-
         except httpx.RequestError as e:
+            # 请求可能已经到达 Provider：无法判定是否已创建任务。
             raise ProviderSubmissionUncertainError(
                 f"Provider submission outcome unknown: {str(e)}"
             ) from e
+
+        status_code = response.status_code
+
+        if 400 <= status_code < 500:
+            # Provider 明确拒绝：确定没有创建任务，保留原始拒绝原因供分类重试。
+            error_text = response.text
+            if status_code == 429:
+                raise Exception(f"Rate limit exceeded: {error_text}")
+            if status_code == 400:
+                raise Exception(f"Invalid request: {error_text}")
+            if status_code == 401 or status_code == 403:
+                raise Exception(f"Authentication failed: {error_text}")
+            raise Exception(f"HTTP {status_code}: {error_text}")
+
+        if not (200 <= status_code < 300):
+            # 5xx：服务端可能已经建好任务，只是响应没回来。
+            raise ProviderSubmissionUncertainError(
+                f"Provider returned HTTP {status_code}; submission outcome unknown"
+            )
+
+        try:
+            data = response.json()
+        except ValueError as e:
+            raise ProviderSubmissionUncertainError(
+                "Provider response could not be parsed; submission outcome unknown"
+            ) from e
+
+        # Ark API 返回格式: {"id": "task-xxx"}。响应体不写进异常消息，
+        # 避免把完整响应带进 DB 的 failure_message。
+        task_id = data.get("id") if isinstance(data, dict) else None
+        if is_submission_uncertain(status_code, has_task_id=bool(task_id)):
+            raise ProviderSubmissionUncertainError(
+                "Provider response has no task id; submission outcome unknown"
+            )
+
+        return {
+            "task_id": task_id,
+            "status": "submitted"
+        }
 
     async def get_task_status(self, task_id: str) -> ProviderTaskStatus:
         """

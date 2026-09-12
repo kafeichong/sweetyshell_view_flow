@@ -1,5 +1,6 @@
 import json
 import sys
+import tempfile
 import unittest
 import os
 from pathlib import Path
@@ -16,8 +17,12 @@ from models import JobStatus, FailureType  # noqa: E402
 
 
 def _new_executor() -> Any:
-    """Create a fresh JobExecutor instance with a writable output dir for tests."""
-    os.environ["COMFYUI_OUTPUT_DIR"] = str(Path("/tmp/video-worker-output"))
+    """Create a fresh JobExecutor instance with a writable output dir for tests.
+
+    每次都用新的临时目录：提交 journal 与阻断标记是持久状态，共享目录会让
+    上一个测试（或上一次运行）留下的证据改变本次启动行为。
+    """
+    os.environ["COMFYUI_OUTPUT_DIR"] = tempfile.mkdtemp(prefix="video-worker-output-")
 
     import config
 
