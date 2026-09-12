@@ -502,7 +502,9 @@ def test_review_task_is_actionable_without_metrics_platform():
 
 **Docker 服务名寻址已显式验证（2026-09-13）：** 新增 `scripts/run_docker_provider_addressing.sh`：在合同 compose 里起容器化的 Fake Provider，用**容器内的真实适配器**打 `http://fake-provider:19091/api/v3` 创建任务并回读统计。这条验证抓到一个真实缺陷——Fake Provider 原先只监听 `127.0.0.1`（容器内的 loopback），同网络的其它容器能解析服务名却连不上；现在监听地址可配（`VIDEO_FLOW_FAKE_PROVIDER_HOST`），容器里绑 `0.0.0.0`，宿主机仍绑回环。该检查已加入 CI 的合同 job。
 
-**尚未完成：** E01–E13 中其余矩阵项仍由各包用例覆盖，未做成跨包用例。
+**准入边界也已跨包验证（2026-09-13）：** 新增 E02/E13 用例——没带凭证 401、凭证无效 403、非法规格 400、全局暂停 503，四种拒绝之后 Fake Provider 的 create 计数必须一动不动（返回码本身证明不了"没花钱"）；并验证暂停只拦新准入、已有路径仍可用，恢复暂停走带 reason/operator/evidenceRef 的受控接口。过程中确认了两个既有约定：凭证守卫是"没带 401 / 无效 403"，以及**空凭证时不能拼出 `Bearer `**（httpx 会本地拒绝，那样测到的就不是服务端行为）。
+
+**尚未完成：** E01–E13 中其余矩阵项（E03 并发、E04 抢额度、E05 响应丢失、E08 无 usage、E10 自定义目录、E11 越权、E12 容器重建）仍由各包用例覆盖，未做成跨包用例。
 - [x] Worker restart 用真正退出/启动测试进程验证；用读取数据库持久化 providerTaskId 作为中断触发点，不依赖固定 sleep 猜时机。
 - [x] 安装测试覆盖新增 Python 模块与前端资源、两个模板、备份位于 custom_nodes 之外；不改同事其他自定义节点。
 - [x] CI 分开显示单元、合同、预期外部 workflow skip；跨包合同不得使用真实 Provider 凭证，漏跑应失败而不是跳过。

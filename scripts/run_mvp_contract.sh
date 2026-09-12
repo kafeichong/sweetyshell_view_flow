@@ -203,7 +203,7 @@ OSS_REGION="oss-cn-beijing" \
   live_collected="$("$CONTRACT_WORKER_PYTHON" -m pytest tests/test_mvp_live_contract.py -m live_contract \
     --collect-only -q -p no:cacheprovider 2>/dev/null | tail -1)"
   case "$live_collected" in
-    *'3 tests collected'*) ;;
+    *'5 tests collected'*) ;;
     *) echo "跨包合同用例数异常: $live_collected" >&2; exit 1 ;;
   esac
 fi

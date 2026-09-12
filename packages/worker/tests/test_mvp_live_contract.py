@@ -325,6 +325,134 @@ class WorkerRestartRecoveryTests(unittest.TestCase):
         self.assertEqual(payload["execution"]["providerTaskId"], persisted_id)
         self.assertEqual(payload["delivery"]["status"], "ready")
 
+class AdmissionBoundaryTests(unittest.TestCase):
+    """E02/E13：准入被拒时绝不能产生 Provider 任务；暂停只拦新准入。
+
+    这些拒绝发生在 Backend 侧，但"没有产生付费任务"这件事只有连上真实的
+    Fake Provider 计数才能证明——单看接口返回码并不能说明没花钱。
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.base_url = required_env("VIDEO_FLOW_LIVE_BASE_URL")
+        cls.provider_url = required_env("VIDEO_FLOW_LIVE_PROVIDER_URL")
+        cls.actor_token = required_env("VIDEO_FLOW_LIVE_ACTOR_TOKEN")
+        cls.admin_token = required_env("VIDEO_FLOW_ADMIN_TOKEN")
+        cls.asset_id = required_env("VIDEO_FLOW_LIVE_ASSET_ID")
+
+    def _api(self):
+        return httpx.Client(base_url=self.base_url, timeout=30.0)
+
+    def _post_task(self, *, key, token, params):
+        headers = {"Idempotency-Key": key, "Content-Type": "application/json"}
+        # 没有凭证时要整条头都不要发：`Bearer ` 是非法头值，httpx 会在本地拒绝，
+        # 测到的就不是服务端的鉴权行为了。
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+
+        with self._api() as client:
+            return client.post(
+                "/api/v1/tasks",
+                headers=headers,
+                json={
+                    "mode": "production",
+                    "capability": "IMAGE_TO_VIDEO",
+                    "profile": "seedance",
+                    "params": params,
+                },
+            )
+
+    def _set_gate(self, paused: bool, reason: str):
+        with self._api() as client:
+            return client.patch(
+                "/api/v1/admin/operations/production-gate",
+                headers={"X-Admin-Token": self.admin_token},
+                json={
+                    "paused": paused,
+                    "reason": reason,
+                    "operator": "contract",
+                    "evidenceRef": "live-contract",
+                },
+            )
+
+    def test_rejected_requests_never_create_a_provider_task(self):
+        before = provider_stats(self.provider_url)["createCount"]
+
+        # 既有合同：没带凭证是 401，凭证无效/停用是 403。两者都必须被拒，
+        # 且都不能走到 Provider。
+        missing_credential = self._post_task(
+            key="e02-no-token",
+            token="",
+            params={"prompt": "e02 no token", "image_asset_id": self.asset_id},
+        )
+        self.assertEqual(missing_credential.status_code, 401)
+
+        invalid_credential = self._post_task(
+            key="e02-bad-token",
+            token="vf_not_a_real_token",
+            params={"prompt": "e02 bad token", "image_asset_id": self.asset_id},
+        )
+        self.assertEqual(invalid_credential.status_code, 403)
+
+        invalid_spec = self._post_task(
+            key="e02-invalid-spec",
+            token=self.actor_token,
+            params={
+                "prompt": "e02 invalid",
+                "image_asset_id": self.asset_id,
+                "duration": 999,
+                "ratio": "16:9",
+            },
+        )
+        # 非法规格必须在准入阶段被拒，而不是提交后才失败。
+        self.assertEqual(invalid_spec.status_code, 400)
+
+        self.assertEqual(
+            provider_stats(self.provider_url)["createCount"],
+            before,
+            "被拒的请求产生了 Provider 任务",
+        )
+
+    def test_pausing_the_gate_blocks_new_admission_only(self):
+        try:
+            paused = self._set_gate(True, "contract: admission boundary check")
+            self.assertEqual(paused.status_code, 200)
+
+            before = provider_stats(self.provider_url)["createCount"]
+            blocked = self._post_task(
+                key="e13-paused",
+                token=self.actor_token,
+                params={
+                    "prompt": "e13 paused admission",
+                    "image_asset_id": self.asset_id,
+                    "duration": 5,
+                    "ratio": "16:9",
+                },
+            )
+            # 503 = 系统暂停；不是 429（额度类拒绝），两者要能区分。
+            self.assertEqual(blocked.status_code, 503)
+            self.assertEqual(provider_stats(self.provider_url)["createCount"], before)
+
+            # 暂停只拦新准入：已有任务的查询不受影响（预览仍可创建）。
+            with self._api() as client:
+                task = client.post(
+                    "/api/v1/tasks",
+                    headers={
+                        "Authorization": f"Bearer {self.actor_token}",
+                        "Idempotency-Key": "e13-existing",
+                    },
+                    json={
+                        "mode": "preview",
+                        "capability": "TEXT_TO_VIDEO",
+                        "profile": "seedance",
+                        "params": {"prompt": "e13 preview under pause"},
+                    },
+                )
+            self.assertEqual(task.status_code, 201)
+        finally:
+            resumed = self._set_gate(False, "contract: restore after boundary check")
+            self.assertEqual(resumed.status_code, 200)
+
 
 if __name__ == "__main__":
     unittest.main()
