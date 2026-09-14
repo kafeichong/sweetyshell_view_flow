@@ -113,3 +113,22 @@ def test_execution_plan_freezes_provider_parameters():
         "watermark": True,
     }
 
+
+
+def test_execution_plan_uses_structured_media_roles():
+    job = _job(
+        executionPlan={
+            "workflowKey": "seedance.reference-image-to-video.v1",
+            "workflowVersion": "v1",
+            "model": "test-model",
+            "prompt": "approved prompt",
+            "media": [{"assetId": "asset-reference", "role": "reference_image"}],
+            "duration": 5,
+            "ratio": "16:9",
+            "resolution": "720p",
+            "generateAudio": False,
+            "watermark": True,
+        },
+    )
+
+    assert job.get_params()["media"] == [{"asset_id": "asset-reference", "role": "reference_image"}]

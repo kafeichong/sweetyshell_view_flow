@@ -62,18 +62,20 @@ def test_production_node_explicitly_submits_production(monkeypatch, tmp_path):
         VideoFlowConfig("https://backend.test", "token", receipt_dir=str(tmp_path)),
         "prompt",
         image,
-        10,
-        "9:16",
+        1,
     )
 
     assert result == ("task-production",)
     assert calls["create"]["mode"] == "production"
-    assert calls["create"]["payload"]["params"]["duration"] == 10
-    # 模板显式带版本，稳定键纳入版本与规格版本。
+    assert calls["create"]["payload"]["workflowKey"] == "seedance.reference-image-to-video.v1"
+    assert calls["create"]["payload"]["generation"] == {"duration": 5, "ratio": "16:9", "resolution": "720p"}
+    assert calls["create"]["payload"]["media"] == [{"assetId": "asset-1", "role": "reference_image"}]
+    # 幂等键纳入工作流、固定规格与版本。
     assert calls["key_params"] == {
-        "profile": "seedance",
-        "duration": 10,
-        "ratio": "9:16",
+        "workflow_key": "seedance.reference-image-to-video.v1",
+        "duration": 5,
+        "ratio": "16:9",
+        "resolution": "720p",
         "generation_version": 1,
         "spec_version": "",
     }
@@ -85,7 +87,7 @@ def test_production_node_explicitly_submits_production(monkeypatch, tmp_path):
     serialized = repr(calls["create"]["payload"])
     assert "signed" not in serialized
     assert "Expires" not in serialized
-    assert set(calls["create"]["payload"]) == {"capability", "profile", "params"}
+    assert set(calls["create"]["payload"]) == {"workflowKey", "prompt", "generation", "media"}
 
 
 def test_production_node_key_changes_only_when_version_changes(monkeypatch, tmp_path):
@@ -119,9 +121,9 @@ def test_production_node_key_changes_only_when_version_changes(monkeypatch, tmp_
     )
     node = nodes.VideoFlowSeedanceProduction()
 
-    node.submit(config, "prompt", image, 10, "9:16", 1)
-    node.submit(config, "prompt", image, 10, "9:16", 1)
-    node.submit(config, "prompt", image, 10, "9:16", 2)
+    node.submit(config, "prompt", image, 1)
+    node.submit(config, "prompt", image, 1)
+    node.submit(config, "prompt", image, 2)
 
     # 同参数同版本沿用同一意图；用户主动加版本才生成新的一版。
     assert keys == [1, 1, 2]
@@ -228,8 +230,8 @@ def test_production_node_stays_on_the_original_intent_when_redispatched(monkeypa
     config = VideoFlowConfig("https://backend.test", "token", receipt_dir=str(tmp_path))
     node = nodes.VideoFlowSeedanceProduction()
 
-    first = node.submit(config, "prompt", image, 5, "16:9", 1)
-    second = node.submit(config, "prompt", image, 5, "16:9", 1)
+    first = node.submit(config, "prompt", image, 1)
+    second = node.submit(config, "prompt", image, 1)
 
     # 即使节点被再次调度（IS_CHANGED 让 ComfyUI 重跑），也只能是同一个意图。
     assert node.IS_CHANGED() != node.IS_CHANGED()
@@ -302,3 +304,38 @@ def test_default_output_dir_falls_back_without_comfyui(monkeypatch):
 
     assert fallback.name == "video-flow"
     assert fallback.parent.name == "output"
+
+
+def test_text_to_video_node_creates_only_a_preview_task(monkeypatch):
+    calls = {}
+
+    class FakeClient:
+        def __init__(self, _config):
+            pass
+
+        @staticmethod
+        def stable_idempotency_key(*_args, **kwargs):
+            calls["key"] = kwargs
+            return "text-intent"
+
+        def create_task(self, **kwargs):
+            calls["create"] = kwargs
+            return {"id": "preview-1"}
+
+    monkeypatch.setattr(nodes, "VideoFlowClient", FakeClient)
+    result = nodes.VideoFlowSeedanceTextToVideo().submit(
+        VideoFlowConfig("https://backend.test", "token"), "a product rotates", 2
+    )
+
+    assert result == ("preview-1",)
+    assert calls["create"] == {
+        "idempotency_key": "text-intent",
+        "mode": "preview",
+        "payload": {
+            "workflowKey": "seedance.text-to-video.v1",
+            "prompt": {"positive": "a product rotates"},
+            "generation": {"duration": 5, "ratio": "16:9", "resolution": "720p"},
+            "media": [],
+        },
+    }
+    assert calls["key"]["workflow_key"] == "seedance.text-to-video.v1"

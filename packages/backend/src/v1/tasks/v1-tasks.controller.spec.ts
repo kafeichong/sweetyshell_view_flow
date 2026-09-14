@@ -1,13 +1,7 @@
 jest.mock('@nestjs/common', () => ({
-  Injectable: () => (target: unknown) => target,
-  createParamDecorator: () => () => () => {},
-  Controller: () => (target: unknown) => target,
-  UseGuards: () => (target: unknown) => target,
-  Post: () => () => {},
-  Get: () => () => {},
-  Body: () => () => {},
-  Headers: () => () => {},
-  Param: () => () => {},
+  Injectable: () => (target: unknown) => target, createParamDecorator: () => () => () => {},
+  Controller: () => (target: unknown) => target, UseGuards: () => (target: unknown) => target,
+  Post: () => () => {}, Get: () => () => {}, Body: () => () => {}, Headers: () => () => {}, Param: () => () => {},
   ConflictException: class ConflictException extends Error { status = 409; },
   BadRequestException: class BadRequestException extends Error { status = 400; },
   ForbiddenException: class ForbiddenException extends Error { status = 403; },
@@ -15,305 +9,65 @@ jest.mock('@nestjs/common', () => ({
   HttpStatus: { SERVICE_UNAVAILABLE: 503, TOO_MANY_REQUESTS: 429 },
   ServiceUnavailableException: class ServiceUnavailableException extends Error { status = 503; },
 }));
-
 import { V1TasksController } from './v1-tasks.controller';
 
-describe('V1TasksController idempotency', () => {
-  const tasks = {
-    findByActorRequest: jest.fn(),
-    createV1: jest.fn(),
-    createPreview: jest.fn(),
-    findOneForActor: jest.fn(),
-  };
-  const budget = {
-    createTaskWithReservation: jest.fn(),
-  };
-  const assets = {
-    findOwnedUploadedInput: jest.fn(),
-  };
-  const productionSpec = JSON.stringify({
-    version: 'test-v1',
-    model: 'test-model',
-    duration: 5,
-    ratio: '16:9',
-    resolution: 'test-resolution',
-    generateAudio: false,
-    watermark: true,
-    pricingVersion: 'test-price-v1',
-    reserveCny: '2.000000',
-  });
+const spec = JSON.stringify({ version: 'test-v1', model: 'test-model', duration: 5, ratio: '16:9', resolution: '720p', generateAudio: false, watermark: true, pricingVersion: 'price-v1', reserveCny: '2.000000' });
+const referenceRequest = { workflowKey: 'seedance.reference-image-to-video.v1', prompt: { positive: 'product orbit' }, generation: { duration: 5, ratio: '16:9', resolution: '720p' }, media: [{ assetId: 'asset-1', role: 'reference_image' }] };
 
+describe('V1TasksController workflow-only task API', () => {
+  const tasks = { findByActorRequest: jest.fn(), createPreview: jest.fn(), findSummaryForActor: jest.fn() };
+  const budget = { createTaskWithReservation: jest.fn() };
+  const assets = { findOwnedUploadedInput: jest.fn() };
   beforeEach(() => {
-    tasks.findByActorRequest.mockReset();
-    tasks.createV1.mockReset();
-    tasks.createPreview.mockReset();
-    tasks.findOneForActor.mockReset();
-    budget.createTaskWithReservation.mockReset();
-    assets.findOwnedUploadedInput.mockReset();
-    assets.findOwnedUploadedInput.mockResolvedValue({
-      id: 'asset-1',
-      fileHash: 'a'.repeat(64),
-    });
-    delete process.env.VIDEO_FLOW_PRODUCTION_ACTORS;
-    process.env.VIDEO_FLOW_PRODUCTION_SPEC_JSON = productionSpec;
+    process.env.VIDEO_FLOW_PRODUCTION_ACTORS = 'creative-pilot'; process.env.VIDEO_FLOW_PRODUCTION_SPEC_JSON = spec;
+    tasks.findByActorRequest.mockResolvedValue(null); tasks.createPreview.mockReset(); budget.createTaskWithReservation.mockReset();
+    budget.createTaskWithReservation.mockResolvedValue({ id: 'task-1', status: 'pending' }); assets.findOwnedUploadedInput.mockResolvedValue({ id: 'asset-1', fileHash: 'a'.repeat(64) });
   });
-
-  it('reuses an existing task for the same actor and request payload', async () => {
-    const body = { capability: 'IMAGE_TO_VIDEO', profile: 'seedance', params: { prompt: 'test', image_url: 'https://x/1.png' } };
-    const existing = { id: 'task-1', requestSnapshot: body };
-    tasks.findByActorRequest.mockResolvedValue(existing);
-
-    const result = await new V1TasksController(tasks as never).create(
-      { actorId: 'actor-1' },
-      'request-1',
-      body,
-    );
-
-    expect(result).toMatchObject({ id: 'task-1', preview: { mode: 'preview', willCallProvider: false } });
-    expect(tasks.createV1).not.toHaveBeenCalled();
-    expect(tasks.createPreview).not.toHaveBeenCalled();
+  it('rejects the retired capability/profile request shape before it can create a task', async () => {
+    await expect(new V1TasksController(tasks as never, budget as never, assets as never).create({ actorId: 'creative-pilot' }, 'old-1', { capability: 'IMAGE_TO_VIDEO', profile: 'seedance', params: { prompt: 'x' } } as never)).rejects.toMatchObject({ status: 400, message: 'WORKFLOW_KEY_REQUIRED' });
+    expect(budget.createTaskWithReservation).not.toHaveBeenCalled(); expect(tasks.createPreview).not.toHaveBeenCalled();
   });
-
-  it('rejects a reused idempotency key with a different payload', async () => {
-    tasks.findByActorRequest.mockResolvedValue({
-      id: 'task-1',
-      requestSnapshot: { capability: 'IMAGE_TO_VIDEO', params: { prompt: 'old' } },
-    });
-
-    await expect(
-      new V1TasksController(tasks as never).create(
-        { actorId: 'actor-1' },
-        'request-1',
-        {
-          capability: 'IMAGE_TO_VIDEO',
-          profile: 'seedance',
-          params: { prompt: 'new', image_url: 'https://x/1.png' },
-        },
-      ),
-    ).rejects.toMatchObject({ status: 409 });
+  it('creates a preview task without a paid attempt', async () => {
+    tasks.createPreview.mockResolvedValue({ id: 'preview-1', status: 'preview' });
+    const result = await new V1TasksController(tasks as never, budget as never, assets as never).create({ actorId: 'creative-pilot' }, 'preview-1', referenceRequest);
+    expect(result).toMatchObject({ id: 'preview-1', preview: { workflowKey: referenceRequest.workflowKey, willCallProvider: false } }); expect(budget.createTaskWithReservation).not.toHaveBeenCalled();
   });
-
-  it('treats the same payload with a different key order as the same request', async () => {
-    const existing = {
-      id: 'task-1',
-      requestSnapshot: {
-        capability: 'IMAGE_TO_VIDEO',
-        profile: 'seedance',
-        params: { prompt: 'test', image_url: 'https://x/1.png' },
-      },
-    };
-    tasks.findByActorRequest.mockResolvedValue(existing);
-
-    const reordered = {
-      params: { image_url: 'https://x/1.png', prompt: 'test' },
-      profile: 'seedance',
-      capability: 'IMAGE_TO_VIDEO',
-    };
-
-    const result = await new V1TasksController(tasks as never).create(
-      { actorId: 'actor-1' },
-      'request-1',
-      reordered as never,
-    );
-
-    expect(result).toMatchObject({ id: 'task-1' });
-    expect(tasks.createV1).not.toHaveBeenCalled();
-    expect(tasks.createPreview).not.toHaveBeenCalled();
+  it('creates the production-verified reference workflow with frozen role-based media', async () => {
+    await new V1TasksController(tasks as never, budget as never, assets as never).create({ actorId: 'creative-pilot' }, 'production-1', { ...referenceRequest, mode: 'production' });
+    expect(budget.createTaskWithReservation).toHaveBeenCalledWith(expect.objectContaining({ task: expect.objectContaining({ workflowName: referenceRequest.workflowKey, workflowVersion: 'v1' }), executionPlan: expect.objectContaining({ media: [{ assetId: 'asset-1', role: 'reference_image', fileHash: 'a'.repeat(64) }] }) }));
   });
-
-  it('未列入白名单的 actor 请求 production 时被拒绝，且不落库', async () => {
-    await expect(
-      new V1TasksController(tasks as never).create(
-        { actorId: 'actor-not-whitelisted' },
-        'request-1',
-        {
-          capability: 'IMAGE_TO_VIDEO',
-          profile: 'seedance',
-          params: { prompt: 'x', image_url: 'https://x/1.png' },
-          mode: 'production',
-        },
-      ),
-    ).rejects.toMatchObject({ status: 403 });
-
-    expect(tasks.findByActorRequest).toHaveBeenCalledWith(
-      'actor-not-whitelisted',
-      'request-1',
-    );
-    expect(tasks.createV1).not.toHaveBeenCalled();
-    expect(tasks.createPreview).not.toHaveBeenCalled();
+  it('returns a prior task for the same actor, idempotency key and body', async () => {
+    tasks.findByActorRequest.mockResolvedValue({ id: 'existing', requestSnapshot: referenceRequest });
+    await expect(new V1TasksController(tasks as never, budget as never, assets as never).create({ actorId: 'creative-pilot' }, 'same-1', referenceRequest)).resolves.toMatchObject({ id: 'existing' });
   });
-
-  it('白名单 actor 的 production 请求创建真实任务，且不带 preview 标记', async () => {
-    process.env.VIDEO_FLOW_PRODUCTION_ACTORS = 'actor-allowed, other-actor';
-    tasks.findByActorRequest.mockResolvedValue(null);
-    tasks.createV1.mockResolvedValue({ id: 'task-real', status: 'pending' });
-    budget.createTaskWithReservation.mockResolvedValue({ id: 'task-real', status: 'pending' });
-
-    const result = await new V1TasksController(tasks as never, budget as never, assets as never).create(
-      { actorId: 'actor-allowed' },
-      'request-real-1',
-      {
-        capability: 'IMAGE_TO_VIDEO',
-        profile: 'seedance',
-        params: {
-          prompt: 'real run',
-          image_asset_id: 'asset-1',
-          duration: 5,
-          ratio: '16:9',
-        },
-        mode: 'production',
-      },
-    );
-
-    expect(budget.createTaskWithReservation).toHaveBeenCalledTimes(1);
-    expect(tasks.createV1).not.toHaveBeenCalled();
-    expect(tasks.createPreview).not.toHaveBeenCalled();
-    expect(result).toMatchObject({ id: 'task-real', status: 'pending' });
-    expect((result as Record<string, unknown>).preview).toBeUndefined();
+  it('rejects preview-only text-to-video from Production', async () => {
+    await expect(new V1TasksController(tasks as never, budget as never, assets as never).create({ actorId: 'creative-pilot' }, 'text-1', { workflowKey: 'seedance.text-to-video.v1', mode: 'production', prompt: { positive: 'product orbit' }, generation: { duration: 5, ratio: '16:9', resolution: '720p' }, media: [] })).rejects.toMatchObject({ status: 400, message: 'WORKFLOW_NOT_PRODUCTION_VERIFIED' });
   });
+});
 
-  it('拒绝不属于当前 actor 的 production 输入素材', async () => {
-    process.env.VIDEO_FLOW_PRODUCTION_ACTORS = 'actor-allowed';
-    tasks.findByActorRequest.mockResolvedValue(null);
+describe('V1TasksController workflow-only safety regressions', () => {
+  const tasks = { findByActorRequest: jest.fn(), createPreview: jest.fn(), findSummaryForActor: jest.fn() };
+  const budget = { createTaskWithReservation: jest.fn() };
+  const assets = { findOwnedUploadedInput: jest.fn() };
+  const body = { workflowKey: 'seedance.reference-image-to-video.v1', prompt: { positive: 'product orbit' }, generation: { duration: 5, ratio: '16:9', resolution: '720p' }, media: [{ assetId: 'asset-1', role: 'reference_image' }] };
+  beforeEach(() => { process.env.VIDEO_FLOW_PRODUCTION_ACTORS = 'creative-pilot'; process.env.VIDEO_FLOW_PRODUCTION_SPEC_JSON = spec; tasks.findByActorRequest.mockResolvedValue(null); assets.findOwnedUploadedInput.mockResolvedValue({ id: 'asset-1', fileHash: null }); budget.createTaskWithReservation.mockResolvedValue({ id: 'task-1' }); });
+  it('requires an idempotency key', async () => {
+    await expect(new V1TasksController(tasks as never, budget as never, assets as never).create({ actorId: 'creative-pilot' }, '', body)).rejects.toMatchObject({ status: 409 });
+  });
+  it('rejects a reused idempotency key with a different request', async () => {
+    tasks.findByActorRequest.mockResolvedValue({ id: 'old', requestSnapshot: body });
+    await expect(new V1TasksController(tasks as never, budget as never, assets as never).create({ actorId: 'creative-pilot' }, 'same', { ...body, prompt: { positive: 'changed' } })).rejects.toMatchObject({ status: 409 });
+  });
+  it('does not permit a non-whitelisted actor to create Production work', async () => {
+    await expect(new V1TasksController(tasks as never, budget as never, assets as never).create({ actorId: 'other' }, 'denied', { ...body, mode: 'production' })).rejects.toMatchObject({ status: 403 });
+    expect(budget.createTaskWithReservation).not.toHaveBeenCalled();
+  });
+  it('requires a Production input Asset owned by the actor', async () => {
     assets.findOwnedUploadedInput.mockResolvedValue(null);
-
-    await expect(
-      new V1TasksController(tasks as never, budget as never, assets as never).create(
-        { actorId: 'actor-allowed' },
-        'request-owned-input',
-        {
-          capability: 'IMAGE_TO_VIDEO',
-          profile: 'seedance',
-          params: {
-            prompt: 'product',
-            image_asset_id: 'asset-other',
-            duration: 5,
-            ratio: '16:9',
-          },
-          mode: 'production',
-        },
-      ),
-    ).rejects.toMatchObject({ status: 403 });
-
-    expect(tasks.createV1).not.toHaveBeenCalled();
+    await expect(new V1TasksController(tasks as never, budget as never, assets as never).create({ actorId: 'creative-pilot' }, 'asset-denied', { ...body, mode: 'production' })).rejects.toMatchObject({ status: 403 });
   });
-
-  it('production 规格配置缺失时 fail closed', async () => {
-    process.env.VIDEO_FLOW_PRODUCTION_ACTORS = 'actor-allowed';
+  it('fails closed if the approved Production spec is absent', async () => {
     delete process.env.VIDEO_FLOW_PRODUCTION_SPEC_JSON;
-    tasks.findByActorRequest.mockResolvedValue(null);
-
-    await expect(
-      new V1TasksController(tasks as never, budget as never, assets as never).create(
-        { actorId: 'actor-allowed' },
-        'request-no-spec',
-        {
-          capability: 'IMAGE_TO_VIDEO',
-          profile: 'seedance',
-          params: {
-            prompt: 'product',
-            image_asset_id: 'asset-1',
-            duration: 5,
-            ratio: '16:9',
-          },
-          mode: 'production',
-        },
-      ),
-    ).rejects.toMatchObject({ status: 503 });
-
-    expect(tasks.createV1).not.toHaveBeenCalled();
-  });
-
-  it('白名单为空时 production 对所有人关闭', async () => {
-    process.env.VIDEO_FLOW_PRODUCTION_ACTORS = '   ';
-
-    await expect(
-      new V1TasksController(tasks as never).create(
-        { actorId: 'actor-allowed' },
-        'request-2',
-        {
-          capability: 'TEXT_TO_VIDEO',
-          profile: 'seedance',
-          params: { prompt: 'x' },
-          mode: 'production',
-        },
-      ),
-    ).rejects.toMatchObject({ status: 403 });
-
-    expect(tasks.createV1).not.toHaveBeenCalled();
-  });
-
-  // 安全回归：以下三条锁定"Preview 永远不会变成付费任务"。
-  it('缺省 mode 按 preview 处理，并且只走 createPreview', async () => {
-    tasks.findByActorRequest.mockResolvedValue(null);
-    tasks.createPreview.mockResolvedValue({ id: 'task-preview', status: 'preview' });
-
-    const result = await new V1TasksController(tasks as never).create(
-      { actorId: 'actor-1' },
-      'request-1',
-      { capability: 'TEXT_TO_VIDEO', profile: 'seedance', params: { prompt: 'hello' } },
-    );
-
-    expect(tasks.createPreview).toHaveBeenCalledTimes(1);
-    expect(tasks.createV1).not.toHaveBeenCalled();
-    expect(tasks.createPreview.mock.calls[0][0]).toMatchObject({
-      actorId: 'actor-1',
-      clientRequestId: 'request-1',
-      capability: 'TEXT_TO_VIDEO',
-    });
-    expect(result).toMatchObject({
-      id: 'task-preview',
-      status: 'preview',
-      preview: { mode: 'preview', willCallProvider: false, costStatus: 'unavailable' },
-    });
-  });
-
-  it('显式 mode=preview 不会创建付费 Attempt', async () => {
-    tasks.findByActorRequest.mockResolvedValue(null);
-    tasks.createPreview.mockResolvedValue({ id: 'task-preview-2', status: 'preview' });
-
-    await new V1TasksController(tasks as never).create(
-      { actorId: 'actor-1' },
-      'request-2',
-      {
-        capability: 'TEXT_TO_VIDEO',
-        profile: 'seedance',
-        params: { prompt: 'hello' },
-        mode: 'preview',
-      },
-    );
-
-    expect(tasks.createPreview).toHaveBeenCalledTimes(1);
-    expect(tasks.createV1).not.toHaveBeenCalled();
-  });
-
-  it('未知 mode 被拒绝，不会落库', async () => {
-    await expect(
-      new V1TasksController(tasks as never).create(
-        { actorId: 'actor-1' },
-        'request-3',
-        {
-          capability: 'TEXT_TO_VIDEO',
-          profile: 'seedance',
-          params: { prompt: 'hello' },
-          mode: 'comfyui' as never,
-        },
-      ),
-    ).rejects.toMatchObject({ status: 400 });
-
-    expect(tasks.createPreview).not.toHaveBeenCalled();
-    expect(tasks.createV1).not.toHaveBeenCalled();
-  });
-
-  it('IMAGE_TO_VIDEO 缺少参考图时被拒绝，不会落库', async () => {
-    await expect(
-      new V1TasksController(tasks as never).create(
-        { actorId: 'actor-1' },
-        'request-4',
-        { capability: 'IMAGE_TO_VIDEO', profile: 'seedance', params: { prompt: 'hello' } },
-      ),
-    ).rejects.toMatchObject({ status: 400 });
-
-    expect(tasks.createPreview).not.toHaveBeenCalled();
+    await expect(new V1TasksController(tasks as never, budget as never, assets as never).create({ actorId: 'creative-pilot' }, 'no-spec', body)).rejects.toMatchObject({ status: 503 });
   });
 });

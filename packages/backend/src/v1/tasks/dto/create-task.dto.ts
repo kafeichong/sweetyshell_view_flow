@@ -1,6 +1,7 @@
 export class CreateTaskDto {
-  capability!: string;
-  profile!: string;
-  params!: Record<string, unknown>;
+  workflowKey?: string;
+  prompt?: { positive?: string };
+  generation?: { duration?: number; ratio?: string; resolution?: string };
+  media?: { assetId?: string; role?: string }[];
   mode?: 'preview' | 'production';
 }

@@ -73,7 +73,7 @@ curl -sS -X POST 'https://ai.sweetyshell.com/api/v1/assets/upload-ticket' \
 
 | 字段 | 用途 |
 | --- | --- |
-| `assetId` | 后续创建任务时作为 `params.image_asset_id` |
+| `assetId` | 后续创建任务时作为 `media[].assetId` |
 | `objectKey` | 对象身份（数据库永久保存的就是它） |
 | `uploadUrl` | 直传地址，有效期 900 秒 |
 | `uploadHeaders` | PUT 时必须原样带上的请求头 |
@@ -106,53 +106,50 @@ curl -sS -X POST 'https://ai.sweetyshell.com/api/v1/assets/<assetId>/complete' \
 
 必须带 `Idempotency-Key`（缺失返回 409）。相同 actor + 相同 key + 相同请求体只会创建一条任务；相同 key 但请求体不同返回 409。
 
-### 3.1 文生视频
+### 3.1 统一工作流请求
+
+新客户端以 `workflowKey` 选择工作流。当前可见目录可通过受鉴权的 `GET /api/v1/tasks/workflows` 查询；不得从客户端传模型、价格或未登记的素材角色。
+
+**文本生视频目前只支持 Preview：**
 
 ```bash
 curl -sS -X POST 'https://ai.sweetyshell.com/api/v1/tasks' \
   -H 'Content-Type: application/json' \
   -H 'Authorization: Bearer <ACTOR_TOKEN>' \
-  -H 'Idempotency-Key: alice-20260911-001' \
+  -H 'Idempotency-Key: alice-20260914-text-001' \
   -d '{
-    "capability": "TEXT_TO_VIDEO",
-    "profile": "seedance",
+    "workflowKey": "seedance.text-to-video.v1",
     "mode": "preview",
-    "params": {
-      "prompt": "A premium product hero shot, smooth camera move, clean studio",
-      "duration": 5
-    }
+    "prompt": {"positive": "A premium product hero shot, smooth camera move, clean studio"},
+    "generation": {"duration": 5, "ratio": "16:9", "resolution": "720p"},
+    "media": []
   }'
 ```
 
-### 3.2 图生视频
-
-把 `capability` 改为 `IMAGE_TO_VIDEO`，并在 `params` 里带上 `image_asset_id`（推荐，来自第 2 步的 `assetId`）：
+**参考图片生视频是当前唯一已验收的 Production 工作流：**
 
 ```json
 {
-  "capability": "IMAGE_TO_VIDEO",
-  "profile": "seedance",
-  "mode": "preview",
-  "params": {
-    "prompt": "Use this product image, slow push-in, clean studio lighting",
-    "duration": 5,
-    "image_asset_id": "<assetId>"
-  }
+  "workflowKey": "seedance.reference-image-to-video.v1",
+  "mode": "production",
+  "prompt": {"positive": "Use this product image, slow push-in, clean studio lighting"},
+  "generation": {"duration": 5, "ratio": "16:9", "resolution": "720p"},
+  "media": [{"assetId": "<assetId>", "role": "reference_image"}]
 }
 ```
 
-> Preview 仍兼容 `params.image_url`，但需要是 Provider 能访问的 HTTPS 地址。Production 必须使用本人已上传并完成校验的 `image_asset_id`；不能传 `image_url` 或本地文件路径。
+Production 只接受本人已上传、完成校验的 `assetId`。`reference_video`、`reference_audio` 是 Seedance 2.5 官方 `content` 协议中的角色，但当前平台尚未开放对应素材上传与 Production 工作流。
 
 ### 3.3 请求校验规则
 
 | 字段 | 规则 |
 | --- | --- |
-| `capability` | 只能是 `TEXT_TO_VIDEO` 或 `IMAGE_TO_VIDEO` |
-| `profile` | 必须以 `seedance` 开头（如 `seedance`、`seedance-main`） |
-| `params.prompt` | 必填，≤ 4000 字符 |
-| `params` 整体 | 序列化后 ≤ 64 KB |
-| `IMAGE_TO_VIDEO` | Preview 必须有 `image_asset_id` 或 `image_url`；Production 必须是已上传完成的 `image_asset_id` |
-| `mode` | 缺省 `preview`；`production` 需白名单 |
+| `workflowKey` | 必须是服务端注册的工作流键 |
+| `prompt.positive` | 必填，≤ 4000 字符 |
+| `generation` | 必须精确匹配该工作流已批准的规格 |
+| `media` | 数量、角色及 Asset 归属必须匹配工作流；参考图片工作流只接受一张 `reference_image` |
+| `mode` | 缺省 `preview`；`production` 还需白名单、额度与工作流状态为 `production_verified` |
+| 旧字段 | `capability/profile/params` 已废弃；请求会返回 `WORKFLOW_KEY_REQUIRED` |
 
 ### 3.4 Preview 响应长这样
 
@@ -213,7 +210,7 @@ curl -sS 'https://ai.sweetyshell.com/api/v1/assets/tasks/<TASK_ID>/result' \
 
 | 返回码 | 含义 | 处理 |
 | --- | --- | --- |
-| 400 | 请求校验失败（capability / profile / params / 上传元数据不符） | 按报错文案修参数 |
+| 400 | 请求校验失败（workflowKey / generation / media / 上传元数据不符） | 按报错文案修参数 |
 | 401 | 没带 `Authorization` | 补 Bearer token |
 | 403 | 凭证无效或已撤销；或 Production 未授权 | 找管理员确认凭证状态 / 白名单 |
 | 404 | 任务或 Asset 不属于当前 actor，或不存在 | 检查 ID 与归属 |
@@ -225,7 +222,7 @@ curl -sS 'https://ai.sweetyshell.com/api/v1/assets/tasks/<TASK_ID>/result' \
 
 ## 8. 在 ComfyUI 里出片（推荐路径）
 
-用 `Seedance Production` 节点提交，`Wait` 等它可交付，`LoadResult` 取片：
+用 `Seedance Reference Image to Video` 节点提交，`Wait` 等它可交付，`LoadResult` 取片。`Seedance Text to Video (Preview)` 只校验并记录意图，不能接到 `Wait` / `LoadResult`：
 
 - **`generation_version` 是付费开关**：默认 `1`。同参数同版本重跑沿用**同一个任务**，
   不会重复扣费；把它改成 `2` 才是"再生成一版"，会产生**新的付费任务**。

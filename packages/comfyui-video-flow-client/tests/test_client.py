@@ -51,7 +51,7 @@ def test_retry_reuses_the_original_intent_instead_of_rebuilt_metadata(tmp_path):
         httpx.Client(transport=httpx.MockTransport(handler)),
     )
     store = ReceiptStore(tmp_path)
-    original = {"capability": "IMAGE_TO_VIDEO", "profile": "seedance", "params": {"prompt": "p"}}
+    original = {"workflowKey": "seedance.reference-image-to-video.v1", "prompt": {"positive": "p"}, "generation": {"duration": 5, "ratio": "16:9", "resolution": "720p"}, "media": [{"assetId": "asset-1", "role": "reference_image"}]}
 
     with pytest.raises(httpx.ReadTimeout):
         client.create_task_with_receipt(
@@ -104,7 +104,7 @@ def test_retry_does_not_bump_generation_version(tmp_path):
         client.create_task_with_receipt(
             intent_key="intent-version",
             idempotency_key=base_key,
-            payload={"capability": "IMAGE_TO_VIDEO", "profile": "seedance", "params": {"prompt": "p"}},
+            payload={"workflowKey": "seedance.reference-image-to-video.v1", "prompt": {"positive": "p"}, "generation": {"duration": 5, "ratio": "16:9", "resolution": "720p"}, "media": [{"assetId": "asset-1", "role": "reference_image"}]},
             mode="production",
             receipt_store=store,
         )
@@ -113,7 +113,7 @@ def test_retry_does_not_bump_generation_version(tmp_path):
     client.create_task_with_receipt(
         intent_key="intent-version",
         idempotency_key=client.stable_idempotency_key("p", b"image", generation_version=4),
-        payload={"capability": "IMAGE_TO_VIDEO", "profile": "seedance", "params": {"prompt": "p"}},
+        payload={"workflowKey": "seedance.reference-image-to-video.v1", "prompt": {"positive": "p"}, "generation": {"duration": 5, "ratio": "16:9", "resolution": "720p"}, "media": [{"assetId": "asset-1", "role": "reference_image"}]},
         mode="production",
         receipt_store=store,
     )
@@ -141,7 +141,7 @@ def test_receipt_write_failure_blocks_the_paid_submission(tmp_path):
         client.create_task_with_receipt(
             intent_key="intent-no-receipt",
             idempotency_key="stable-key",
-            payload={"capability": "IMAGE_TO_VIDEO", "profile": "seedance", "params": {"prompt": "p"}},
+            payload={"workflowKey": "seedance.reference-image-to-video.v1", "prompt": {"positive": "p"}, "generation": {"duration": 5, "ratio": "16:9", "resolution": "720p"}, "media": [{"assetId": "asset-1", "role": "reference_image"}]},
             mode="production",
             receipt_store=store,
         )
@@ -165,7 +165,7 @@ def test_receipt_update_failure_reports_the_created_task_id(tmp_path):
         client.create_task_with_receipt(
             intent_key="intent-update-failure",
             idempotency_key="stable-key",
-            payload={"capability": "IMAGE_TO_VIDEO", "profile": "seedance", "params": {"prompt": "p"}},
+            payload={"workflowKey": "seedance.reference-image-to-video.v1", "prompt": {"positive": "p"}, "generation": {"duration": 5, "ratio": "16:9", "resolution": "720p"}, "media": [{"assetId": "asset-1", "role": "reference_image"}]},
             mode="production",
             receipt_store=store,
         )
@@ -205,7 +205,7 @@ def test_create_task_with_receipt_reuses_key_after_timeout(tmp_path):
         httpx.Client(transport=httpx.MockTransport(handler)),
     )
     store = ReceiptStore(tmp_path)
-    payload = {"capability": "TEXT_TO_VIDEO", "profile": "seedance", "params": {"prompt": "p"}}
+    payload = {"workflowKey": "seedance.text-to-video.v1", "prompt": {"positive": "p"}, "generation": {"duration": 5, "ratio": "16:9", "resolution": "720p"}, "media": []}
 
     for _ in range(2):
         try:
@@ -236,7 +236,7 @@ def test_create_task_with_receipt_records_task_id(tmp_path):
     result = client.create_task_with_receipt(
         intent_key="intent-success",
         idempotency_key="stable-key",
-        payload={"capability": "TEXT_TO_VIDEO", "profile": "seedance", "params": {"prompt": "p"}},
+        payload={"workflowKey": "seedance.text-to-video.v1", "prompt": {"positive": "p"}, "generation": {"duration": 5, "ratio": "16:9", "resolution": "720p"}, "media": []},
         mode="production",
         receipt_store=store,
     )
@@ -258,7 +258,7 @@ def test_create_task_sends_preview_contract_without_exposing_token():
     )
     result = client.create_task(
         idempotency_key="key-1",
-        payload={"capability": "IMAGE_TO_VIDEO", "profile": "seedance", "params": {}},
+        payload={"workflowKey": "seedance.reference-image-to-video.v1", "prompt": {"positive": "p"}, "generation": {"duration": 5, "ratio": "16:9", "resolution": "720p"}, "media": [{"assetId": "asset-1", "role": "reference_image"}]},
     )
 
     assert result == {"id": "task-1"}
@@ -335,7 +335,7 @@ def test_create_task_scopes_same_base_idempotency_key_by_mode():
         VideoFlowConfig("https://backend.test", "secret-token"),
         httpx.Client(transport=httpx.MockTransport(handler)),
     )
-    payload = {"capability": "TEXT_TO_VIDEO", "profile": "seedance", "params": {}}
+    payload = {"workflowKey": "seedance.text-to-video.v1", "prompt": {"positive": "p"}, "generation": {"duration": 5, "ratio": "16:9", "resolution": "720p"}, "media": []}
     base_key = VideoFlowClient.stable_idempotency_key("prompt", b"image")
 
     client.create_task(idempotency_key=base_key, payload=payload, mode="preview")
@@ -357,7 +357,7 @@ def test_create_task_omits_production_unless_explicitly_requested():
         VideoFlowConfig("https://backend.test", "secret-token"),
         httpx.Client(transport=httpx.MockTransport(handler)),
     )
-    payload = {"capability": "TEXT_TO_VIDEO", "profile": "seedance", "params": {}}
+    payload = {"workflowKey": "seedance.text-to-video.v1", "prompt": {"positive": "p"}, "generation": {"duration": 5, "ratio": "16:9", "resolution": "720p"}, "media": []}
 
     client.create_task(idempotency_key="k1", payload=payload)
     client.create_task(idempotency_key="k2", payload=payload, mode="production")

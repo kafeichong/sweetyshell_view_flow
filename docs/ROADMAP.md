@@ -739,6 +739,7 @@ Backend 只接受用户意图，按 Registry 生成并冻结 `executionPlan`：w
 
 #### W3：Registry 与 generation policy
 
+- [x] 已完成基础 Registry：对外创建任务必须提交 `workflowKey`，现有 `seedance.reference-image-to-video.v1` 与 `seedance.text-to-video.v1` 均由服务端注册；旧 `capability/profile/params` 合同已拒绝。当前代码状态见 [PROJECT_STATUS.md](PROJECT_STATUS.md)，该基础不代表新增模式已开放。
 - [ ] 将现有 Registry 拆为 `WorkflowDefinition`、`MediaPolicy`、`GenerationPolicy` 和 `ProviderFieldPolicy`；支持固定值、枚举范围、`adaptive`、按模式必填/禁止字段以及 `preview_only` / `disabled` / `production_verified` 生命周期。
 - [ ] 先注册第 10.2 节八个键。`disabled` 只可被目录读取，不允许创建 Preview 或 Production Task；`preview_only` 可创建不可执行 Preview；`production_verified` 才可经白名单和额度创建 pending Task。
 - [ ] 禁止框架外的 role 组合：首帧/尾帧工作流不能混用 `reference_*`；视频编辑必须有 `reference_video`；音频参考工作流按证据规则限制是否允许纯音频。

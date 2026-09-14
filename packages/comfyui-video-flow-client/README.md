@@ -52,11 +52,12 @@ Production 节点的 `generation_version` 默认是 `1`。相同版本会复用�
 
 - `Video Flow Config`
 - `Seedance Preview`
-- `Seedance Production`
+- `Seedance Reference Image to Video`
+- `Seedance Text to Video (Preview)`
 - `Wait Video Flow Task`
 - `Load Video Flow Result`
 
-`Seedance Production` 会产生真实费用，目前 Production 白名单保持为空；额度门禁上线并完成单人授权后才可使用。
+`Seedance Reference Image to Video` 是当前唯一可进入 Production 的节点，固定使用已验收的 5 秒 / 720p / 16:9 规格。`Seedance Text to Video (Preview)` 不会调用 Provider；它在当前版本只用于校验统一工作流契约，待单独真实验收后才会开放 Production。
 
 ## 一次完整提交
 

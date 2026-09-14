@@ -133,7 +133,7 @@ bash scripts/run_docker_provider_addressing.sh       # Docker 服务名寻址
 | Preview / Production 双模式：`mode` 缺省为 `preview`；Production 按 actor 白名单 fail-closed | `src/v1/tasks/v1-tasks.controller.ts:62-72`、`src/v1/tasks/production-policy.ts` |
 | Preview 结构上不可执行：落 `status='preview'`，而 Worker 只 claim `status='pending'` | `src/tasks/tasks.service.ts:84-106`、`src/tasks/task-claim.service.ts:13-16` |
 | 幂等：`Idempotency-Key` 必填 + `(actorId, clientRequestId)` 唯一约束 + 请求体稳定序列化比对 + P2002 并发回读 | `src/v1/tasks/v1-tasks.controller.ts:27-43,79-140` |
-| 请求校验：capability 白名单、profile 前缀、prompt 长度、IMAGE_TO_VIDEO 必须有图 | `src/v1/tasks/preview-plan.ts:59-111` |
+| 请求校验：只接受注册的 `workflowKey`、结构化 `prompt/generation/media`；旧 `capability/profile/params` 返回 `WORKFLOW_KEY_REQUIRED` | `src/tasks/workflow-registry.ts`、`src/v1/tasks/v1-tasks.controller.ts`；验证：`cd packages/backend && npm test -- --runInBand` |
 | 原子 claim + 5 分钟租约 + 自动创建 ExecutionAttempt | `src/tasks/task-claim.service.ts:22-84` |
 | 凭证鉴权：token 只存 `sha256`、可撤销、记录 `lastUsedAt` | `src/auth/credentials.service.ts`、`src/auth/api-credential.guard.ts` |
 | Worker / Admin 内部接口用独立服务令牌，`timingSafeEqual` 比对 | `src/auth/worker-service.guard.ts`、`src/auth/admin-token.guard.ts` |

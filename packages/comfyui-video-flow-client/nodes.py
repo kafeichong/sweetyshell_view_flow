@@ -57,15 +57,25 @@ class VideoFlowSeedancePreview:
         Image.fromarray(pixels).save(buffer, format="PNG")
         image_bytes = buffer.getvalue()
         uploaded = client.upload_media(image_bytes, filename="reference.png", mime_type="image/png")
-        summary = {"mode": "preview", "capability": "IMAGE_TO_VIDEO", "prompt": prompt, "input": "reference.png"}
+        summary = {"mode": "preview", "workflowKey": "seedance.reference-image-to-video.v1", "prompt": prompt, "input": "reference.png"}
         task = client.create_task(
-            idempotency_key=client.stable_idempotency_key(prompt, image_bytes),
-            payload={"capability": "IMAGE_TO_VIDEO", "profile": "seedance", "params": {"prompt": prompt, "image_asset_id": uploaded["assetId"]}},
+            idempotency_key=client.stable_idempotency_key(
+                prompt, image_bytes, workflow_key="seedance.reference-image-to-video.v1",
+                duration=5, ratio="16:9", resolution="720p",
+            ),
+            payload={
+                "workflowKey": "seedance.reference-image-to-video.v1",
+                "prompt": {"positive": prompt},
+                "generation": {"duration": 5, "ratio": "16:9", "resolution": "720p"},
+                "media": [{"assetId": uploaded["assetId"], "role": "reference_image"}],
+            },
         )
         return (str(task["id"]), str(summary))
 
 
 class VideoFlowSeedanceProduction:
+    """已实测的参考图片生视频工作流。"""
+
     @classmethod
     def INPUT_TYPES(cls):
         return {
@@ -73,8 +83,7 @@ class VideoFlowSeedanceProduction:
                 "config": ("VIDEO_FLOW_CONFIG",),
                 "prompt": ("STRING", {"multiline": True}),
                 "image": ("IMAGE",),
-                "duration": ("INT", {"default": 5, "min": 1, "max": 60}),
-                "ratio": (["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"],),
+                # 当前生产注册表固定为已验收规格，避免节点暴露会被后端拒绝的假选项。
                 "generation_version": ("INT", {"default": 1, "min": 1, "max": 9999}),
             }
         }
@@ -82,52 +91,73 @@ class VideoFlowSeedanceProduction:
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("task_id",)
     FUNCTION = "submit"
-    CATEGORY = "Video Flow"
+    CATEGORY = "Video Flow/Seedance"
 
     @classmethod
     def IS_CHANGED(cls, *args, **kwargs):
-        # 即使再次被调度，submit 也只能沿用回执里的原意图：重新调度不会
-        # 变成第二次付费生成，用户主动改 generation_version 才会。
         return requery_nonce()
 
-    def submit(self, config, prompt, image, duration, ratio, generation_version=1):
+    def submit(self, config, prompt, image, generation_version=1):
         client = VideoFlowClient(config)
         pixels = np.clip(image[0].cpu().numpy() * 255, 0, 255).astype(np.uint8)
         buffer = BytesIO()
         Image.fromarray(pixels).save(buffer, format="PNG")
         image_bytes = buffer.getvalue()
-        uploaded = client.upload_media(
-            image_bytes,
-            filename="reference.png",
-            mime_type="image/png",
-        )
-        # 稳定键显式带上 generation_version 与规格版本：同参数同版本重复执行
-        # 命中同一个任务，用户主动提升版本号才表示再生成一版。
+        uploaded = client.upload_media(image_bytes, filename="reference.png", mime_type="image/png")
         intent_key = client.stable_idempotency_key(
-            prompt,
-            image_bytes,
-            profile="seedance",
-            duration=duration,
-            ratio=ratio,
-            generation_version=generation_version,
+            prompt, image_bytes, workflow_key="seedance.reference-image-to-video.v1",
+            duration=5, ratio="16:9", resolution="720p", generation_version=generation_version,
             spec_version=config.spec_version,
         )
         task = client.create_task_with_receipt(
             idempotency_key=intent_key,
             mode="production",
             payload={
-                "capability": "IMAGE_TO_VIDEO",
-                "profile": "seedance",
-                "params": {
-                    "prompt": prompt,
-                    "image_asset_id": uploaded["assetId"],
-                    "duration": duration,
-                    "ratio": ratio,
-                },
+                "workflowKey": "seedance.reference-image-to-video.v1",
+                "prompt": {"positive": prompt},
+                "generation": {"duration": 5, "ratio": "16:9", "resolution": "720p"},
+                "media": [{"assetId": uploaded["assetId"], "role": "reference_image"}],
             },
             intent_key=intent_key,
-            # 回执按后端地址与凭证分命名空间：换账号不会误用上一个人的 taskId。
             receipt_store=client.receipt_store(config.receipt_dir),
+        )
+        return (str(task["id"]),)
+
+
+class VideoFlowSeedanceTextToVideo:
+    """文本生视频节点。后端当前只允许预览，Production 会明确拒绝。"""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "config": ("VIDEO_FLOW_CONFIG",),
+                "prompt": ("STRING", {"multiline": True}),
+                "generation_version": ("INT", {"default": 1, "min": 1, "max": 9999}),
+            }
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("preview_task_id",)
+    FUNCTION = "submit"
+    CATEGORY = "Video Flow/Seedance"
+
+    def submit(self, config, prompt, generation_version=1):
+        client = VideoFlowClient(config)
+        intent_key = client.stable_idempotency_key(
+            prompt, workflow_key="seedance.text-to-video.v1", duration=5,
+            ratio="16:9", resolution="720p", generation_version=generation_version,
+            spec_version=config.spec_version,
+        )
+        task = client.create_task(
+            idempotency_key=intent_key,
+            mode="preview",
+            payload={
+                "workflowKey": "seedance.text-to-video.v1",
+                "prompt": {"positive": prompt},
+                "generation": {"duration": 5, "ratio": "16:9", "resolution": "720p"},
+                "media": [],
+            },
         )
         return (str(task["id"]),)
 
@@ -211,13 +241,15 @@ NODE_CLASS_MAPPINGS = {
     "VideoFlowConfig": VideoFlowConfigNode,
     "VideoFlowSeedancePreview": VideoFlowSeedancePreview,
     "VideoFlowSeedanceProduction": VideoFlowSeedanceProduction,
+    "VideoFlowSeedanceTextToVideo": VideoFlowSeedanceTextToVideo,
     "VideoFlowWaitTask": VideoFlowWaitTask,
     "VideoFlowLoadResult": VideoFlowLoadResult,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "VideoFlowConfig": "Video Flow Config",
     "VideoFlowSeedancePreview": "Seedance Preview",
-    "VideoFlowSeedanceProduction": "Seedance Production",
+    "VideoFlowSeedanceProduction": "Seedance Reference Image to Video",
+    "VideoFlowSeedanceTextToVideo": "Seedance Text to Video (Preview)",
     "VideoFlowWaitTask": "Wait Video Flow Task",
     "VideoFlowLoadResult": "Load Video Flow Result",
 }

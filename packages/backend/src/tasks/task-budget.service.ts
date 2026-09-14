@@ -17,6 +17,9 @@ export interface ExecutionPlan {
   prompt?: string;
   imageAssetId?: string;
   inputFileHash?: string | null;
+  workflowKey?: string;
+  workflowVersion?: string;
+  media?: { assetId: string; role: string; fileHash?: string | null }[];
 }
 
 export interface ProductionTaskData {
@@ -30,6 +33,8 @@ export interface ProductionTaskData {
     status: string;
     capability?: string;
     workflowName?: string;
+    workflowVersion?: string;
+    workflowHash?: string;
     requestSnapshot?: object;
     imageUrl?: string;
   };

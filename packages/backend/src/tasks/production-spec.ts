@@ -16,8 +16,11 @@ export type ProductionExecutionPlan = {
   reserveCny: string;
   model: string;
   prompt: string;
-  imageAssetId: string;
+  imageAssetId?: string;
   inputFileHash?: string | null;
+  workflowKey?: string;
+  workflowVersion?: string;
+  media?: { assetId: string; role: string; fileHash?: string | null }[];
   duration: number;
   ratio: string;
   resolution: string;
