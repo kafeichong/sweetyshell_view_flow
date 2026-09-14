@@ -39,3 +39,16 @@ describe('workflow registry request normalization', () => {
     }, spec)).toThrow('WORKFLOW_MEDIA_NOT_ALLOWED');
   });
 });
+
+it('lists every official workflow while keeping unvalidated modes disabled', () => {
+  const { listWorkflows } = require('./workflow-registry');
+  const workflows = listWorkflows();
+  expect(workflows).toEqual(expect.arrayContaining([
+    expect.objectContaining({ key: 'seedance.first-frame-to-video.v1', status: 'disabled', media: [{ role: 'first_frame', min: 1, max: 1 }] }),
+    expect.objectContaining({ key: 'seedance.first-last-frame-to-video.v1', status: 'disabled' }),
+    expect.objectContaining({ key: 'seedance.omni-reference.v1', status: 'disabled' }),
+    expect.objectContaining({ key: 'seedance.video-edit.v1', status: 'disabled' }),
+    expect.objectContaining({ key: 'seedance.video-extend.v1', status: 'disabled' }),
+    expect.objectContaining({ key: 'seedance.audio-reference-to-video.v1', status: 'disabled' }),
+  ]));
+});

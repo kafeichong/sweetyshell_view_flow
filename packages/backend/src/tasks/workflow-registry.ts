@@ -1,14 +1,14 @@
 import { ProductionSpec } from './production-spec';
 
 export type WorkflowStatus = 'production_verified' | 'preview_only' | 'disabled';
-export type WorkflowMediaRole = 'reference_image';
+export type WorkflowMediaRole = 'reference_image' | 'first_frame' | 'last_frame' | 'reference_video' | 'reference_audio';
 
 export type WorkflowDefinition = {
   key: string;
   version: string;
   label: string;
   status: WorkflowStatus;
-  capability: 'TEXT_TO_VIDEO' | 'IMAGE_TO_VIDEO';
+  capability: 'TEXT_TO_VIDEO' | 'IMAGE_TO_VIDEO' | 'VIDEO_TO_VIDEO' | 'AUDIO_TO_VIDEO';
   profile: 'seedance';
   media: { role: WorkflowMediaRole; min: number; max: number }[];
 };
@@ -31,6 +31,24 @@ const WORKFLOWS: readonly WorkflowDefinition[] = [
     capability: 'TEXT_TO_VIDEO',
     profile: 'seedance',
     media: [],
+  },
+  {
+    key: 'seedance.first-frame-to-video.v1', version: 'v1', label: 'Seedance First Frame to Video', status: 'disabled', capability: 'IMAGE_TO_VIDEO', profile: 'seedance', media: [{ role: 'first_frame', min: 1, max: 1 }],
+  },
+  {
+    key: 'seedance.first-last-frame-to-video.v1', version: 'v1', label: 'Seedance First and Last Frame to Video', status: 'disabled', capability: 'IMAGE_TO_VIDEO', profile: 'seedance', media: [{ role: 'first_frame', min: 1, max: 1 }, { role: 'last_frame', min: 1, max: 1 }],
+  },
+  {
+    key: 'seedance.omni-reference.v1', version: 'v1', label: 'Seedance Omni Reference', status: 'disabled', capability: 'IMAGE_TO_VIDEO', profile: 'seedance', media: [{ role: 'reference_image', min: 0, max: 30 }, { role: 'reference_video', min: 0, max: 10 }, { role: 'reference_audio', min: 0, max: 10 }],
+  },
+  {
+    key: 'seedance.video-edit.v1', version: 'v1', label: 'Seedance Video Edit', status: 'disabled', capability: 'VIDEO_TO_VIDEO', profile: 'seedance', media: [{ role: 'reference_video', min: 1, max: 10 }],
+  },
+  {
+    key: 'seedance.video-extend.v1', version: 'v1', label: 'Seedance Video Extend', status: 'disabled', capability: 'VIDEO_TO_VIDEO', profile: 'seedance', media: [{ role: 'reference_video', min: 1, max: 10 }],
+  },
+  {
+    key: 'seedance.audio-reference-to-video.v1', version: 'v1', label: 'Seedance Audio Reference to Video', status: 'disabled', capability: 'AUDIO_TO_VIDEO', profile: 'seedance', media: [{ role: 'reference_audio', min: 1, max: 10 }],
   },
 ] as const;
 
