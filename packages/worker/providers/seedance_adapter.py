@@ -85,6 +85,12 @@ class SeedanceAdapter:
         Returns:
             {"task_id": "...", "status": "submitted"}
         """
+        compiled_payload = params.get("_compiled_payload")
+        if compiled_payload is not None:
+            if not isinstance(compiled_payload, dict):
+                raise ValueError("Seedance compiled payload must be an object")
+            return await self.create_task_payload(compiled_payload)
+
         # 构建 content 数组
         content = []
 

@@ -699,6 +699,71 @@ class ProviderSubmissionRecoveryTests(unittest.TestCase):
             execution_plan=approved_execution_plan(),
         )
 
+    def test_compilation_failure_requires_review_before_provider_submission(self):
+        import executor as executor_module
+
+        plan = approved_execution_plan() | {
+            "workflowKey": "seedance.video-edit.v1",
+            "workflowVersion": "v1",
+            "media": [{"assetId": "asset-video-1", "role": "reference_video"}],
+            "ratio": "16:9",  # 官方编辑模式必须是 adaptive。
+            "duration": -1,
+            "omniReferenceTaskType": "edit",
+            "outputFormat": "mov",
+        }
+        job = Job(
+            id="job-compile-failure", status="pending", created_by="alice",
+            prompt="edit @video1", created_at="2026-09-10T00:00:00+00:00",
+            provider_profile="seedance-main", attempt_id="attempt-compile-failure",
+            execution_plan=plan,
+        )
+        adapter = SimpleNamespace(default_model="test-model", create_task=AsyncMock())
+        settings = SimpleNamespace(
+            comfyui_enabled=False, running_job_timeout_minutes=10,
+            task_status_check_interval=0,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            job_executor = self._plan_job_executor(adapter, directory)
+            with patch.object(executor_module, "settings", settings):
+                asyncio.run(job_executor.execute_job(job))
+
+        adapter.create_task.assert_not_awaited()
+        failure = job_executor.update_job_status.await_args_list[-1].kwargs
+        self.assertEqual(failure["attempt_status"], "requires_review")
+        self.assertEqual(failure["failure_code"], "EXECUTION_PLAN_COMPILE_FAILED")
+
+    def test_workflow_plan_is_compiled_before_the_adapter_is_called(self):
+        import executor as executor_module
+
+        plan = approved_execution_plan() | {
+            "workflowKey": "seedance.reference-image-to-video.v1",
+            "workflowVersion": "v1",
+            "media": [{"assetId": "asset-image-1", "role": "reference_image"}],
+        }
+        job = Job(
+            id="job-compiled", status="pending", created_by="alice",
+            prompt="a product video", created_at="2026-09-10T00:00:00+00:00",
+            provider_profile="seedance-main", attempt_id="attempt-compiled", execution_plan=plan,
+        )
+        adapter = SimpleNamespace(
+            default_model="test-model",
+            create_task=AsyncMock(return_value={"task_id": "provider-compiled"}),
+            poll_until_complete=AsyncMock(return_value=ProviderTaskStatus(id="provider-compiled", status="failed")),
+            classify_failure=lambda _message: executor_module.FailureType.UNKNOWN,
+        )
+        settings = SimpleNamespace(
+            comfyui_enabled=False, running_job_timeout_minutes=10,
+            task_status_check_interval=0,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            job_executor = self._plan_job_executor(adapter, directory)
+            with patch.object(executor_module, "settings", settings):
+                asyncio.run(job_executor.execute_job(job))
+
+        submitted = adapter.create_task.await_args.args[0]["_compiled_payload"]
+        self.assertEqual(submitted["content"][1]["role"], "reference_image")
+        self.assertEqual(submitted["content"][1]["image_url"]["url"], "https://oss.test/input")
+
     def test_outcome_is_recorded_before_any_artifact_delivery(self):
         import executor as executor_module
 

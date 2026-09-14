@@ -953,6 +953,22 @@ class JobExecutor:
                     asset_id = provider_params.get("image_asset_id")
                     if asset_id:
                         provider_params["image_url"] = await self.resolve_asset_url(str(asset_id))
+                if provider_params.get("workflow_key"):
+                    try:
+                        from providers.seedance_execution_policy import compile_seedance_payload
+                        provider_params = {"_compiled_payload": compile_seedance_payload(provider_params)}
+                    except ValueError as error:
+                        await self.update_job_status(
+                            job.id,
+                            JobStatus.FAILED,
+                            attempt_id=attempt_id,
+                            attempt_status="requires_review",
+                            failure_type=FailureType.INVALID_INPUT,
+                            failure_code="EXECUTION_PLAN_COMPILE_FAILED",
+                            failure_message=str(error),
+                            task_status="requires_review",
+                        )
+                        return
                 result = await adapter.create_task(provider_params)
                 provider_task_id = result["task_id"]
 
