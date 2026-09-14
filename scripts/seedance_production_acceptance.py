@@ -78,13 +78,14 @@ def main() -> int:
         idempotency_key=idem,
         mode="production",
         payload={
-            "capability": "IMAGE_TO_VIDEO",
-            "profile": "seedance",
-            "params": {
-                "prompt": PROMPT,
+            "workflowKey": "seedance.reference-image-to-video.v1",
+            "prompt": {"positive": PROMPT},
+            "generation": {
                 "duration": DURATION,
-                "image_asset_id": asset_id,
+                "ratio": "16:9",
+                "resolution": "720p",
             },
+            "media": [{"assetId": asset_id, "role": "reference_image"}],
         },
     )
     task_id = task["id"]
