@@ -2,7 +2,7 @@
   "1": {
     "class_type": "VideoFlowConfig",
     "inputs": {
-      "backend_url": "http://localhost:3100",
+      "backend_url": "https://ai.sweetyshell.com",
       "protocol_version": "1"
     }
   },

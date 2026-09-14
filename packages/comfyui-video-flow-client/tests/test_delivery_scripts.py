@@ -106,6 +106,39 @@ def test_installer_keeps_previous_version_outside_custom_nodes(tmp_path):
     assert (backups[0] / "old-version.txt").read_text(encoding="utf-8") == "old"
 
 
+def test_creative_installer_uses_supplied_comfyui_and_secure_token_file(tmp_path):
+    comfy_root = tmp_path / "ComfyUI"
+    python_path = comfy_root / ".venv/bin/python"
+    python_path.parent.mkdir(parents=True)
+    _write_executable(python_path, "#!/bin/sh\nexit 0\n")
+    (comfy_root / "custom_nodes").mkdir()
+    token_source = tmp_path / "creative-token"
+    token_source.write_text("vf_creative_token\n", encoding="utf-8")
+    home = tmp_path / "home"
+    home.mkdir()
+
+    result = subprocess.run(
+        [str(CLIENT_DIR / "install_creative.command")],
+        check=True,
+        env={
+            **os.environ,
+            "HOME": str(home),
+            "VIDEO_FLOW_COMFYUI_ROOT": str(comfy_root),
+            "VIDEO_FLOW_TOKEN_FILE": str(token_source),
+            "VIDEO_FLOW_NONINTERACTIVE": "1",
+        },
+        text=True,
+        capture_output=True,
+    )
+
+    assert (comfy_root / "custom_nodes/video_flow_client/nodes.py").is_file()
+    installed_token = home / ".video-flow/token"
+    assert installed_token.read_text(encoding="utf-8").strip() == "vf_creative_token"
+    assert stat.S_IMODE(installed_token.stat().st_mode) == 0o600
+    assert "vf_creative_token" not in result.stdout
+    assert "vf_creative_token" not in result.stderr
+
+
 def test_admin_credential_script_never_prints_issued_token(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()

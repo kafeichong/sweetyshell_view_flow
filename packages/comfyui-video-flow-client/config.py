@@ -36,7 +36,7 @@ class VideoFlowConfig:
     @classmethod
     def from_env(cls) -> "VideoFlowConfig":
         return cls(
-            backend_url=os.getenv("VIDEO_FLOW_BACKEND_URL", "http://localhost:3100").rstrip("/"),
+            backend_url=os.getenv("VIDEO_FLOW_BACKEND_URL", "https://ai.sweetyshell.com").rstrip("/"),
             token=os.getenv("VIDEO_FLOW_TOKEN", "").strip() or _read_token_file(),
             protocol_version=os.getenv("VIDEO_FLOW_PROTOCOL_VERSION", "1"),
             receipt_dir=os.getenv("VIDEO_FLOW_RECEIPT_DIR", "~/.video-flow/receipts"),

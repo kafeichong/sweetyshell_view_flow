@@ -2,7 +2,9 @@
 
 这是 Video Flow 的 ComfyUI 客户端节点包。节点只访问公司的 Backend，不保存或接收火山 Ark、OSS 密钥。
 
-推荐使用随包安装脚本（第二个参数是管理员单独提供的 actor token 文件）：
+创意同事在 macOS 上优先双击 `install_creative.command`：选择 ComfyUI 目录后，在系统隐藏输入框中粘贴管理员单独提供的 actor token。安装器会检测目录、安装节点和依赖，并把凭证保存到权限为 `600` 的本机文件；token 不会写入 Workflow JSON。
+
+终端安装方式仍可用（第二个参数是管理员单独提供的 actor token 文件）：
 
 ```bash
 ./install.sh /path/to/ComfyUI /path/to/actor-token

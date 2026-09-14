@@ -30,7 +30,7 @@ def requery_nonce() -> str:
 class VideoFlowConfigNode:
     @classmethod
     def INPUT_TYPES(cls):
-        return {"required": {"backend_url": ("STRING", {"default": "http://localhost:3100"}), "protocol_version": ("STRING", {"default": "1"})}}
+        return {"required": {"backend_url": ("STRING", {"default": VideoFlowConfig.from_env().backend_url}), "protocol_version": ("STRING", {"default": "1"})}}
 
     RETURN_TYPES = ("VIDEO_FLOW_CONFIG",)
     FUNCTION = "configure"

@@ -90,6 +90,14 @@ def test_production_node_explicitly_submits_production(monkeypatch, tmp_path):
     assert set(calls["create"]["payload"]) == {"workflowKey", "prompt", "generation", "media"}
 
 
+def test_config_node_defaults_to_company_backend(monkeypatch):
+    monkeypatch.delenv("VIDEO_FLOW_BACKEND_URL", raising=False)
+
+    defaults = nodes.VideoFlowConfigNode.INPUT_TYPES()["required"]
+
+    assert defaults["backend_url"][1]["default"] == "https://ai.sweetyshell.com"
+
+
 def test_production_node_key_changes_only_when_version_changes(monkeypatch, tmp_path):
     keys = []
 
