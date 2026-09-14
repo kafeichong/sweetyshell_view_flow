@@ -227,7 +227,7 @@ export class V1AssetsController {
     if (this.inspector) {
       try {
         const signed = this.presign.createDownloadUrl(asset.objectKey);
-        mediaMetadata = await this.inspector.inspect(signed.downloadUrl);
+        mediaMetadata = await this.inspector.inspect(signed.downloadUrl, actual.mimeType);
         validateSeedanceMediaMetadata(actual.mimeType, mediaMetadata);
       } catch {
         throw new BadRequestException('Uploaded media could not be inspected');

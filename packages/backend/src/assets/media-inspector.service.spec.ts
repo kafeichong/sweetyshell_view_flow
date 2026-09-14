@@ -22,4 +22,9 @@ describe('MediaInspectorService', () => {
     const inspect = new MediaInspectorService(async () => JSON.stringify({ format: {}, streams: [] }));
     await expect(inspect.inspect('https://oss.example/invalid')).rejects.toThrow('MEDIA_INSPECTION_FAILED');
   });
+  it('classifies a probed raster stream as an image when the uploaded MIME is image/*', async () => {
+    const service = new MediaInspectorService(async () => JSON.stringify({ streams: [{ codec_type: 'video', width: 1280, height: 1280, codec_name: 'png' }] }));
+    await expect(service.inspect('https://signed/image.png', 'image/png')).resolves.toEqual({ kind: 'image', width: 1280, height: 1280 });
+  });
+
 });

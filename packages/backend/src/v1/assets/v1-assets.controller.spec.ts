@@ -462,7 +462,7 @@ describe('V1AssetsController media inspection', () => {
     const inspector = { inspect: jest.fn().mockResolvedValue({ kind: 'video', width: 1280, height: 720, durationSeconds: 5, frameRate: 24, videoCodec: 'h264' }) };
     const controller = new V1AssetsController(assets as never, presign as never, undefined, inspector as never);
     await controller.completeUpload({ actorId: 'actor-a' }, 'asset-1');
-    expect(inspector.inspect).toHaveBeenCalledWith('https://oss/signed');
+    expect(inspector.inspect).toHaveBeenCalledWith('https://oss/signed', 'video/mp4');
     expect(assets.markUploaded).toHaveBeenCalledWith('asset-1', 'actor-a', expect.objectContaining({ mediaMetadata: expect.objectContaining({ kind: 'video', width: 1280 }) }));
   });
   it('does not mark an upload complete when media inspection fails', async () => {

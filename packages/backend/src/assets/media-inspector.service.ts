@@ -28,7 +28,7 @@ export const defaultMediaProbeRunner: ProbeRunner = async (url) => {
 export class MediaInspectorService {
   constructor(@Inject(MEDIA_PROBE_RUNNER) private readonly runProbe: ProbeRunner) {}
 
-  async inspect(url: string): Promise<MediaMetadata> {
+  async inspect(url: string, expectedMime?: string): Promise<MediaMetadata> {
     let data: ProbeResponse;
     try { data = JSON.parse(await this.runProbe(url)) as ProbeResponse; } catch { throw new Error('MEDIA_INSPECTION_FAILED'); }
     const streams = data.streams ?? [];
@@ -37,6 +37,9 @@ export class MediaInspectorService {
     const duration = Number(data.format?.duration);
     const durationSeconds = Number.isFinite(duration) && duration > 0 ? duration : undefined;
     if (video && Number.isInteger(video.width) && Number.isInteger(video.height)) {
+      if (expectedMime?.toLowerCase().startsWith('image/')) {
+        return { kind: 'image', width: video.width, height: video.height };
+      }
       return { kind: 'video', width: video.width, height: video.height, durationSeconds, frameRate: frameRate(video.r_frame_rate), videoCodec: video.codec_name, audioCodec: audio?.codec_name };
     }
     if (audio && durationSeconds) return { kind: 'audio', durationSeconds, audioCodec: audio.codec_name };

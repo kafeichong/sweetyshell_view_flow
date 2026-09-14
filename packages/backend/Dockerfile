@@ -5,6 +5,7 @@ WORKDIR /app
 # 安装 OpenSSL 和其他依赖
 RUN apt-get update && apt-get install -y \
     openssl \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # 复制依赖文件
