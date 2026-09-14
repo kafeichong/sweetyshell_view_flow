@@ -26,6 +26,8 @@ export type ProductionExecutionPlan = {
   resolution: string;
   generateAudio: boolean;
   watermark: boolean;
+  omniReferenceTaskType?: 'reference' | 'edit' | 'extend';
+  outputFormat?: 'mov';
 };
 
 const ALLOWED_PARAMS = new Set([

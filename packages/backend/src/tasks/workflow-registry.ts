@@ -3,6 +3,7 @@ import { ProductionSpec } from './production-spec';
 export type WorkflowStatus = 'production_verified' | 'preview_only' | 'disabled';
 export type WorkflowMediaRole = 'reference_image' | 'first_frame' | 'last_frame' | 'reference_video' | 'reference_audio';
 type WorkflowGeneration = { duration: readonly number[] | 'production_spec'; ratio: readonly string[] | 'production_spec'; resolution: readonly string[] | 'production_spec' };
+export type SeedanceProviderFields = { omniReferenceTaskType?: 'reference' | 'edit' | 'extend'; outputFormat?: 'mov' };
 
 export type WorkflowDefinition = {
   key: string;
@@ -14,6 +15,7 @@ export type WorkflowDefinition = {
   media: { role: WorkflowMediaRole; min: number; max: number }[];
   requiresAnyMedia?: boolean;
   generation: WorkflowGeneration;
+  providerFields?: SeedanceProviderFields;
 };
 
 const STANDARD_RESOLUTIONS = ['480p', '720p', '1080p'] as const;
@@ -51,14 +53,17 @@ const WORKFLOWS: readonly WorkflowDefinition[] = [
   {
     key: 'seedance.omni-reference.v1', version: 'v1', label: 'Seedance Omni Reference', status: 'disabled', capability: 'IMAGE_TO_VIDEO', profile: 'seedance', media: [{ role: 'reference_image', min: 0, max: 30 }, { role: 'reference_video', min: 0, max: 10 }, { role: 'reference_audio', min: 0, max: 10 }], requiresAnyMedia: true,
     generation: { duration: STANDARD_DURATIONS, ratio: ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'], resolution: STANDARD_RESOLUTIONS },
+    providerFields: { omniReferenceTaskType: 'reference', outputFormat: 'mov' },
   },
   {
     key: 'seedance.video-edit.v1', version: 'v1', label: 'Seedance Video Edit', status: 'disabled', capability: 'VIDEO_TO_VIDEO', profile: 'seedance', media: [{ role: 'reference_video', min: 1, max: 10 }],
     generation: { duration: [-1], ratio: ['adaptive'], resolution: STANDARD_RESOLUTIONS },
+    providerFields: { omniReferenceTaskType: 'edit', outputFormat: 'mov' },
   },
   {
     key: 'seedance.video-extend.v1', version: 'v1', label: 'Seedance Video Extend', status: 'disabled', capability: 'VIDEO_TO_VIDEO', profile: 'seedance', media: [{ role: 'reference_video', min: 1, max: 10 }],
     generation: { duration: [...STANDARD_DURATIONS, -1], ratio: ['adaptive'], resolution: STANDARD_RESOLUTIONS },
+    providerFields: { omniReferenceTaskType: 'extend', outputFormat: 'mov' },
   },
   {
     key: 'seedance.audio-reference-to-video.v1', version: 'v1', label: 'Seedance Audio Reference to Video', status: 'disabled', capability: 'AUDIO_TO_VIDEO', profile: 'seedance', media: [{ role: 'reference_audio', min: 1, max: 10 }],
@@ -77,6 +82,7 @@ export type NormalizedWorkflowTaskRequest = {
   prompt: string;
   media: WorkflowMediaInput[];
   generation: Pick<ProductionSpec, 'duration' | 'ratio' | 'resolution'>;
+  providerFields: SeedanceProviderFields;
   legacy: boolean;
 };
 
@@ -183,6 +189,7 @@ export function normalizeWorkflowTaskRequest(body: unknown, spec: ProductionSpec
     prompt,
     media: validateMedia(raw.media, workflow),
     generation: validateGeneration(raw.generation, workflow, spec),
+    providerFields: workflow.providerFields ?? {},
     legacy: false,
   };
 }

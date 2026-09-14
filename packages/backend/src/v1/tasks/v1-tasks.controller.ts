@@ -147,6 +147,7 @@ export class V1TasksController {
           resolution: spec.resolution,
           generateAudio: spec.generateAudio,
           watermark: spec.watermark,
+          ...normalized.providerFields,
         };
       }
     } else {

@@ -80,6 +80,15 @@ describe('workflow registry request normalization', () => {
     expect(() => normalizeWorkflowTaskRequest({ ...body, generation: { ...body.generation, ratio: '16:9' } }, spec)).toThrow('WORKFLOW_GENERATION_MISMATCH');
   });
 
+  it('freezes official Provider fields by workflow instead of deriving them from a prompt', () => {
+    const normalized = normalizeWorkflowTaskRequest({
+      workflowKey: 'seedance.video-extend.v1', prompt: { positive: 'extend @video1 into @video2' },
+      generation: { duration: 11, ratio: 'adaptive', resolution: '720p' },
+      media: [{ assetId: 'video-1', role: 'reference_video' }],
+    }, spec);
+    expect(normalized.providerFields).toEqual({ omniReferenceTaskType: 'extend', outputFormat: 'mov' });
+  });
+
   it('binds every role in a production plan to inspected asset metadata', () => {
     expect(() => validateWorkflowInputAssets(
       [{ assetId: 'video-1', role: 'reference_video' }],

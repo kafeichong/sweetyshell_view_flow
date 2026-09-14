@@ -132,3 +132,37 @@ def test_execution_plan_uses_structured_media_roles():
     )
 
     assert job.get_params()["media"] == [{"asset_id": "asset-reference", "role": "reference_image"}]
+
+
+def test_execution_plan_preserves_frozen_workflow_and_provider_fields():
+    job = _job(
+        executionPlan={
+            "workflowKey": "seedance.video-extend.v1",
+            "workflowVersion": "v1",
+            "model": "test-model",
+            "prompt": "extend @video1",
+            "media": [{"assetId": "video-1", "role": "reference_video"}],
+            "duration": 11,
+            "ratio": "adaptive",
+            "resolution": "720p",
+            "generateAudio": True,
+            "watermark": False,
+            "omniReferenceTaskType": "extend",
+            "outputFormat": "mov",
+        },
+    )
+
+    assert job.get_params() == {
+        "prompt": "extend @video1",
+        "media": [{"asset_id": "video-1", "role": "reference_video"}],
+        "model": "test-model",
+        "duration": 11,
+        "ratio": "adaptive",
+        "resolution": "720p",
+        "generate_audio": True,
+        "watermark": False,
+        "workflow_key": "seedance.video-extend.v1",
+        "workflow_version": "v1",
+        "omni_reference_task_type": "extend",
+        "output_format": "mov",
+    }

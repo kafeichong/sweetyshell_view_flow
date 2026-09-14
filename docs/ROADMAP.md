@@ -741,7 +741,7 @@ Backend 只接受用户意图，按 Registry 生成并冻结 `executionPlan`：w
 #### W3：Registry 与 generation policy
 
 - [x] 已完成基础 Registry：对外创建任务必须提交 `workflowKey`，现有 `seedance.reference-image-to-video.v1` 与 `seedance.text-to-video.v1` 均由服务端注册；旧 `capability/profile/params` 合同已拒绝。当前代码状态见 [PROJECT_STATUS.md](PROJECT_STATUS.md)，该基础不代表新增模式已开放。
-- [~] `WorkflowDefinition` 已含声明式 `MediaPolicy` 与 `GenerationPolicy`：支持固定 Production spec、枚举范围、`adaptive`、`duration=-1` 和 `preview_only` / `disabled` / `production_verified` 生命周期；`ProviderFieldPolicy`（如 `omni_reference_task_type`、`output_format`）尚未进入冻结 `executionPlan`。
+- [~] `WorkflowDefinition` 已含声明式 `MediaPolicy`、`GenerationPolicy` 与已取证模式的 `ProviderFieldPolicy`：支持固定 Production spec、枚举范围、`adaptive`、`duration=-1`、`reference/edit/extend` 和 `mov`。这些字段已进入冻结 `executionPlan` 并由 Worker `Job.get_params()` 保留；Ark payload 编译器尚未消费，见 W4。
 - [x] 已注册第 10.2 节八个键。`disabled` 只可被目录读取，不允许创建 Preview 或 Production Task；`preview_only` 可创建不可执行 Preview；`production_verified` 才可经白名单和额度创建 pending Task。
 - [x] 已拒绝框架外 role 组合，并校验首尾帧顺序、必填数量与全模态至少一份素材；视频编辑必须有 `reference_video`。音频参考的可选图/视频组合仍按后续原始官方 fixture 决定。
 - [ ] 验收：每个 workflow 的合法/非法媒体组合、`adaptive` 约束、时长边界、状态转换、旧 task 快照恢复全部由纯函数单测覆盖。

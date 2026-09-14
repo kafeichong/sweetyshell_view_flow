@@ -48,7 +48,6 @@ class Job(BaseModel):
     completedAt: Optional[str] = Field(default=None, alias="completed_at")
     taskStatus: Optional[str] = Field(default=None, alias="task_status")
     deliveryStatus: Optional[str] = Field(default=None, alias="delivery_status")
-    executionPlan: Optional[Dict[str, Any]] = Field(default=None, alias="execution_plan")
 
     # 旧字段（兼容性，全部可选，有默认值）
     workflowHash: Optional[str] = Field(default="simple-video-gen", alias="workflow_hash")
@@ -108,6 +107,10 @@ class Job(BaseModel):
                     "resolution": plan["resolution"],
                     "generate_audio": plan["generateAudio"],
                     "watermark": plan["watermark"],
+                    "workflow_key": plan.get("workflowKey"),
+                    "workflow_version": plan.get("workflowVersion"),
+                    "omni_reference_task_type": plan.get("omniReferenceTaskType"),
+                    "output_format": plan.get("outputFormat"),
                 }
             return {
                 "prompt": plan["prompt"],
