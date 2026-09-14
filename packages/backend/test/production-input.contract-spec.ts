@@ -1,4 +1,5 @@
 import { createContractHarness } from './contract-harness';
+import { inspectedImageFixture, referenceImageWorkflowRequest } from './workflow-fixtures';
 
 const testSpec = {
   version: 'test-v1',
@@ -26,18 +27,7 @@ async function createProduction(
       'Content-Type': 'application/json',
       'Idempotency-Key': key,
     },
-    body: JSON.stringify({
-      mode: 'production',
-      capability: 'IMAGE_TO_VIDEO',
-      profile: 'seedance',
-      params: {
-        prompt: 'contract product',
-        image_asset_id: assetId,
-        duration: 5,
-        ratio: '16:9',
-        ...paramsOverride,
-      },
-    }),
+    body: JSON.stringify({ ...referenceImageWorkflowRequest('contract product', assetId, 'test-resolution'), ...paramsOverride }),
   });
 }
 
@@ -63,9 +53,11 @@ describe('production input contract', () => {
           role: 'input',
           objectKey: `contract/${harness.actorId}/input.png`,
           mimeType: 'image/png',
+          mediaMetadata: { kind: 'image', width: 1280, height: 720 },
           sizeBytes: 10,
           fileHash: 'a'.repeat(64),
           inspectionStatus: 'uploaded',
+          ...inspectedImageFixture,
         },
       });
       const response = await createProduction(

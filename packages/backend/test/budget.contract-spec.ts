@@ -1,5 +1,6 @@
 import { createContractHarness } from './contract-harness';
 import { Prisma } from '@prisma/client';
+import { inspectedImageFixture, referenceImageWorkflowRequest } from './workflow-fixtures';
 
 const testSpec = {
   version: 'test-v1',
@@ -48,6 +49,7 @@ describe('T02: Budget reservation and admission', () => {
           objectKey: 'test/asset-1.jpg',
           fileHash: 'a'.repeat(64),
           inspectionStatus: 'uploaded',
+          ...inspectedImageFixture,
         },
         {
           ownerId: actorId,
@@ -55,6 +57,7 @@ describe('T02: Budget reservation and admission', () => {
           objectKey: 'test/asset-2.jpg',
           fileHash: 'b'.repeat(64),
           inspectionStatus: 'uploaded',
+          ...inspectedImageFixture,
         },
       ],
     });
@@ -88,17 +91,7 @@ describe('T02: Budget reservation and admission', () => {
         'Authorization': `Bearer ${actorToken}`,
         'Idempotency-Key': 'test-reserve-1',
       },
-      body: JSON.stringify({
-        mode: 'production',
-        capability: 'IMAGE_TO_VIDEO',
-        profile: 'seedance',
-        params: {
-          prompt: 'test reservation',
-          image_asset_id: assetIds[0],
-          duration: 5,
-          ratio: '16:9',
-        },
-      }),
+      body: JSON.stringify(referenceImageWorkflowRequest('test reservation', assetIds[0], 'test-resolution')),
     });
 
     expect(response.status).toBe(201);
@@ -129,17 +122,7 @@ describe('T02: Budget reservation and admission', () => {
         'Authorization': `Bearer ${actorToken}`,
         'Idempotency-Key': 'test-daily-limit-1',
       },
-      body: JSON.stringify({
-        mode: 'production',
-        capability: 'IMAGE_TO_VIDEO',
-        profile: 'seedance',
-        params: {
-          prompt: 'first task',
-          image_asset_id: assetIds[0],
-          duration: 5,
-          ratio: '16:9',
-        },
-      }),
+      body: JSON.stringify(referenceImageWorkflowRequest('first task', assetIds[0], 'test-resolution')),
     });
 
     expect(response1.status).toBe(201);
@@ -152,17 +135,7 @@ describe('T02: Budget reservation and admission', () => {
         'Authorization': `Bearer ${actorToken}`,
         'Idempotency-Key': 'test-daily-limit-2',
       },
-      body: JSON.stringify({
-        mode: 'production',
-        capability: 'IMAGE_TO_VIDEO',
-        profile: 'seedance',
-        params: {
-          prompt: 'second task',
-          image_asset_id: assetIds[1],
-          duration: 5,
-          ratio: '16:9',
-        },
-      }),
+      body: JSON.stringify(referenceImageWorkflowRequest('second task', assetIds[1], 'test-resolution')),
     });
 
     expect(response2.status).toBe(429);
@@ -178,17 +151,7 @@ describe('T02: Budget reservation and admission', () => {
 
   it('allows same idempotency key without double reservation', async () => {
     const assetIds = (global as any).testAssetIds || [];
-    const body = {
-      mode: 'production',
-      capability: 'IMAGE_TO_VIDEO',
-      profile: 'seedance',
-      params: {
-        prompt: 'idempotent task',
-        image_asset_id: assetIds[0],
-        duration: 5,
-        ratio: '16:9',
-      },
-    };
+    const body = referenceImageWorkflowRequest('idempotent task', assetIds[0], 'test-resolution');
 
     // First request
     const response1 = await fetch(`${harness.appUrl}/api/v1/tasks`, {
@@ -230,17 +193,7 @@ describe('T02: Budget reservation and admission', () => {
 
   it('handles concurrent requests with same key correctly', async () => {
     const assetIds = (global as any).testAssetIds || [];
-    const body = {
-      mode: 'production',
-      capability: 'IMAGE_TO_VIDEO',
-      profile: 'seedance',
-      params: {
-        prompt: 'concurrent task',
-        image_asset_id: assetIds[0],
-        duration: 5,
-        ratio: '16:9',
-      },
-    };
+    const body = referenceImageWorkflowRequest('concurrent task', assetIds[0], 'test-resolution');
 
     // Send two concurrent requests
     const [response1, response2] = await Promise.all([
@@ -296,17 +249,7 @@ describe('T02: Budget reservation and admission', () => {
         'Authorization': `Bearer ${actorToken}`,
         'Idempotency-Key': 'test-paused-1',
       },
-      body: JSON.stringify({
-        mode: 'production',
-        capability: 'IMAGE_TO_VIDEO',
-        profile: 'seedance',
-        params: {
-          prompt: 'test pause',
-          image_asset_id: assetIds[0],
-          duration: 5,
-          ratio: '16:9',
-        },
-      }),
+      body: JSON.stringify(referenceImageWorkflowRequest('test pause', assetIds[0], 'test-resolution')),
     });
 
     expect(response.status).toBe(503);
@@ -337,17 +280,7 @@ describe('T02: Budget reservation and admission', () => {
         'Authorization': `Bearer ${actorToken}`,
         'Idempotency-Key': 'test-no-limits-1',
       },
-      body: JSON.stringify({
-        mode: 'production',
-        capability: 'IMAGE_TO_VIDEO',
-        profile: 'seedance',
-        params: {
-          prompt: 'test no limits',
-          image_asset_id: assetIds[0],
-          duration: 5,
-          ratio: '16:9',
-        },
-      }),
+      body: JSON.stringify(referenceImageWorkflowRequest('test no limits', assetIds[0], 'test-resolution')),
     });
 
     expect(response.status).toBe(429);
@@ -380,17 +313,7 @@ describe('T02: Budget reservation and admission', () => {
           'Authorization': `Bearer ${actorToken}`,
           'Idempotency-Key': key,
         },
-        body: JSON.stringify({
-          mode: 'production',
-          capability: 'IMAGE_TO_VIDEO',
-          profile: 'seedance',
-          params: {
-            prompt: 'race for budget',
-            image_asset_id: assetId,
-            duration: 5,
-            ratio: '16:9',
-          },
-        }),
+        body: JSON.stringify(referenceImageWorkflowRequest('race for budget', assetId, 'test-resolution')),
       });
 
     const [response1, response2] = await Promise.all([
@@ -434,17 +357,7 @@ describe('T02: Budget reservation and admission', () => {
         'Authorization': `Bearer ${actorToken}`,
         'Idempotency-Key': 'test-period-keys-1',
       },
-      body: JSON.stringify({
-        mode: 'production',
-        capability: 'IMAGE_TO_VIDEO',
-        profile: 'seedance',
-        params: {
-          prompt: 'period keys',
-          image_asset_id: assetIds[0],
-          duration: 5,
-          ratio: '16:9',
-        },
-      }),
+      body: JSON.stringify(referenceImageWorkflowRequest('period keys', assetIds[0], 'test-resolution')),
     });
 
     expect(response.status).toBe(201);
@@ -487,6 +400,7 @@ describe('T02: Budget reservation and admission', () => {
           objectKey: `contract/${limitedHarness.actorId}/daily-count.jpg`,
           fileHash: 'c'.repeat(64),
           inspectionStatus: 'uploaded',
+          ...inspectedImageFixture,
         },
       });
       const asset2 = await limitedHarness.prisma.asset.create({
@@ -496,6 +410,7 @@ describe('T02: Budget reservation and admission', () => {
           objectKey: `contract/${limitedHarness.actorId}/daily-count-2.jpg`,
           fileHash: 'd'.repeat(64),
           inspectionStatus: 'uploaded',
+          ...inspectedImageFixture,
         },
       });
 
@@ -506,17 +421,7 @@ describe('T02: Budget reservation and admission', () => {
           'Authorization': `Bearer ${limitedHarness.actorToken}`,
           'Idempotency-Key': 'test-daily-count-1',
         },
-        body: JSON.stringify({
-          mode: 'production',
-          capability: 'IMAGE_TO_VIDEO',
-          profile: 'seedance',
-          params: {
-            prompt: 'first of the day',
-            image_asset_id: asset.id,
-            duration: 5,
-            ratio: '16:9',
-          },
-        }),
+        body: JSON.stringify(referenceImageWorkflowRequest('first of the day', asset.id, 'test-resolution')),
       });
       expect(first.status).toBe(201);
 
@@ -527,17 +432,7 @@ describe('T02: Budget reservation and admission', () => {
           'Authorization': `Bearer ${limitedHarness.actorToken}`,
           'Idempotency-Key': 'test-daily-count-2',
         },
-        body: JSON.stringify({
-          mode: 'production',
-          capability: 'IMAGE_TO_VIDEO',
-          profile: 'seedance',
-          params: {
-            prompt: 'second of the day',
-            image_asset_id: asset2.id,
-            duration: 5,
-            ratio: '16:9',
-          },
-        }),
+        body: JSON.stringify(referenceImageWorkflowRequest('second of the day', asset2.id, 'test-resolution')),
       });
       expect(second.status).toBe(429);
       const error = await second.json();

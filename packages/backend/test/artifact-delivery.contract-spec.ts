@@ -1,6 +1,7 @@
 import { createHash } from 'crypto';
 import { createContractHarness } from './contract-harness';
 import { Prisma } from '@prisma/client';
+import { inspectedImageFixture, referenceImageWorkflowRequest } from './workflow-fixtures';
 
 const PRICING_VERSION = 'seedance-token-v1';
 const VERIFIED_MODEL = 'doubao-seedance-2-5-260628';
@@ -36,17 +37,7 @@ async function createProductionTask(
       'Authorization': `Bearer ${harness.actorToken}`,
       'Idempotency-Key': key,
     },
-    body: JSON.stringify({
-      mode: 'production',
-      capability: 'IMAGE_TO_VIDEO',
-      profile: 'seedance',
-      params: {
-        prompt: 'artifact delivery contract',
-        image_asset_id: assetId,
-        duration: 5,
-        ratio: '16:9',
-      },
-    }),
+    body: JSON.stringify(referenceImageWorkflowRequest('artifact delivery contract', assetId, 'test-resolution')),
   });
   expect(response.status).toBe(201);
   return response.json();
@@ -200,6 +191,7 @@ describe('T06: Artifact delivery contract', () => {
         objectKey: `contract/${harness.actorId}/delivery-${suffix}.jpg`,
         fileHash: suffix.repeat(64),
         inspectionStatus: 'uploaded',
+        ...inspectedImageFixture,
       })),
     });
 

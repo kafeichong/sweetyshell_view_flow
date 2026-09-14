@@ -91,7 +91,7 @@ export class V1TasksController {
 
     if (isWorkflowRequest || mode === 'production') {
       const spec = loadProductionSpec();
-      if (!spec || !this.assets) throw new ServiceUnavailableException('PRODUCTION_SPEC_UNAVAILABLE');
+      if (mode === 'production' && (!spec || !this.assets)) throw new ServiceUnavailableException('PRODUCTION_SPEC_UNAVAILABLE');
       let normalized;
       try {
         normalized = normalizeWorkflowTaskRequest(body, spec);
@@ -117,6 +117,7 @@ export class V1TasksController {
           estimatedCostCny: null, costStatus: 'unavailable', willCallProvider: false,
         };
       } else {
+        if (!spec || !this.assets) throw new ServiceUnavailableException('PRODUCTION_SPEC_UNAVAILABLE');
         const media = [] as { assetId: string; role: string; fileHash?: string | null }[];
         const inputAssets = [] as { id: string; mimeType: string | null; mediaMetadata: unknown }[];
         for (const item of normalized.media) {

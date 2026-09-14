@@ -1,5 +1,6 @@
 import { createContractHarness } from './contract-harness';
 import { Prisma } from '@prisma/client';
+import { inspectedImageFixture, referenceImageWorkflowRequest } from './workflow-fixtures';
 
 const testSpec = {
   version: 'test-v1',
@@ -55,17 +56,7 @@ async function createProductionTask(
       'Authorization': `Bearer ${harness.actorToken}`,
       'Idempotency-Key': idempotencyKey,
     },
-    body: JSON.stringify({
-      mode: 'production',
-      capability: 'IMAGE_TO_VIDEO',
-      profile: 'seedance',
-      params: {
-        prompt: 'claim contract',
-        image_asset_id: assetId,
-        duration: 5,
-        ratio: '16:9',
-      },
-    }),
+    body: JSON.stringify(referenceImageWorkflowRequest('claim contract', assetId, 'test-resolution')),
   });
   expect(response.status).toBe(201);
   return response.json();
@@ -118,6 +109,7 @@ describe('T03: Claim admission and recovery contract', () => {
           objectKey: `contract/${harness.actorId}/claim-1.jpg`,
           fileHash: 'e'.repeat(64),
           inspectionStatus: 'uploaded',
+          ...inspectedImageFixture,
         },
         {
           ownerId: harness.actorId,
@@ -125,6 +117,7 @@ describe('T03: Claim admission and recovery contract', () => {
           objectKey: `contract/${harness.actorId}/claim-2.jpg`,
           fileHash: 'f'.repeat(64),
           inspectionStatus: 'uploaded',
+          ...inspectedImageFixture,
         },
       ],
     });

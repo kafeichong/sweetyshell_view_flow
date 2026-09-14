@@ -1,5 +1,6 @@
 import { createContractHarness } from './contract-harness';
 import { Prisma } from '@prisma/client';
+import { inspectedImageFixture, referenceImageWorkflowRequest } from './workflow-fixtures';
 
 // 计费规则与 task-cost.ts 登记的一致：价格版本 + 模型都要匹配，
 // 否则终态只会进人工核查，不会套一个错公式结算。
@@ -43,17 +44,7 @@ async function createProductionTask(
       'Authorization': `Bearer ${harness.actorToken}`,
       'Idempotency-Key': key,
     },
-    body: JSON.stringify({
-      mode: 'production',
-      capability: 'IMAGE_TO_VIDEO',
-      profile: 'seedance',
-      params: {
-        prompt: 'provider outcome contract',
-        image_asset_id: assetId,
-        duration: 5,
-        ratio: '16:9',
-      },
-    }),
+    body: JSON.stringify(referenceImageWorkflowRequest('provider outcome contract', assetId, 'test-resolution')),
   });
   expect(response.status).toBe(201);
   return response.json();
@@ -132,6 +123,7 @@ describe('T05: Provider outcome settlement contract', () => {
           objectKey: `contract/${harness.actorId}/outcome-1.jpg`,
           fileHash: '1'.repeat(64),
           inspectionStatus: 'uploaded',
+          ...inspectedImageFixture,
         },
         {
           ownerId: harness.actorId,
@@ -139,6 +131,7 @@ describe('T05: Provider outcome settlement contract', () => {
           objectKey: `contract/${harness.actorId}/outcome-2.jpg`,
           fileHash: '2'.repeat(64),
           inspectionStatus: 'uploaded',
+          ...inspectedImageFixture,
         },
         {
           ownerId: harness.actorId,
@@ -146,6 +139,7 @@ describe('T05: Provider outcome settlement contract', () => {
           objectKey: `contract/${harness.actorId}/outcome-3.jpg`,
           fileHash: '3'.repeat(64),
           inspectionStatus: 'uploaded',
+          ...inspectedImageFixture,
         },
         {
           ownerId: harness.actorId,
@@ -153,6 +147,7 @@ describe('T05: Provider outcome settlement contract', () => {
           objectKey: `contract/${harness.actorId}/outcome-4.jpg`,
           fileHash: '4'.repeat(64),
           inspectionStatus: 'uploaded',
+          ...inspectedImageFixture,
         },
       ],
     });

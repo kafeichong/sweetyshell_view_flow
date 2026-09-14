@@ -40,7 +40,7 @@ const WORKFLOWS: readonly WorkflowDefinition[] = [
     capability: 'TEXT_TO_VIDEO',
     profile: 'seedance',
     media: [],
-    generation: { duration: 'production_spec', ratio: 'production_spec', resolution: 'production_spec' },
+    generation: { duration: STANDARD_DURATIONS, ratio: ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'], resolution: STANDARD_RESOLUTIONS },
   },
   {
     key: 'seedance.first-frame-to-video.v1', version: 'v1', label: 'Seedance First Frame to Video', status: 'disabled', capability: 'IMAGE_TO_VIDEO', profile: 'seedance', media: [{ role: 'first_frame', min: 1, max: 1 }],
@@ -99,13 +99,14 @@ function resolveWorkflow(key: unknown): WorkflowDefinition {
   return workflow ?? invalid('WORKFLOW_NOT_FOUND');
 }
 
-function validateGeneration(value: unknown, workflow: WorkflowDefinition, spec: ProductionSpec) {
+function validateGeneration(value: unknown, workflow: WorkflowDefinition, spec?: ProductionSpec) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) invalid('WORKFLOW_GENERATION_REQUIRED');
   const generation = value as Record<string, unknown>;
   const policy = workflow.generation;
-  const duration = policy.duration === 'production_spec' ? spec.duration : generation.duration;
-  const ratio = policy.ratio === 'production_spec' ? spec.ratio : generation.ratio;
-  const resolution = policy.resolution === 'production_spec' ? spec.resolution : generation.resolution;
+  if ((policy.duration === 'production_spec' || policy.ratio === 'production_spec' || policy.resolution === 'production_spec') && !spec) invalid('WORKFLOW_SPEC_UNAVAILABLE');
+  const duration = policy.duration === 'production_spec' ? spec!.duration : generation.duration;
+  const ratio = policy.ratio === 'production_spec' ? spec!.ratio : generation.ratio;
+  const resolution = policy.resolution === 'production_spec' ? spec!.resolution : generation.resolution;
   if (
     generation.duration !== duration ||
     generation.ratio !== ratio ||
@@ -169,7 +170,7 @@ export function validateWorkflowInputAssets(media: WorkflowMediaInput[], assets:
   }
 }
 
-export function normalizeWorkflowTaskRequest(body: unknown, spec: ProductionSpec): NormalizedWorkflowTaskRequest {
+export function normalizeWorkflowTaskRequest(body: unknown, spec?: ProductionSpec): NormalizedWorkflowTaskRequest {
   if (!body || typeof body !== 'object' || Array.isArray(body)) invalid('WORKFLOW_REQUEST_INVALID');
   const raw = body as Record<string, unknown>;
   if (!raw.workflowKey) invalid('WORKFLOW_KEY_REQUIRED');

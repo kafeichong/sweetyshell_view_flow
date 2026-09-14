@@ -68,7 +68,16 @@ describe('V1TasksController workflow-only safety regressions', () => {
   });
   it('fails closed if the approved Production spec is absent', async () => {
     delete process.env.VIDEO_FLOW_PRODUCTION_SPEC_JSON;
-    await expect(new V1TasksController(tasks as never, budget as never, assets as never).create({ actorId: 'creative-pilot' }, 'no-spec', body)).rejects.toMatchObject({ status: 503 });
+    await expect(new V1TasksController(tasks as never, budget as never, assets as never).create({ actorId: 'creative-pilot' }, 'no-spec', { ...body, mode: 'production' })).rejects.toMatchObject({ status: 503 });
+  });
+  it('allows a non-executing text preview without a Production spec', async () => {
+    delete process.env.VIDEO_FLOW_PRODUCTION_SPEC_JSON;
+    tasks.createPreview.mockResolvedValue({ id: 'preview-text', status: 'preview' });
+    await expect(new V1TasksController(tasks as never, budget as never, assets as never).create({ actorId: 'creative-pilot' }, 'preview-no-spec', {
+      workflowKey: 'seedance.text-to-video.v1', mode: 'preview', prompt: { positive: 'a glass bottle rotates' },
+      generation: { duration: 5, ratio: '16:9', resolution: '720p' }, media: [],
+    })).resolves.toMatchObject({ id: 'preview-text', preview: { willCallProvider: false } });
+    expect(budget.createTaskWithReservation).not.toHaveBeenCalled();
   });
   it('does not reserve a paid task when an inspected asset does not match its workflow role', async () => {
     assets.findOwnedUploadedInput.mockResolvedValue({ id: 'asset-1', fileHash: null, mimeType: 'video/mp4', mediaMetadata: { kind: 'video' } });

@@ -2,6 +2,7 @@ import {
   assertContractEnvironment,
   createContractHarness,
 } from './contract-harness';
+import { textPreviewWorkflowRequest } from './workflow-fixtures';
 
 describe('contract test isolation', () => {
   test('rejects a non-contract database before connecting', () => {
@@ -38,12 +39,7 @@ describe('real Nest and PostgreSQL contract harness', () => {
           'Content-Type': 'application/json',
           'Idempotency-Key': 'contract-preview-1',
         },
-        body: JSON.stringify({
-          mode: 'preview',
-          capability: 'TEXT_TO_VIDEO',
-          profile: 'seedance',
-          params: { prompt: 'contract test only' },
-        }),
+        body: JSON.stringify(textPreviewWorkflowRequest('contract test only', '720p')),
       });
       const task = await response.json();
 
