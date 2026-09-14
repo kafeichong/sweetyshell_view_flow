@@ -9,6 +9,26 @@ import { AssetPresignService } from '../../assets/asset-presign.service';
 import { TasksService } from '../../tasks/tasks.service';
 import { UploadTicketDto } from './dto/upload-ticket.dto';
 
+
+type InputMediaPolicy = { mediaType: 'image' | 'video' | 'audio'; maxSizeBytes: number };
+
+// Seedance 2.5 官网创建任务文档的单文件 MIME 与大小限制。时长、分辨率、帧率
+// 和多素材总量必须读取文件本体，不能在签发 PUT ticket 时凭客户端声明判断。
+const INPUT_MEDIA_POLICIES: Readonly<Record<string, InputMediaPolicy>> = {
+  'image/jpeg': { mediaType: 'image', maxSizeBytes: 30 * 1024 * 1024 },
+  'image/png': { mediaType: 'image', maxSizeBytes: 30 * 1024 * 1024 },
+  'image/webp': { mediaType: 'image', maxSizeBytes: 30 * 1024 * 1024 },
+  'image/bmp': { mediaType: 'image', maxSizeBytes: 30 * 1024 * 1024 },
+  'image/tiff': { mediaType: 'image', maxSizeBytes: 30 * 1024 * 1024 },
+  'image/gif': { mediaType: 'image', maxSizeBytes: 30 * 1024 * 1024 },
+  'image/heic': { mediaType: 'image', maxSizeBytes: 30 * 1024 * 1024 },
+  'image/heif': { mediaType: 'image', maxSizeBytes: 30 * 1024 * 1024 },
+  'video/mp4': { mediaType: 'video', maxSizeBytes: 200 * 1024 * 1024 },
+  'video/quicktime': { mediaType: 'video', maxSizeBytes: 200 * 1024 * 1024 },
+  'audio/wav': { mediaType: 'audio', maxSizeBytes: 15 * 1024 * 1024 },
+  'audio/mpeg': { mediaType: 'audio', maxSizeBytes: 15 * 1024 * 1024 },
+};
+
 @ApiTags('assets')
 @ApiBearerAuth('actor-token')
 @Controller('v1/assets')
@@ -86,12 +106,13 @@ export class V1AssetsController {
     @CurrentActor() actor: { actorId: string },
     @Body() body: UploadTicketDto,
   ) {
-    const allowedMimeTypes = new Set(['image/png', 'image/jpeg', 'image/webp']);
-    if (!body?.filename?.trim() || !allowedMimeTypes.has(body.mimeType)) {
-      throw new BadRequestException('filename and supported image mimeType are required');
+    const mimeType = typeof body?.mimeType === 'string' ? body.mimeType.trim().toLowerCase() : '';
+    const policy = INPUT_MEDIA_POLICIES[mimeType];
+    if (!body?.filename?.trim() || !policy) {
+      throw new BadRequestException('filename and supported Seedance input mimeType are required');
     }
-    if (!Number.isInteger(body.sizeBytes) || body.sizeBytes <= 0 || body.sizeBytes > 20 * 1024 * 1024) {
-      throw new BadRequestException('sizeBytes must be between 1 and 20971520');
+    if (!Number.isInteger(body.sizeBytes) || body.sizeBytes <= 0 || body.sizeBytes > policy.maxSizeBytes) {
+      throw new BadRequestException(`sizeBytes must be between 1 and ${policy.maxSizeBytes} for ${policy.mediaType}`);
     }
     if (!this.presign.isConfigured()) {
       throw new ServiceUnavailableException('OSS presign service is not configured');
@@ -119,7 +140,7 @@ export class V1AssetsController {
         return this.presign.createUploadTicket(
           existing.id,
           existing.objectKey,
-          body.mimeType,
+          mimeType,
           body.sizeBytes,
           sha256,
         );
@@ -134,7 +155,8 @@ export class V1AssetsController {
         ownerId: actor.actorId,
         bucket: this.presign.getBucketName(),
         objectKey,
-        mimeType: body.mimeType,
+        mediaType: policy.mediaType,
+        mimeType,
         sizeBytes: body.sizeBytes,
         fileHash: sha256,
         inspectionStatus: 'pending_upload',
@@ -152,7 +174,7 @@ export class V1AssetsController {
           return this.presign.createUploadTicket(
             concurrent.id,
             concurrent.objectKey,
-            body.mimeType,
+            mimeType,
             body.sizeBytes,
             sha256,
           );
@@ -163,7 +185,7 @@ export class V1AssetsController {
     return this.presign.createUploadTicket(
       asset.id,
       asset.objectKey,
-      body.mimeType,
+      mimeType,
       body.sizeBytes,
       sha256,
     );

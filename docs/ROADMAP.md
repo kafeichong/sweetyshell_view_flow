@@ -733,7 +733,7 @@ Backend 只接受用户意图，按 Registry 生成并冻结 `executionPlan`：w
 
 #### W2：媒体资产能力与上传票据策略
 
-- [ ] 扩展 Backend Asset ticket 的工作流策略：图片、视频、音频各自的 MIME、单文件大小、像素/时长/帧率、数量、总大小和总时长限制；只允许目标 workflow 所需的 role。
+- [~] Backend upload ticket 已支持官网列示的图片/MP4/MOV/WAV/MP3 MIME 与单文件上限，并写入 `mediaType`；尚未完成像素、时长、帧率、数量、总大小/总时长和按 workflow role 的预检。证据：`packages/backend/src/v1/assets/v1-assets.controller.ts`、`v1-assets.controller.spec.ts`。
 - [ ] 在 `/complete` 后提取并保存可信媒体元数据；视频编辑/延长在 Provider 调用前验证源视频时长和编码，音频工作流验证格式和时长。无法解析或不符合策略的 Asset 不得进入 Production。
 - [ ] 保持 actor 所有权、内容 hash、上传完成校验和 Worker 临时下载 URL；媒体临时 URL 绝不进入 requestSnapshot、回执或日志。
 - [ ] 验收：图片、视频、音频的边界值、跨 actor Asset、未完成上传、超数量/超总时长、错误 MIME 均有 Backend 单测与 Worker 契约测试。

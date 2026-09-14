@@ -137,7 +137,7 @@ bash scripts/run_docker_provider_addressing.sh       # Docker 服务名寻址
 | 原子 claim + 5 分钟租约 + 自动创建 ExecutionAttempt | `src/tasks/task-claim.service.ts:22-84` |
 | 凭证鉴权：token 只存 `sha256`、可撤销、记录 `lastUsedAt` | `src/auth/credentials.service.ts`、`src/auth/api-credential.guard.ts` |
 | Worker / Admin 内部接口用独立服务令牌，`timingSafeEqual` 比对 | `src/auth/worker-service.guard.ts`、`src/auth/admin-token.guard.ts` |
-| 素材预签名直传：内容寻址复用 Asset、`/complete` 时用 OSS HEAD 校验 size / mime / sha256 | `src/v1/assets/v1-assets.controller.ts`、`src/assets/asset-presign.service.ts` |
+| 素材预签名直传：内容寻址复用 Asset、`/complete` 时用 OSS HEAD 校验 size / mime / sha256；ticket 支持官网列示图片、MP4/MOV、WAV/MP3 和各自单文件上限，记录 `mediaType` | `src/v1/assets/v1-assets.controller.ts`、`src/assets/asset-presign.service.ts`；验证：`npx jest src/v1/assets/v1-assets.controller.spec.ts --runInBand` |
 | Worker 登记输出时继承 Task actor，写入 `ownerId`、`inspectionStatus='uploaded'` 与永久 `objectKey`；actor 可按 Task 获取新签名下载 URL | `src/v1/internal/v1-worker.controller.ts`、`src/v1/assets/v1-assets.controller.ts`、`src/assets/assets.service.ts` |
 | 数据模型分域：Task / ExecutionAttempt / Asset / ActorCredential；费用四态 `estimated / usage_calculated / billed / unavailable` | `prisma/schema.prisma` |
 

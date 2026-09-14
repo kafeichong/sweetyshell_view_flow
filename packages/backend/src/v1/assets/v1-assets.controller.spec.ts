@@ -412,3 +412,42 @@ describe('V1AssetsController ownership', () => {
     );
   });
 });
+
+describe('V1AssetsController official Seedance media ticket policy', () => {
+  function buildTicketController() {
+    const assets = {
+      findByOwnerHash: jest.fn().mockResolvedValue(null),
+      registerInput: jest.fn().mockResolvedValue({ id: 'asset-media', objectKey: 'inputs/actor-a/media' }),
+    };
+    const presign = {
+      isConfigured: jest.fn().mockReturnValue(true),
+      getBucketName: jest.fn().mockReturnValue('sweetyshell-ai-assets'),
+      createUploadTicket: jest.fn().mockReturnValue({ assetId: 'asset-media' }),
+    };
+    return { assets, presign, controller: new V1AssetsController(assets as never, presign as never) };
+  }
+
+  it.each([
+    ['video', 'source.mov', 'video/quicktime', 200 * 1024 * 1024],
+    ['audio', 'voice.wav', 'audio/wav', 15 * 1024 * 1024],
+  ])('issues an official %s input ticket within its per-file size limit', async (mediaType, filename, mimeType, sizeBytes) => {
+    const { assets, controller } = buildTicketController();
+
+    await controller.createUploadTicket({ actorId: 'actor-a' }, { filename, mimeType, sizeBytes });
+
+    expect(assets.registerInput).toHaveBeenCalledWith(expect.objectContaining({
+      mediaType,
+      mimeType,
+      sizeBytes,
+    }));
+  });
+
+  it('rejects a video ticket over the official 200MB per-file limit', async () => {
+    const { controller } = buildTicketController();
+
+    await expect(controller.createUploadTicket(
+      { actorId: 'actor-a' },
+      { filename: 'oversized.mp4', mimeType: 'video/mp4', sizeBytes: 200 * 1024 * 1024 + 1 },
+    )).rejects.toMatchObject({ status: 400, message: 'sizeBytes must be between 1 and 209715200 for video' });
+  });
+});
