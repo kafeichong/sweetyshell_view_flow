@@ -264,14 +264,10 @@ class WorkerRestartRecoveryTests(unittest.TestCase):
                 },
                 json={
                     "mode": "production",
-                    "capability": "IMAGE_TO_VIDEO",
-                    "profile": "seedance",
-                    "params": {
-                        "prompt": prompt,
-                        "image_asset_id": self.asset_id,
-                        "duration": 5,
-                        "ratio": "16:9",
-                    },
+                    "workflowKey": "seedance.reference-image-to-video.v1",
+                    "prompt": {"positive": prompt},
+                    "generation": {"duration": 5, "ratio": "16:9", "resolution": "720p"},
+                    "media": [{"assetId": self.asset_id, "role": "reference_image"}],
                 },
             )
         created.raise_for_status()
@@ -369,9 +365,17 @@ class AdmissionBoundaryTests(unittest.TestCase):
                 headers=headers,
                 json={
                     "mode": "production",
-                    "capability": "IMAGE_TO_VIDEO",
-                    "profile": "seedance",
-                    "params": params,
+                    "workflowKey": "seedance.reference-image-to-video.v1",
+                    "prompt": {"positive": params["prompt"]},
+                    "generation": {
+                        "duration": params.get("duration", 5),
+                        "ratio": params.get("ratio", "16:9"),
+                        "resolution": "720p",
+                    },
+                    "media": [{
+                        "assetId": params.get("image_asset_id", self.asset_id),
+                        "role": "reference_image",
+                    }],
                 },
             )
 
@@ -456,9 +460,10 @@ class AdmissionBoundaryTests(unittest.TestCase):
                     },
                     json={
                         "mode": "preview",
-                        "capability": "TEXT_TO_VIDEO",
-                        "profile": "seedance",
-                        "params": {"prompt": "e13 preview under pause"},
+                        "workflowKey": "seedance.text-to-video.v1",
+                        "prompt": {"positive": "e13 preview under pause"},
+                        "generation": {"duration": 5, "ratio": "16:9", "resolution": "720p"},
+                        "media": [],
                     },
                 )
             self.assertEqual(task.status_code, 201)
@@ -496,14 +501,10 @@ class AdditionalCrossPackageScenariosTests(unittest.TestCase):
     def _post_task(self, *, prompt: str, idempotency_key: str, token: Optional[str] = None, asset_id: Optional[str] = None):
         payload = {
             "mode": "production",
-            "capability": "IMAGE_TO_VIDEO",
-            "profile": "seedance",
-            "params": {
-                "prompt": prompt,
-                "image_asset_id": asset_id or self.asset_id,
-                "duration": 5,
-                "ratio": "16:9",
-            },
+            "workflowKey": "seedance.reference-image-to-video.v1",
+            "prompt": {"positive": prompt},
+            "generation": {"duration": 5, "ratio": "16:9", "resolution": "720p"},
+            "media": [{"assetId": asset_id or self.asset_id, "role": "reference_image"}],
         }
         with self._api(token=token) as client:
             return client.post(
@@ -688,7 +689,7 @@ class AdditionalCrossPackageScenariosTests(unittest.TestCase):
         self.assertEqual(after_total - before_total, 1, "only one intent should enter provider")
 
         for response in created:
-            prompt = response.json()["executionPlan"]["prompt"] if response.json().get("executionPlan") else response.json()["params"].get("prompt", "")
+            prompt = response.json()["executionPlan"]["prompt"]
             if prompt in after and prompt in before:
                 self.assertEqual(after[prompt] - before[prompt], 1)
             elif prompt:

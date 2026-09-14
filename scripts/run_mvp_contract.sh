@@ -119,8 +119,8 @@ else
       ON CONFLICT (actor_id) DO UPDATE SET token_hash = EXCLUDED.token_hash, status = 'active';
       INSERT INTO production_gates (id, paused, reason) VALUES ('production', false, 'live contract')
       ON CONFLICT (id) DO UPDATE SET paused = false, reason = 'live contract';
-      INSERT INTO assets (id, owner_id, role, object_key, file_hash, inspection_status, media_type)
-      VALUES (gen_random_uuid(), 'live-contract-actor', 'input', 'live-contract/reference.png', repeat('a', 64), 'uploaded', 'image')
+      INSERT INTO assets (id, owner_id, role, object_key, file_hash, inspection_status, media_type, mime_type, media_metadata)
+      VALUES (gen_random_uuid(), 'live-contract-actor', 'input', 'live-contract/reference.png', repeat('a', 64), 'uploaded', 'image', 'image/png', json_build_object('kind', 'image', 'width', 1280, 'height', 720))
       ON CONFLICT (owner_id, role, file_hash) DO NOTHING;
     " >/dev/null
 

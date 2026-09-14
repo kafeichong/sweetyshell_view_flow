@@ -741,16 +741,16 @@ Backend 只接受用户意图，按 Registry 生成并冻结 `executionPlan`：w
 #### W3：Registry 与 generation policy
 
 - [x] 已完成基础 Registry：对外创建任务必须提交 `workflowKey`，现有 `seedance.reference-image-to-video.v1` 与 `seedance.text-to-video.v1` 均由服务端注册；旧 `capability/profile/params` 合同已拒绝。当前代码状态见 [PROJECT_STATUS.md](PROJECT_STATUS.md)，该基础不代表新增模式已开放。
-- [~] `WorkflowDefinition` 已含声明式 `MediaPolicy`、`GenerationPolicy` 与已取证模式的 `ProviderFieldPolicy`：支持固定 Production spec、枚举范围、`adaptive`、`duration=-1`、`reference/edit/extend` 和 `mov`。这些字段已进入冻结 `executionPlan` 并由 Worker `Job.get_params()` 保留；Ark payload 编译器尚未消费，见 W4。
+- [x] `WorkflowDefinition` 已含声明式 `MediaPolicy`、`GenerationPolicy` 与已取证模式的 `ProviderFieldPolicy`：支持固定 Production spec、枚举范围、`adaptive`、`duration=-1`、`reference/edit/extend` 和 `mov`。这些字段进入冻结 `executionPlan`，由 Worker 编译器消费并在提交前复验。
 - [x] 已注册第 10.2 节八个键。`disabled` 只可被目录读取，不允许创建 Preview 或 Production Task；`preview_only` 可创建不可执行 Preview；`production_verified` 才可经白名单和额度创建 pending Task。
 - [x] 已拒绝框架外 role 组合，并校验首尾帧顺序、必填数量与全模态至少一份素材；视频编辑必须有 `reference_video`。音频参考的可选图/视频组合仍按后续原始官方 fixture 决定。
 - [ ] 验收：每个 workflow 的合法/非法媒体组合、`adaptive` 约束、时长边界、状态转换、旧 task 快照恢复全部由纯函数单测覆盖。
 
 #### W4：Seedance Provider 编译与结果标准化
 
-- [~] 已新增纯 `seedance_execution_policy.py`：对受 Backend 冻结的 `workflowKey`、已解析媒体 URL、ratio/duration 和已取证的特殊字段进行复验，再生成 Ark payload；Worker 已在提交前调用它，并通过 `SeedanceAdapter.create_task_payload()` 原样发送。离线 pytest 覆盖参考图、首尾帧、视频编辑、冲突字段拒绝、编译失败不调用 Provider、已有 Provider ID 的恢复分支不重新提交。Fake Provider 已保存最后一次 POST body，跨包合同已升级为当前 `workflowKey` 请求格式并加入最终 Ark payload 断言；整套 Docker 合同环境尚未在本轮重跑。
+- [x] 已新增纯 `seedance_execution_policy.py`：对受 Backend 冻结的 `workflowKey`、已解析媒体 URL、ratio/duration 和已取证的特殊字段进行复验，再生成 Ark payload；Worker 已在提交前调用它，并通过 `SeedanceAdapter.create_task_payload()` 原样发送。离线 pytest 覆盖参考图、首尾帧、视频编辑、冲突字段拒绝、编译失败不调用 Provider、已有 Provider ID 的恢复分支不重新提交。Fake Provider 保存最后一次 POST body；`run_mvp_contract.sh` 已完成 Backend 48、Fake Provider 5、Worker live 10 passed / 2 explicitly skipped 的隔离合同验证。
 
-- [ ] 把 Worker 中的 `media_urls` 临时映射改为按 Registry 冻结角色输出 Ark `content`，并只发送 W1 已证实的 Provider 字段。
+- [x] Worker 已按 Registry 冻结角色把解析后的素材 URL 输出为 Ark `content`，并只发送已有官方字段证据的 Provider 字段。
 - [ ] 为每个已取证模式建立 payload fixture：文生、参考图、首帧、首尾帧、全模态参考、编辑、延长、参考音频。Fixture 只验证 JSON shape，不调用 Ark。
 - [ ] 统一读取创建响应 `id` 和终态响应中的状态、视频 URL、可选尾帧、usage/错误；未被 W1 证实的返回字段保留原始受限 payload，不对外编造结构。
 - [ ] 验收：Worker 单测验证每个 Registry 快照只产生预期 `content` 项；未知字段、URL 失效、Provider 4xx、5xx/超时均维持当前“不可判定即 requires_review、不自动重提”的规则。

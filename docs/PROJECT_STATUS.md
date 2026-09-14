@@ -1,7 +1,7 @@
 # Video Flow 项目现状（权威）
 
-> 最后核验：2026-09-11
-> 本轮核验方式：只读代码、接口调用链与测试走查；测试、部署和真实生成结果沿用下文注明的前轮核验快照，本轮未重跑、未部署、未创建付费任务。
+> 最后核验：2026-09-14
+> 本轮核验方式：本地三包回归与隔离 Docker 跨包合同；仅使用本地 Fake Provider，未部署、未推送、未创建付费任务。
 > 本文是**唯一**描述"系统现在是什么样"的文档。任何历史文档与本文冲突时，以本文为准；如果本文与代码冲突，以代码为准并立即更新本文。
 
 ---
@@ -74,7 +74,7 @@
 - 2026-09-14：Worker 新增 `seedance_execution_policy.py`，将已冻结的 reference-image、首尾帧、全模态参考、视频编辑和视频延长意图编译为 Ark `content` payload，并在提交前复验角色、顺序、数量、`adaptive` / `duration=-1` 与 `reference/edit/extend` 字段。`executor.py` 已在素材 URL 解析后调用编译器，并通过 `SeedanceAdapter.create_task_payload()` 原样运输；编译失败进入 `requires_review` 且不调用 Provider，已有 `providerTaskId` 的恢复分支不重新提交。验证：`cd packages/worker && venv/bin/python -m pytest -q`（199 passed / 26 skipped / 12 deselected）。未调用 Ark、未部署、未改变任何 workflow 的 `production_verified` 状态。
 - 2026-09-14：Fake Provider 已增加 `lastCreatePayload` 测试观测字段；跨包 Worker 合同改为当前 `workflowKey` 请求格式，并断言最终 POST 保留冻结后的 `content`、时长、比例和分辨率。验证：`cd packages/worker && venv/bin/python -m pytest ../../scripts/tests/test_fake_provider.py -q`（5 passed）。包含 Backend、Docker、Worker 的完整合同脚本本轮尚未重跑。
 - 2026-09-14：隔离 Docker 合同首次因 `MediaInspectorService` 把函数参数作为 Nest 依赖注入而无法启动；已改为 `MEDIA_PROBE_RUNNER` 显式 Token 和默认 `ffprobe` provider。验证：Backend `npx jest --runInBand && npm run build`（22 suites / 205 tests）。重跑后 Backend 已启动，合同中 40 个失败均为旧 `capability/profile/params` 请求和无媒体元数据 fixture，需迁移为当前 `workflowKey` 合同；该套 Docker 合同当前不能标为通过。
-- 2026-09-14：Backend 隔离合同已迁移到 `workflowKey` 夹具，并为图片输入补齐检查后的 MIME/尺寸元数据；`VIDEO_FLOW_CONTRACT_DB_PORT=55433 VIDEO_FLOW_CONTRACT_PROVIDER_PORT=19092 bash scripts/run_mvp_contract.sh` 中 Backend 合同为 6 suites / 48 tests 通过，Fake Provider 单测 5 通过。脚本随后进入 Worker live contract，仍有 8 个旧请求形状返回 400；Worker 侧测试迁移尚未完成，因此跨包全套仍不能标为通过。
+- 2026-09-14：隔离 Docker 跨包合同已全套通过。Worker live contract 已迁移为当前 `workflowKey` 请求形状，测试输入 Asset 也携带已检查的 `mime_type` 与图片尺寸元数据；`VIDEO_FLOW_CONTRACT_DB_PORT=55433 VIDEO_FLOW_CONTRACT_PROVIDER_PORT=19092 bash scripts/run_mvp_contract.sh` 的结果为 Backend 合同 6 suites / 48 tests、Fake Provider 5 tests、Worker live contract 10 passed / 2 skipped。跳过项是 E04（独立生产白名单 Actor、专属输入 Asset 和精确额度 fixture）与 E12（真实容器重建、外部告警通道），并非通过的替代证据。全量本地回归：Backend `npm run build && npx jest --runInBand`（22 suites / 206 tests）、Worker `venv/bin/python -m pytest -q`（199 passed / 26 skipped / 12 deselected）、ComfyUI 客户端 `.venv/bin/python -m pytest -q`（58 passed）。所有验证仅访问本地 Fake Provider，未调用 Ark、未部署、未推送；当前唯一 `production_verified` 工作流仍是 `seedance.reference-image-to-video.v1`，尚待单独、有额度上限的真实验收。
 
 - `feat/creative-mvp` 隔离 worktree 已完成 ROADMAP T00：新增真实编译 Backend + PostgreSQL 的合同测试入口、仅 loopback 的假 Provider、Provider 测试环境 fail-closed 校验，并修正 `start:prod` 指向实际构建入口 `dist/src/main`。
 - ROADMAP T01 已在本分支实现：Production 只接受固定规格和本人已上传的 input Asset，Task 保存 `executionPlan` / `deliveryStatus`，Worker 新提交缺少批准快照时转 `requires_review`，已有 Provider ID 的恢复路径不因此重建任务。证据：`packages/backend/src/tasks/production-spec.ts`、`packages/backend/src/v1/tasks/v1-tasks.controller.ts`、`packages/worker/executor.py`。
