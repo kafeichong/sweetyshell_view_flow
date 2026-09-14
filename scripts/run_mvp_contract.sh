@@ -5,8 +5,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 COMPOSE_FILE="$SCRIPT_DIR/compose.contract.yml"
 PROJECT_NAME="video-flow-contract"
-DATABASE_URL="postgresql://video_contract:video_contract@127.0.0.1:55432/video_flow_contract"
-UPGRADE_DATABASE_URL="postgresql://video_contract:video_contract@127.0.0.1:55432/video_flow_upgrade_contract"
+CONTRACT_DB_PORT="${VIDEO_FLOW_CONTRACT_DB_PORT:-55432}"
+CONTRACT_PROVIDER_PORT="${VIDEO_FLOW_CONTRACT_PROVIDER_PORT:-19091}"
+DATABASE_URL="postgresql://video_contract:video_contract@127.0.0.1:${CONTRACT_DB_PORT}/video_flow_contract"
+UPGRADE_DATABASE_URL="postgresql://video_contract:video_contract@127.0.0.1:${CONTRACT_DB_PORT}/video_flow_upgrade_contract"
 if test -x "$REPO_ROOT/packages/worker/venv/bin/python"; then
   CONTRACT_PYTHON="$REPO_ROOT/packages/worker/venv/bin/python"
 else
@@ -31,15 +33,16 @@ cleanup() {
 }
 trap cleanup EXIT
 
-"$CONTRACT_PYTHON" "$SCRIPT_DIR/fake_provider.py" >"$FAKE_PROVIDER_LOG" 2>&1 &
+VIDEO_FLOW_FAKE_PROVIDER_PORT="$CONTRACT_PROVIDER_PORT" \
+  "$CONTRACT_PYTHON" "$SCRIPT_DIR/fake_provider.py" >"$FAKE_PROVIDER_LOG" 2>&1 &
 FAKE_PROVIDER_PID="$!"
 for _ in $(seq 1 50); do
-  if curl --fail --silent "http://127.0.0.1:19091/api/v3/__test__/stats" >/dev/null; then
+  if curl --fail --silent "http://127.0.0.1:${CONTRACT_PROVIDER_PORT}/api/v3/__test__/stats" >/dev/null; then
     break
   fi
   sleep 0.1
 done
-if ! curl --fail --silent "http://127.0.0.1:19091/api/v3/__test__/stats" >/dev/null; then
+if ! curl --fail --silent "http://127.0.0.1:${CONTRACT_PROVIDER_PORT}/api/v3/__test__/stats" >/dev/null; then
   sed -n '1,120p' "$FAKE_PROVIDER_LOG" >&2
   exit 1
 fi
@@ -50,7 +53,7 @@ cd "$REPO_ROOT/packages/backend"
 # 新环境必须能从空库直接执行完整 migration 链。
 VIDEO_FLOW_TEST_MODE=1 \
 DATABASE_URL="$DATABASE_URL" \
-VIDEO_FLOW_PROVIDER_BASE_URL="http://127.0.0.1:19091/api/v3" \
+VIDEO_FLOW_PROVIDER_BASE_URL="http://127.0.0.1:${CONTRACT_PROVIDER_PORT}/api/v3" \
 npx prisma migrate deploy
 
 # 模拟生产库已按历史实际顺序登记四个 migration，再验证新增兼容
@@ -85,7 +88,7 @@ npm run build
 
 VIDEO_FLOW_TEST_MODE=1 \
 DATABASE_URL="$DATABASE_URL" \
-VIDEO_FLOW_PROVIDER_BASE_URL="http://127.0.0.1:19091/api/v3" \
+VIDEO_FLOW_PROVIDER_BASE_URL="http://127.0.0.1:${CONTRACT_PROVIDER_PORT}/api/v3" \
 npm run test:contract -- --runInBand
 
 cd "$REPO_ROOT"
@@ -134,7 +137,7 @@ else
   cd "$REPO_ROOT/packages/backend"
   VIDEO_FLOW_TEST_MODE=1 \
   DATABASE_URL="$DATABASE_URL" \
-  VIDEO_FLOW_PROVIDER_BASE_URL="http://127.0.0.1:19091/api/v3" \
+  VIDEO_FLOW_PROVIDER_BASE_URL="http://127.0.0.1:${CONTRACT_PROVIDER_PORT}/api/v3" \
   VIDEO_FLOW_ADMIN_TOKEN="$LIVE_ADMIN_TOKEN" \
   VIDEO_FLOW_WORKER_TOKEN="$LIVE_WORKER_TOKEN" \
   VIDEO_FLOW_PRODUCTION_ACTORS="live-contract-actor" \
@@ -174,18 +177,18 @@ else
   # - 本机可能挂着 SOCKS/HTTP 代理：回环地址必须直连，否则 create 会打到代理上。
   VIDEO_FLOW_TEST_MODE=1 \
   DATABASE_URL="$DATABASE_URL" \
-  VIDEO_FLOW_PROVIDER_BASE_URL="http://127.0.0.1:19091/api/v3" \
+  VIDEO_FLOW_PROVIDER_BASE_URL="http://127.0.0.1:${CONTRACT_PROVIDER_PORT}/api/v3" \
   BACKEND_URL="http://127.0.0.1:$LIVE_PORT" \
   WORKER_SERVICE_TOKEN="$LIVE_WORKER_TOKEN" \
   VIDEO_FLOW_WORKER_TOKEN="$LIVE_WORKER_TOKEN" \
   VIDEO_FLOW_ADMIN_TOKEN="$LIVE_ADMIN_TOKEN" \
   VIDEO_FLOW_LIVE_BASE_URL="http://127.0.0.1:$LIVE_PORT" \
-  VIDEO_FLOW_LIVE_PROVIDER_URL="http://127.0.0.1:19091" \
+  VIDEO_FLOW_LIVE_PROVIDER_URL="http://127.0.0.1:${CONTRACT_PROVIDER_PORT}" \
   VIDEO_FLOW_LIVE_ACTOR_TOKEN="$LIVE_ACTOR_TOKEN" \
   VIDEO_FLOW_LIVE_ASSET_ID="$LIVE_ASSET_ID" \
   VIDEO_FLOW_AUDIT_DIR="$(mktemp -d -t video-flow-live-audit.XXXXXX)" \
   COMFYUI_OUTPUT_DIR="$(mktemp -d -t video-flow-live-output.XXXXXX)" \
-OSS_ENDPOINT="http://127.0.0.1:19091/oss" \
+OSS_ENDPOINT="http://127.0.0.1:${CONTRACT_PROVIDER_PORT}/oss" \
 OSS_CNAME=1 \
 OSS_ACCESS_KEY_ID="live-contract-oss" \
 OSS_ACCESS_KEY_SECRET="live-contract-oss-secret" \
@@ -200,10 +203,15 @@ OSS_REGION="oss-cn-beijing" \
   }
 
   # 漏跑必须失败：跨包用例被静默排除等于没跑。
-  live_collected="$("$CONTRACT_WORKER_PYTHON" -m pytest tests/test_mvp_live_contract.py -m live_contract \
-    --collect-only -q -p no:cacheprovider 2>/dev/null | tail -1)"
-  case "$live_collected" in
-    *'5 tests collected'*) ;;
-    *) echo "跨包合同用例数异常: $live_collected" >&2; exit 1 ;;
-  esac
+  live_collect_output="$("$CONTRACT_WORKER_PYTHON" -m pytest tests/test_mvp_live_contract.py -m live_contract \
+    --collect-only -q -p no:cacheprovider 2>/dev/null)"
+  live_collected="$(echo "$live_collect_output" | awk '{ for (i = 1; i <= NF; i++) if ($i == "collected" && i >= 3) print $(i - 2) }')"
+  if test -z "$live_collected"; then
+    echo "跨包合同用例收集失败: $live_collect_output" >&2
+    exit 1
+  fi
+  if test "$live_collected" -lt 5; then
+    echo "跨包合同用例数异常（过少）: $live_collect_output" >&2
+    exit 1
+  fi
 fi

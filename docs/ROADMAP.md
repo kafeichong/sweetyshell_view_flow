@@ -489,7 +489,7 @@ def test_review_task_is_actionable_without_metrics_platform():
 **新增：** `packages/worker/tests/test_mvp_live_contract.py`、`scripts/tests/test_acceptance_cli.py`；隔离测试用的本地可解码短视频 fixture（由测试生成，不上传生产素材）。
 **接口：** 跨包测试复用 T00 服务，不 mock 掉真实 Backend/DB/Worker 序列；fake Provider 记录每个测试关联 key 的 create 次数。installer 复制 receipts.py、examples、web 等新资源，不能只更新旧文件白名单。
 
-- [x] 将下方矩阵逐项实现为跨包自动用例，provider_count、Task/Attempt/Asset/预算、日志都必须断言；测试异常不能被预期 skip 吞掉。
+- [ ] 将下方矩阵逐项实现为跨包自动用例，provider_count、Task/Attempt/Asset/预算、日志都必须断言；测试异常不能被预期 skip 吞掉。E03/E05/E08/E10/E11 已实跑，E04/E12 仍需外部/专属 fixture。
 
 **跨包用例（2026-09-13 已通过）：**
 已完成且已验证的部分：Fake Provider 按提示词统计 `createCountsByKey`（跨包用例据此断言"同一意图只创建一次"）；新增 `packages/worker/tests/test_mvp_live_contract.py`（真实 Worker 代码 + 真实 Backend/DB + Fake Provider，覆盖"预览不创建 Provider 任务"与"重跑不产生第二次 create"），默认由 pytest marker 排除、缺环境直接失败而不是 skip；`scripts/run_mvp_contract.sh` 增加独立 Backend 实例与素材/凭证/准入准备，并把该段放在 `VIDEO_FLOW_RUN_LIVE_CONTRACT=1` 开关之后（默认关闭，避免未通过的用例把整套合同染色成绿）。装载器 `install.sh` 已补 `receipts.py`、`examples/`、`web/`，并有安装测试断言这些资源确实送达且备份仍在 `custom_nodes` 之外；两份手册已补"ComfyUI 出片路径与 generation_version 的付费含义""超时恢复/费用未知/报障 taskId"与"管理员查询/恢复/暂停/迁移备份回滚"。
@@ -504,7 +504,7 @@ def test_review_task_is_actionable_without_metrics_platform():
 
 **准入边界也已跨包验证（2026-09-13）：** 新增 E02/E13 用例——没带凭证 401、凭证无效 403、非法规格 400、全局暂停 503，四种拒绝之后 Fake Provider 的 create 计数必须一动不动（返回码本身证明不了"没花钱"）；并验证暂停只拦新准入、已有路径仍可用，恢复暂停走带 reason/operator/evidenceRef 的受控接口。过程中确认了两个既有约定：凭证守卫是"没带 401 / 无效 403"，以及**空凭证时不能拼出 `Bearer `**（httpx 会本地拒绝，那样测到的就不是服务端行为）。
 
-**尚未完成：** E01–E13 中其余矩阵项（E03 并发、E04 抢额度、E05 响应丢失、E08 无 usage、E10 自定义目录、E11 越权、E12 容器重建）仍由各包用例覆盖，未做成跨包用例。
+**2026-09-14 更新：** E03（同意图并发）、E05（提交响应缺 ID）、E08（usage 缺失）、E10（自定义输出目录与重启不重复 create）、E11（跨 owner 读取与 Worker 私有接口拒绝）已做成跨包合同并实跑通过。E04 仍需要独立的生产白名单 Actor、专属输入 Asset 和精确额度 fixture；E12 仍需要真实容器重建及外部告警通道，不能以本地替身宣称完成。
 - [x] Worker restart 用真正退出/启动测试进程验证；用读取数据库持久化 providerTaskId 作为中断触发点，不依赖固定 sleep 猜时机。
 - [x] 安装测试覆盖新增 Python 模块与前端资源、两个模板、备份位于 custom_nodes 之外；不改同事其他自定义节点。
 - [x] CI 分开显示单元、合同、预期外部 workflow skip；跨包合同不得使用真实 Provider 凭证，漏跑应失败而不是跳过。

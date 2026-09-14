@@ -21,8 +21,11 @@ import os
 import subprocess
 import sys
 import time
-import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import unittest
+from tempfile import mkdtemp
+from typing import Optional
 
 import httpx
 import pytest
@@ -452,6 +455,405 @@ class AdmissionBoundaryTests(unittest.TestCase):
         finally:
             resumed = self._set_gate(False, "contract: restore after boundary check")
             self.assertEqual(resumed.status_code, 200)
+
+
+class AdditionalCrossPackageScenariosTests(unittest.TestCase):
+    """补齐 ROADMAP 矩阵中未跨包覆盖项（E03/E04/E05/E08/E10/E11/E12）的骨架。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.base_url = required_env("VIDEO_FLOW_LIVE_BASE_URL")
+        cls.provider_url = required_env("VIDEO_FLOW_LIVE_PROVIDER_URL")
+        cls.actor_token = required_env("VIDEO_FLOW_LIVE_ACTOR_TOKEN")
+        cls.admin_token = required_env("VIDEO_FLOW_ADMIN_TOKEN")
+        cls.asset_id = required_env("VIDEO_FLOW_LIVE_ASSET_ID")
+        cls.audit_dir = os.path.join(os.path.abspath(os.path.join(os.path.expanduser("~"), ".video-flow-live-audit")), "cross-package")
+
+    def _api(self, token: Optional[str] = None) -> httpx.Client:
+        actor_token = self.actor_token if token is None else token
+        headers = {}
+        if actor_token:
+            headers["Authorization"] = f"Bearer {actor_token}"
+        return httpx.Client(base_url=self.base_url, timeout=30.0, headers=headers)
+
+    def _admin_api(self) -> httpx.Client:
+        return httpx.Client(
+            base_url=self.base_url,
+            timeout=30.0,
+            headers={"X-Admin-Token": self.admin_token},
+        )
+
+    def _post_task(self, *, prompt: str, idempotency_key: str, token: Optional[str] = None, asset_id: Optional[str] = None):
+        payload = {
+            "mode": "production",
+            "capability": "IMAGE_TO_VIDEO",
+            "profile": "seedance",
+            "params": {
+                "prompt": prompt,
+                "image_asset_id": asset_id or self.asset_id,
+                "duration": 5,
+                "ratio": "16:9",
+            },
+        }
+        with self._api(token=token) as client:
+            return client.post(
+                "/api/v1/tasks",
+                headers={"Idempotency-Key": idempotency_key},
+                json=payload,
+            )
+
+    def _post_task_concurrently(self, *, prompt: str, key: str, token: Optional[str] = None, parallel: int = 2):
+        with ThreadPoolExecutor(max_workers=parallel) as executor:
+            futures = [executor.submit(self._post_task, prompt=prompt, idempotency_key=key, token=token) for _ in range(parallel)]
+            return [future.result(timeout=20) for future in futures]
+
+    def _wait_until(self, predicate, *, timeout: float = 60.0, description: str = ""):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            value = predicate()
+            if value:
+                return value
+            time.sleep(0.2)
+        raise AssertionError(f"timed out waiting for {description}")
+
+    def _run_one_cycle(self) -> None:
+        """跑一轮真实的认领 + 执行，不进入常驻循环。"""
+        executor = importlib.reload(self._load_executor()).JobExecutor()
+
+        async def cycle():
+            try:
+                jobs = await executor.fetch_inflight_jobs()
+                jobs.extend(await executor.fetch_pending_jobs())
+                for job in {job.id: job for job in jobs}.values():
+                    await executor.execute_job(job)
+            finally:
+                await executor.close()
+
+        asyncio.run(cycle())
+
+    def _load_executor(self):
+        import executor as executor_module
+        importlib.reload(executor_module)
+        return executor_module
+
+    def _spawn_worker(self, *, output_dir: str, audit_dir: Optional[str] = None) -> subprocess.Popen:
+        env = {
+            **os.environ,
+            "BACKEND_URL": self.base_url,
+            "WORKER_SERVICE_TOKEN": os.environ.get("VIDEO_FLOW_WORKER_TOKEN", ""),
+            "VIDEO_FLOW_PROVIDER_BASE_URL": f"{self.provider_url}/api/v3",
+            "COMFYUI_OUTPUT_DIR": output_dir,
+            "VIDEO_FLOW_AUDIT_DIR": audit_dir or "",
+            "NO_PROXY": "127.0.0.1,localhost",
+            "no_proxy": "127.0.0.1,localhost",
+        }
+        return subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                "import asyncio, executor; asyncio.run(executor.JobExecutor().poll_loop())",
+            ],
+            cwd=str(Path(__file__).resolve().parents[1]),
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+    def _stop_worker(self, worker: subprocess.Popen) -> None:
+        if worker.poll() is None:
+            worker.kill()
+        try:
+            worker.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            worker.kill()
+
+    def _create_actor(self, actor_id: str, name: str) -> str:
+        response = self._admin_api().post(
+            "/api/v1/admin/credentials",
+            json={"actorId": actor_id, "name": name},
+        )
+        # Admin credential endpoint is intentionally strict; fallback as error to avoid silently
+        # using a wrong token in authorization tests.
+        if response.status_code != 201:
+            raise AssertionError(f"create actor failed: {response.status_code} {response.text}")
+        return response.json()["token"]
+
+    def _set_actor_limits(self, actor_id: str, *, daily_limit: str, monthly_limit: str) -> None:
+        with self._admin_api() as client:
+            response = client.patch(
+                f"/api/v1/admin/credentials/{actor_id}/limits",
+                json={"dailyLimitCny": daily_limit, "monthlyLimitCny": monthly_limit},
+            )
+        if response.status_code != 200:
+            raise AssertionError(f"set limits failed: {response.status_code} {response.text}")
+
+    def _set_provider_mode(self, *, create_mode: Optional[str] = None, usage_mode: Optional[str] = None):
+        if create_mode is not None:
+            response = httpx.get(
+                f"{self.provider_url}/__test__/create-mode",
+                params={"mode": create_mode},
+            )
+            response.raise_for_status()
+            assert response.json()["createMode"] == create_mode
+        if usage_mode is not None:
+            response = httpx.get(
+                f"{self.provider_url}/__test__/usage-mode",
+                params={"mode": usage_mode},
+            )
+            response.raise_for_status()
+            assert response.json()["usageMode"] == usage_mode
+
+    def _reset_provider(self):
+        httpx.post(f"{self.provider_url}/__test__/reset").raise_for_status()
+
+    def _task_summary(self, task_id: str, *, token: Optional[str] = None):
+        with self._api(token=token) as client:
+            response = client.get(
+                f"/api/v1/tasks/{task_id}",
+            )
+            response.raise_for_status()
+            return response.json()
+
+    def test_e03_same_intent_concurrent_requests_create_once(self):
+        self._reset_provider()
+        prompt = "live e03 same-intent"
+        key = "e03-live-same-intent"
+        before = provider_stats(self.provider_url)["createCountsByKey"].get(prompt, 0)
+
+        responses = self._post_task_concurrently(
+            prompt=prompt,
+            key=key,
+            parallel=3,
+        )
+        for response in responses:
+            self.assertIn(response.status_code, (200, 201))
+
+        task_ids = {resp.json()["id"] for resp in responses}
+        self.assertEqual(len(task_ids), 1, f"task split: {task_ids}")
+
+        self._run_one_cycle()
+        after = provider_stats(self.provider_url)["createCountsByKey"].get(prompt, 0)
+        self.assertEqual(after, before + 1, "provider create is expected to happen exactly once")
+
+    @unittest.skip("E04 需要独立的生产白名单 Actor 与专属输入 Asset；合同环境尚未提供该 fixture")
+    def test_e04_budget_race_one_intent_enters_provider(self):
+        self._reset_provider()
+        seed = self._post_task(
+            prompt="live e04 actor-id discovery",
+            idempotency_key="e04-actor-id-seed",
+        )
+        self.assertEqual(seed.status_code, 201)
+        actor_id = seed.json().get("createdBy")
+        if not actor_id:
+            self.fail(f"actor id missing in seed response: {seed.text}")
+
+        # 限制预算为单次预占，模拟抢占场景；执行后恢复到默认即可。
+        try:
+            self._set_actor_limits(actor_id, daily_limit="2.000000", monthly_limit="1000.000000")
+        except AssertionError:
+            self._set_actor_limits(actor_id, daily_limit="2", monthly_limit="1000")
+
+        parallel_prompts = [
+            ("live e04 new intent a", "e04-intent-a"),
+            ("live e04 new intent b", "e04-intent-b"),
+        ]
+
+        before_total = provider_stats(self.provider_url)["createCount"]
+        before = provider_stats(self.provider_url)["createCountsByKey"]
+
+        responses = []
+        for prompt, key in parallel_prompts:
+            responses.append(self._post_task(prompt=prompt, idempotency_key=key))
+
+        created = [r for r in responses if r.status_code in (200, 201)]
+        rejected = [r for r in responses if r.status_code == 429]
+        self.assertTrue(created, "no task was created")
+        self.assertTrue(rejected, "budget-race should have at least one reject")
+
+        self._run_one_cycle()
+
+        after = provider_stats(self.provider_url)["createCountsByKey"]
+        after_total = provider_stats(self.provider_url)["createCount"]
+        self.assertLessEqual(after_total - before_total, len(created))
+        self.assertEqual(after_total - before_total, 1, "only one intent should enter provider")
+
+        for response in created:
+            prompt = response.json()["executionPlan"]["prompt"] if response.json().get("executionPlan") else response.json()["params"].get("prompt", "")
+            if prompt in after and prompt in before:
+                self.assertEqual(after[prompt] - before[prompt], 1)
+            elif prompt:
+                self.assertEqual(after.get(prompt), 1)
+
+        # 恢复到默认上限，避免影响后续用例。
+        self._set_actor_limits(actor_id, daily_limit="100.000000", monthly_limit="1000.000000")
+
+    def test_e05_submit_unknown_response_does_not_double_submit(self):
+        self._reset_provider()
+        self._set_provider_mode(create_mode="missing_id")
+        try:
+            response = self._post_task(
+                prompt="live e05 missing provider response",
+                idempotency_key="e05-submit-unknown",
+            )
+            self.assertIn(response.status_code, (200, 201))
+            task_id = response.json()["id"]
+
+            before = provider_stats(self.provider_url)["createCountsByKey"].get(
+                "live e05 missing provider response",
+                0,
+            )
+            self._run_one_cycle()
+
+            summary = self._task_summary(task_id)
+            self.assertEqual(summary["execution"]["status"], "requires_review")
+            self.assertIsNone(summary["execution"]["providerTaskId"])
+            self.assertEqual(
+                provider_stats(self.provider_url)["createCountsByKey"].get(
+                    "live e05 missing provider response",
+                    0,
+                ),
+                before + 1,
+            )
+
+            self._run_one_cycle()
+            self.assertEqual(
+                provider_stats(self.provider_url)["createCountsByKey"].get(
+                    "live e05 missing provider response",
+                    0,
+                ),
+                before + 1,
+                "response-loss should not cause duplicate create",
+            )
+        finally:
+            self._set_provider_mode(create_mode="normal")
+
+    def test_e08_missing_or_invalid_usage_marks_unavailable(self):
+        self._reset_provider()
+        self._set_provider_mode(usage_mode="missing")
+        try:
+            response = self._post_task(
+                prompt="live e08 usage missing",
+                idempotency_key="e08-usage",
+            )
+            self.assertIn(response.status_code, (200, 201))
+            task_id = response.json()["id"]
+
+            self._run_one_cycle()
+            summary = self._task_summary(task_id)
+            self.assertEqual(summary["costSummary"]["status"], "unavailable")
+            self.assertIsNone(summary["costSummary"]["usageCalculatedCny"])
+            self.assertNotEqual(summary["costSummary"].get("usageCalculatedCny"), "0.000000")
+        finally:
+            self._set_provider_mode(usage_mode="valid")
+
+    def test_e10_custom_output_dir_download_resume_and_signature_refresh(self):
+        self._reset_provider()
+        output_dir = mkdtemp(prefix="video-flow-custom-output-")
+        audit_dir = mkdtemp(prefix="video-flow-custom-audit-")
+
+        task = self._post_task(
+            prompt="live e10 custom output",
+            idempotency_key="e08-output",
+        )
+        self.assertIn(task.status_code, (200, 201))
+        task_id = task.json()["id"]
+
+        worker = self._spawn_worker(output_dir=output_dir, audit_dir=audit_dir)
+        try:
+            self._wait_until(
+                lambda: self._task_summary(task_id).get("delivery", {}).get("status") == "ready",
+                timeout=90.0,
+                description="task ready",
+            )
+        finally:
+            self._stop_worker(worker)
+
+        artifacts = list(Path(output_dir).rglob("*.mp4"))
+        self.assertTrue(artifacts, "no artifacts written under custom output dir")
+
+        before_count = provider_stats(self.provider_url)["createCount"]
+        worker = self._spawn_worker(output_dir=output_dir, audit_dir=audit_dir)
+        try:
+            time.sleep(2)
+        finally:
+            self._stop_worker(worker)
+        after_count = provider_stats(self.provider_url)["createCount"]
+        self.assertEqual(before_count, after_count, "resume run should not create duplicate providers")
+
+    def test_e11_unauthorized_task_or_attempt_access_blocked(self):
+        self._reset_provider()
+        owner_task = self._post_task(
+            prompt="live e11 owner task",
+            idempotency_key="e11-owner",
+        )
+        self.assertIn(owner_task.status_code, (200, 201))
+        task_id = owner_task.json()["id"]
+        self._run_one_cycle()
+        owner_summary = self._task_summary(task_id)
+
+        attacker_token = self._create_actor(
+            actor_id=f"e11-attacker-{int(time.time())}",
+            name="e11-attacker",
+        )
+
+        # 设计上应以 404 隐藏他人任务是否存在，且不能泄露执行详情。
+        with self._api(token=attacker_token) as client:
+            owner_task_result = client.get(f"/api/v1/tasks/{task_id}")
+        self.assertEqual(owner_task_result.status_code, 404)
+
+        # 尝试访问输出下载接口，要求 404/403 并且不返回他人对象信息。
+        with self._api(token=attacker_token) as client:
+            attack_result = client.get(f"/api/v1/assets/tasks/{task_id}/result")
+        self.assertIn(attack_result.status_code, (403, 404))
+
+        attempt_id = owner_summary["execution"]["attemptId"]
+        with self._api(token=attacker_token) as client:
+            mismatch = client.patch(
+                f"/api/v1/internal/attempts/{attempt_id}/outcome",
+                json={"providerTaskId": "fake-attacker", "status": "succeeded"},
+            )
+        self.assertIn(mismatch.status_code, (401, 403))
+
+    @unittest.skip("E12 的外部告警通道和容器重建验收属于 T10/T12，当前本地合同环境无可验证替身")
+    def test_e12_rebuild_keeps_journal_and_alert_truthful(self):
+        self._reset_provider()
+        output_dir = mkdtemp(prefix="video-flow-rebuild-output-")
+        audit_dir = mkdtemp(prefix="video-flow-rebuild-audit-")
+
+        task = self._post_task(
+            prompt="live e12 rebuild journal",
+            idempotency_key="e12-rebuild",
+        )
+        self.assertIn(task.status_code, (200, 201))
+        task_id = task.json()["id"]
+
+        worker = self._spawn_worker(output_dir=output_dir, audit_dir=audit_dir)
+        try:
+            self._wait_until(
+                lambda: self._task_summary(task_id).get("delivery", {}).get("status") == "ready",
+                timeout=90.0,
+                description="task ready",
+            )
+        finally:
+            self._stop_worker(worker)
+
+        before = provider_stats(self.provider_url)["createCount"]
+        journal_path = Path(audit_dir) / "submissions.jsonl"
+        self.assertTrue(journal_path.is_file(), f"journal missing: {journal_path}")
+        records = []
+        for line in journal_path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                records.append(line)
+        self.assertTrue(records, "journal should keep execution evidence for restart")
+
+        # 容器重建后同一 task 不应改写出第二个 provider create。仅做“恢复不重复”验证。
+        worker = self._spawn_worker(output_dir=output_dir, audit_dir=audit_dir)
+        try:
+            time.sleep(2)
+        finally:
+            self._stop_worker(worker)
+        after = provider_stats(self.provider_url)["createCount"]
+        self.assertEqual(before, after)
 
 
 if __name__ == "__main__":

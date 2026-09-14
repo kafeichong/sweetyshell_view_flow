@@ -73,6 +73,14 @@
 | --- | --- | --- |
 | `2026-09-11-creative-mvp-T04-T07-summary.md` | T04 提交安全、T07 客户端回执、版本幂等和测试证据快照；后续任务完成后不再回写 | `PROJECT_STATUS.md` + `ROADMAP.md` |
 
+### 2026-09-14 —— 工作分类与 T11 执行拆分
+
+| 文件 | 归档原因 | 当前依据 |
+| --- | --- | --- |
+| `2026-09-14-work-classification-summary.md` | 当日按“可自动推进/需外部操作”分类的交接快照 | `PROJECT_STATUS.md` + `ROADMAP.md` |
+| `2026-09-14-priority-exec-plan.md` | 当日优先级与执行顺序快照；完成状态不再回写 | `PROJECT_STATUS.md` + `ROADMAP.md` |
+| `2026-09-14-t11-cross-package-gap-list.md` | T11 缺口拆分的实施前快照；实际覆盖以权威状态和路线图为准 | `PROJECT_STATUS.md` + `ROADMAP.md` |
+
 ### plans —— 历史实施计划
 
 | 文件 | 归档原因 | 遗留事项去向 |

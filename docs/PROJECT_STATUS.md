@@ -93,7 +93,7 @@
 | T08 等待与模板 | `610ebfe` | 客户端 56 用例（含状态序列） | `wait_for_task`、节点只输出 taskId、`IS_CHANGED`、稳定下载 |
 | T09 持久日志 | `3da7e2a` | Worker 165；后端 179；脚本 8 | `audit_log.py` 脱敏、`GET .../report` 只读报表、人工处置留痕 |
 | T10 心跳与巡检 | `7eb5fad` | Worker 182；后端 185；脚本 21 | `health_state.py`、`/ready`、`operations/health`、`production-gate`、monitor |
-| T11 跨包回归 | `8077d29` `bf76a5d` `ae7e1b8` `7276a94` `f55d43b` `caa35c5` `3d47893` | 合同 6 specs/48 tests + 跨包 5 用例 | 跨包用例、对象存储替身、Worker 重启恢复、Docker 寻址、CI 分层、手册 |
+| T11 跨包回归 | `8077d29` `bf76a5d` `ae7e1b8` `7276a94` `f55d43b` `caa35c5` `3d47893`（当前工作树未提交） | 合同 6 specs/48 tests + Fake Provider 5 + 跨包 10 通过 / 2 跳过 | 跨包用例、对象存储替身、Worker 重启恢复、Docker 寻址、CI 分层、手册；E03/E05/E08/E10/E11 已补 |
 
 **本轮在实现过程中发现并修复的真实缺陷**（都不是测试问题，都会影响生产行为）：
 
@@ -110,10 +110,10 @@
 
 ```bash
 cd packages/backend && npx jest --runInBand          # 19 套件 / 185 通过
-cd packages/worker && venv/bin/python -m pytest -q   # 185 通过 / 26 跳过 / 5 跨包用例默认排除
+cd packages/worker && venv/bin/python -m pytest -q   # 常规单测；live_contract marker 默认排除
 cd packages/comfyui-video-flow-client && .venv/bin/python -m pytest -q   # 57 通过
 packages/worker/venv/bin/python -m pytest scripts/tests -q               # 22 通过
-bash scripts/run_mvp_contract.sh                     # 6 specs / 48 tests + 跨包 5 用例
+VIDEO_FLOW_CONTRACT_DB_PORT=55433 VIDEO_FLOW_CONTRACT_PROVIDER_PORT=19092 bash scripts/run_mvp_contract.sh  # 6 specs/48 + Fake Provider 5 + 跨包 10 通过/2 跳过
 bash scripts/run_docker_provider_addressing.sh       # Docker 服务名寻址
 ```
 
@@ -121,7 +121,7 @@ bash scripts/run_docker_provider_addressing.sh       # Docker 服务名寻址
 
 - T08 三项：节点展示扩展未经真实 ComfyUI 验证；两份模板目前是 API 格式而非真实导出的 UI 格式；未在自定义 output 路径与重启后的主实例做导入/执行/重新取片。**卡点**：需要一个可运行、可安装节点、可重启的 ComfyUI（本机 Comfy Desktop 的数据根 `~/mylab/ComfyUI` 没有 `.venv`，`install.sh` 需要 ComfyUI 自带 Python；且安装会改动正在使用的环境，待 Steven 确认目标环境与授权）。
 - T10 两项：宿主计划任务检查巡检/备份回执超时、外部可用性渠道验证"整机失联可告警"——依赖实际宿主与通知渠道；"上线时触发一条无付费测试告警并由责任人确认收到"同属部署动作。
-- T11 一项：E01–E13 中 E03/E04/E05/E08/E10/E11/E12 仍由各包用例覆盖，未做成跨包用例。
+- T11 两项：E04 需要独立的白名单 Actor、专属输入 Asset 和精确额度 fixture，才能验证两个新意图争抢最后预算；E12 需要真实容器重建与外部告警通道。其余 E03/E05/E08/E10/E11 已做成跨包合同并实跑通过。
 - T12 全部：部署与真实创意验收，需生产操作授权。
 
 **本轮所有提交均未推送、未部署。** main 领先 origin/main 41 个提交。
@@ -215,7 +215,7 @@ bash scripts/run_docker_provider_addressing.sh       # Docker 服务名寻址
 
 - **T08 三项**：节点展示扩展未经真实 ComfyUI 验证；两份模板是 API 格式而非真实导出的 UI 格式；自定义 output 路径与重启后主实例的导入/执行/重新取片未验证。需要一台可运行、可安装节点、可重启的 ComfyUI。
 - **T10 两项**：宿主计划任务检查巡检/备份回执超时、外部可用性渠道验证"整机失联可告警"；以及"上线时触发一条无付费测试告警并由责任人确认收到"。需要实际宿主与通知渠道。
-- **T11 一项**：E03/E04/E05/E08/E10/E11/E12 仍由各包用例覆盖，未做成跨包用例。
+- **T11 两项**：E04 仍缺独立白名单 Actor/输入 Asset/精确额度 fixture；E12 仍缺真实容器重建和外部告警通道。E03/E05/E08/E10/E11 已做成跨包合同并实跑通过。
 - **T12 全部**：部署与真实创意验收，需生产操作授权。
 
 其中 T08 的三项是本轮唯一"有环境就能立刻做"的：本机 Comfy Desktop 的数据根为 `~/mylab/ComfyUI`，但没有 `.venv`（`install.sh` 要求 ComfyUI 自带 Python），且安装会改动正在使用的环境，需先确认目标环境与授权。
