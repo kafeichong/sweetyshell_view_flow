@@ -1,4 +1,5 @@
 import { BadRequestException, Body, ConflictException, Controller, Get, NotFoundException, Param, Post, ServiceUnavailableException, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { randomUUID } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { ApiCredentialGuard } from '../../auth/api-credential.guard';
@@ -6,7 +7,10 @@ import { CurrentActor } from '../../auth/current-actor.decorator';
 import { AssetsService } from '../../assets/assets.service';
 import { AssetPresignService } from '../../assets/asset-presign.service';
 import { TasksService } from '../../tasks/tasks.service';
+import { UploadTicketDto } from './dto/upload-ticket.dto';
 
+@ApiTags('assets')
+@ApiBearerAuth('actor-token')
 @Controller('v1/assets')
 @UseGuards(ApiCredentialGuard)
 export class V1AssetsController {
@@ -80,7 +84,7 @@ export class V1AssetsController {
   @Post('upload-ticket')
   async createUploadTicket(
     @CurrentActor() actor: { actorId: string },
-    @Body() body: { filename: string; mimeType: string; sizeBytes: number; sha256?: string },
+    @Body() body: UploadTicketDto,
   ) {
     const allowedMimeTypes = new Set(['image/png', 'image/jpeg', 'image/webp']);
     if (!body?.filename?.trim() || !allowedMimeTypes.has(body.mimeType)) {

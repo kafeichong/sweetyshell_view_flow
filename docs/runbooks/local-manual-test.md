@@ -8,13 +8,15 @@
 
 `scripts/run_mvp_contract.sh` 能自动跑完 Preview + 跨包合同并给出一个通过/失败结果，但出错时不方便逐步查看中间状态，也不方便手工探索某个分支（比如故意让 Provider 返回失败）。这份文档把同样的链路拆成可以一步步手动执行、逐步用 `curl` 检查的步骤，每一步都说明**在做什么、为什么这么做、怎么判断这步成功**。
 
+Backend 现在挂载了 Swagger（`@nestjs/swagger`），步骤 4 起完服务后，浏览器打开 `http://127.0.0.1:3100/docs` 就能看到步骤 5–12 里除签发凭证外几乎所有接口（`/v1/tasks`、`/v1/assets/*`、`/v1/admin/*`）的交互式文档，可以直接在网页上填参数点 "Try it out"，不用每次都手写/改 curl。下面仍然保留完整 curl 命令，方便自动化、脚本化或需要精确核对请求头（如 `Idempotency-Key`）的场景；日常探索可以优先用 `/docs`，遇到需要固定复现步骤或截图取证的场景再回到 curl。
+
 **安全边界（不可绕过）：** 全程使用 `scripts/fake_provider.py` 模拟 Ark 与 OSS，**不配置 `VOLCENGINE_ACCESS_KEY`、真实 OSS 密钥**。这套手测验证的是代码路径是否符合合同，不构成真实出片的验收证据；真实验收属于 T12，需要 Steven 明确批准范围后才能执行，且要用 [creative-user-guide.md](./creative-user-guide.md) 里的真实域名流程。
 
 ## 1. 前置条件
 
 - Docker 可用（跑隔离 Postgres）。
 - `packages/worker/venv` 已按 `requirements.txt` 装好依赖（Fake Provider 和本地 Worker 都用这个 venv）。
-- `packages/backend` 已 `npm install`。
+- `packages/backend` 已 `pnpm install`（这个包由 pnpm 管理，`node_modules` 是 `.pnpm` 虚拟存储布局；用 `npm install` 会报 `Cannot read properties of null (reading 'matches')` 之类的错误，改依赖也要用 `pnpm add`，不要用 `npm install --save`）。
 - 默认端口空闲：`55432`（隔离 Postgres）、`19091`（Fake Provider）、`3100`（本地 Backend，**如果宿主机上有 `docker compose up` 起的真实栈占用了 3100，先 `docker compose down` 停掉，避免连错实例）、`8001`（本地 Worker）。合同脚本可用 `VIDEO_FLOW_CONTRACT_DB_PORT` 与 `VIDEO_FLOW_CONTRACT_PROVIDER_PORT` 改用空闲端口；手工步骤仍需把后续 URL 同步改为对应端口。
 - 建议每个前台服务单独开一个终端标签页；下面命令里用 `&` 后台跑的，请记下 `$!`（进程号），第 13 步清理要用。
 
@@ -118,6 +120,8 @@ curl -i http://127.0.0.1:3100/api/v1/tasks
 # HTTP/1.1 401 ...
 ```
 不带 token 返回 401，说明服务起来了，而且鉴权 fail-closed（这是最简单的存活探针）。
+
+**Swagger UI（可选，非生产环境默认开启）：** 浏览器打开 `http://127.0.0.1:3100/docs`，可以看到 `tasks`/`assets`/`admin` 三组接口的交互式文档，点右上角 "Authorize" 分别填入 actor token（`Bearer vf_...`，第 5 步签发后填）和 admin token（`local-admin-token`）就能在网页上直接 "Try it out"，替代下面大部分 curl 命令。这个功能只在非 `NODE_ENV=production` 时默认开启（可用 `VIDEO_FLOW_ENABLE_SWAGGER=true|false` 强制覆盖），生产部署（`docker-compose.yml` 里 `NODE_ENV=production`）默认不暴露，不用担心手测习惯带到生产环境。
 
 ### 步骤 5：签发 actor 凭证
 

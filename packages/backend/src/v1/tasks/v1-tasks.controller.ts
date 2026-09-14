@@ -15,6 +15,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { ApiBearerAuth, ApiHeader, ApiTags } from '@nestjs/swagger';
 import { ApiCredentialGuard } from '../../auth/api-credential.guard';
 import { CurrentActor } from '../../auth/current-actor.decorator';
 import { TasksService } from '../../tasks/tasks.service';
@@ -51,6 +52,8 @@ export function stableStringify(value: unknown): string {
   return JSON.stringify(value ?? null);
 }
 
+@ApiTags('tasks')
+@ApiBearerAuth('actor-token')
 @Controller('v1/tasks')
 @UseGuards(ApiCredentialGuard)
 export class V1TasksController {
@@ -61,6 +64,11 @@ export class V1TasksController {
   ) {}
 
   @Post()
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    description: '同一 actor + 相同请求体只创建一次任务；同 key 不同请求体返回 409',
+    required: true,
+  })
   async create(
     @CurrentActor() actor: { actorId: string },
     @Headers('idempotency-key') idempotencyKey: string,

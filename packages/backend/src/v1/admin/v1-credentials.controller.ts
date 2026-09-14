@@ -1,9 +1,14 @@
 import { Body, Controller, Param, Patch, Post, UseGuards, BadRequestException } from '@nestjs/common';
+import { ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { AdminTokenGuard } from '../../auth/admin-token.guard';
 import { CredentialsService } from '../../auth/credentials.service';
 import { PrismaService } from '../../prisma.service';
 import { Prisma } from '@prisma/client';
+import { CreateCredentialDto } from './dto/create-credential.dto';
+import { UpdateLimitsDto } from './dto/update-limits.dto';
 
+@ApiTags('admin')
+@ApiSecurity('admin-token')
 @Controller('v1/admin/credentials')
 @UseGuards(AdminTokenGuard)
 export class V1CredentialsController {
@@ -13,7 +18,7 @@ export class V1CredentialsController {
   ) {}
 
   @Post()
-  create(@Body() body: { actorId: string; name: string }) {
+  create(@Body() body: CreateCredentialDto) {
     if (!body?.actorId?.trim() || !body?.name?.trim()) {
       throw new Error('actorId and name are required');
     }
@@ -28,7 +33,7 @@ export class V1CredentialsController {
   @Patch(':actorId/limits')
   async updateLimits(
     @Param('actorId') actorId: string,
-    @Body() body: { dailyLimitCny?: string; monthlyLimitCny?: string },
+    @Body() body: UpdateLimitsDto,
   ) {
     const credential = await this.prisma.actorCredential.findUnique({
       where: { actorId },
