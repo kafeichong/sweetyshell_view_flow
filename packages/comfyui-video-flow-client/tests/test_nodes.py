@@ -98,6 +98,21 @@ def test_config_node_defaults_to_company_backend(monkeypatch):
     assert defaults["backend_url"][1]["default"] == "https://ai.sweetyshell.com"
 
 
+def test_image_to_video_workflow_is_a_visual_comfyui_graph():
+    workflow_path = Path(__file__).resolve().parents[1] / "workflows/seedance-image-to-video-v1.comfy.json"
+    workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+
+    assert isinstance(workflow.get("nodes"), list)
+    assert {node["type"] for node in workflow["nodes"]} == {
+        "VideoFlowConfig",
+        "LoadImage",
+        "VideoFlowSeedanceProduction",
+        "VideoFlowWaitTask",
+        "VideoFlowLoadResult",
+    }
+    assert len(workflow["links"]) == 6
+
+
 def test_one_click_product_video_runs_complete_delivery_chain(monkeypatch):
     calls = []
     config = VideoFlowConfig("https://ai.sweetyshell.com", "creative-token")
