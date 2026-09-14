@@ -68,7 +68,7 @@
 | "三条主链路互相不匹配，当前不可上线"（P0-1/2/4/6） | `2026-09-10/项目代码评审报告.md` | 该报告是修复前快照；P0-1/2/4/6 已修复，且 2026-09-10 已真实付费出片成功 |
 | "应停留在 Preview，不要直接做 Production" | `2026-09-09/下一步建议…md`、`2026-09-10/当前代码已经具备什么.md` | 已完成一次真实 Production 出片；现行策略是"白名单灰度 + 额度闸门"，见 ROADMAP |
 | "`mode: production` 目前被服务端禁止" | `2026-09-10/Seedance统一调用与创意交付总结.md` | 是白名单门控（`VIDEO_FLOW_PRODUCTION_ACTORS`），不是永久禁止；白名单为空时返回 403 |
-| "必须有 `params.image_url`" | `2026-09-10/Seedance统一调用与创意交付总结.md` | 现行链路是客户端上传素材拿 `asset_id`，服务端用 `params.image_asset_id`（`image_url` 仍兼容） |
+| "必须有 `params.image_url`" | `2026-09-10/Seedance统一调用与创意交付总结.md` | 任务入口现行使用 `workflowKey` 与 `media[].assetId`；旧 `capability/profile/params` 已不再接受 |
 | 测试口径 "Backend 40 / 客户端 8 / Worker 77+26skip"、"Jest 29 / pytest 30 failed" | 多份 09-09/09-10 文档 | 当前数字以 [PROJECT_STATUS](./PROJECT_STATUS.md) 的完整验证结果为准 |
 | "旧 `/api/tasks` 零鉴权" | 09-10 与早期 09-11 文档 | 2026-09-11 已按 Admin / Worker 用途加 Guard，并完成公网 401 验收 |
 

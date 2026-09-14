@@ -73,7 +73,7 @@ curl -sS -X POST 'https://ai.sweetyshell.com/api/v1/assets/upload-ticket' \
 
 | 字段 | 用途 |
 | --- | --- |
-| `assetId` | 后续创建任务时作为 `params.image_asset_id` |
+| `assetId` | 后续创建任务时作为 `media[].assetId` |
 | `objectKey` | 对象身份（数据库永久保存的就是它） |
 | `uploadUrl` | 直传地址，有效期 900 秒 |
 | `uploadHeaders` | PUT 时必须原样带上的请求头 |
@@ -149,7 +149,7 @@ Production 只接受本人已上传、完成校验的 `assetId`。`reference_vid
 | `generation` | 必须精确匹配该工作流已批准的规格 |
 | `media` | 数量、角色及 Asset 归属必须匹配工作流；参考图片工作流只接受一张 `reference_image` |
 | `mode` | 缺省 `preview`；`production` 还需白名单、额度与工作流状态为 `production_verified` |
-| 旧字段 | `capability/profile/params.image_asset_id` 仅为旧客户端兼容；新模板不要再使用 |
+| 旧字段 | `capability/profile/params` 已废弃；请求会返回 `WORKFLOW_KEY_REQUIRED` |
 
 ### 3.4 Preview 响应长这样
 
@@ -210,7 +210,7 @@ curl -sS 'https://ai.sweetyshell.com/api/v1/assets/tasks/<TASK_ID>/result' \
 
 | 返回码 | 含义 | 处理 |
 | --- | --- | --- |
-| 400 | 请求校验失败（capability / profile / params / 上传元数据不符） | 按报错文案修参数 |
+| 400 | 请求校验失败（workflowKey / generation / media / 上传元数据不符） | 按报错文案修参数 |
 | 401 | 没带 `Authorization` | 补 Bearer token |
 | 403 | 凭证无效或已撤销；或 Production 未授权 | 找管理员确认凭证状态 / 白名单 |
 | 404 | 任务或 Asset 不属于当前 actor，或不存在 | 检查 ID 与归属 |

@@ -91,37 +91,10 @@ function validateMedia(value: unknown, workflow: WorkflowDefinition): WorkflowMe
   return media;
 }
 
-function normalizeLegacy(body: Record<string, unknown>, spec: ProductionSpec): NormalizedWorkflowTaskRequest {
-  if (body.capability !== 'IMAGE_TO_VIDEO' || typeof body.profile !== 'string' || body.profile.split('-')[0] !== 'seedance') {
-    invalid('WORKFLOW_LEGACY_NOT_SUPPORTED');
-  }
-  const params = body.params;
-  if (!params || typeof params !== 'object' || Array.isArray(params)) invalid('WORKFLOW_LEGACY_PARAMS_REQUIRED');
-  const raw = params as Record<string, unknown>;
-  if (Object.keys(raw).some((key) => !["prompt", "image_asset_id", "duration", "ratio"].includes(key))) {
-    invalid('WORKFLOW_LEGACY_PARAM_NOT_ALLOWED');
-  }
-  const prompt = nonEmptyString(raw.prompt);
-  const imageAssetId = nonEmptyString(raw.image_asset_id);
-  if (!prompt || !imageAssetId) invalid('WORKFLOW_LEGACY_INPUT_REQUIRED');
-  if (raw.duration !== spec.duration || raw.ratio !== spec.ratio) invalid('WORKFLOW_GENERATION_MISMATCH');
-  return {
-    workflowKey: 'seedance.reference-image-to-video.v1',
-    workflowVersion: 'v1',
-    status: 'production_verified',
-    capability: 'IMAGE_TO_VIDEO',
-    profile: 'seedance',
-    prompt,
-    media: [{ assetId: imageAssetId, role: 'reference_image' }],
-    generation: { duration: spec.duration, ratio: spec.ratio, resolution: spec.resolution },
-    legacy: true,
-  };
-}
-
 export function normalizeWorkflowTaskRequest(body: unknown, spec: ProductionSpec): NormalizedWorkflowTaskRequest {
   if (!body || typeof body !== 'object' || Array.isArray(body)) invalid('WORKFLOW_REQUEST_INVALID');
   const raw = body as Record<string, unknown>;
-  if (!raw.workflowKey) return normalizeLegacy(raw, spec);
+  if (!raw.workflowKey) invalid('WORKFLOW_KEY_REQUIRED');
 
   const workflow = resolveWorkflow(raw.workflowKey);
   const promptData = raw.prompt;

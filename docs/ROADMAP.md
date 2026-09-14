@@ -669,7 +669,7 @@ remaining=尚未满足的验收项
 
 本批次将原有能力/profile 请求兼容迁移为“一个任务入口 + 服务端工作流注册表”。实现提交前不部署、不改生产白名单、不创建真实任务。当前模型与账号已真实验收的边界仍见 [PROJECT_STATUS.md](./PROJECT_STATUS.md)。
 
-- [x] Backend 新增代码注册表及 `workflowKey` 请求标准化；旧 `IMAGE_TO_VIDEO + seedance + image_asset_id` 映射到 `seedance.reference-image-to-video.v1`。
+- [x] Backend 新增代码注册表及 `workflowKey` 请求标准化；对外不再接受旧 `capability/profile/params` 合同。历史任务的执行快照仍可由 Worker 读取与恢复。
 - [x] Production 执行快照记录 workflow key/version/hash 与有角色的 `media[]`；Worker 逐项签发下载 URL，再编译成 Seedance 的统一 `content` 列表。
 - [x] ComfyUI 增加参考图片生视频完整模板，以及文本生视频 Preview 模板；原节点 ID 保留兼容，显示名更新。
 - [x] 将 `seedance.text-to-video.v1` 设为 `preview_only`，Production 返回 `WORKFLOW_NOT_PRODUCTION_VERIFIED`，不创建 pending 任务。

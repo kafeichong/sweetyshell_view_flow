@@ -23,7 +23,6 @@ import { TasksService } from '../../tasks/tasks.service';
 import { TaskBudgetService } from '../../tasks/task-budget.service';
 import { AssetsService } from '../../assets/assets.service';
 import { CreateTaskDto } from './dto/create-task.dto';
-import { buildPreviewPlan, validateTaskRequest } from './preview-plan';
 import { isProductionAllowed } from './production-policy';
 import { ProductionExecutionPlan, loadProductionSpec } from '../../tasks/production-spec';
 import { listWorkflows, normalizeWorkflowTaskRequest } from '../../tasks/workflow-registry';
@@ -74,9 +73,7 @@ export class V1TasksController {
     const existing = await this.tasks.findByActorRequest(actor.actorId, idempotencyKey);
     if (existing) {
       if (stableStringify(existing.requestSnapshot) !== requestSnapshot) throw new ConflictException('Idempotency-Key payload mismatch');
-      return mode === 'preview' && typeof (body as Record<string, unknown>)?.workflowKey !== 'string'
-        ? { ...existing, preview: buildPreviewPlan(body ?? {}) }
-        : existing;
+      return existing;
     }
     if (mode === 'production' && !isProductionAllowed(actor.actorId)) {
       throw new ForbiddenException('Production mode is not enabled for this actor');
@@ -143,13 +140,9 @@ export class V1TasksController {
         };
       }
     } else {
-      const validated = validateTaskRequest(body ?? {});
-      capability = validated.capability;
-      profile = validated.profile;
-      prompt = validated.prompt;
-      workflowName = profile;
-      preview = buildPreviewPlan(body ?? {});
+      throw new BadRequestException('WORKFLOW_KEY_REQUIRED');
     }
+
 
     try {
       if (mode === 'production') {

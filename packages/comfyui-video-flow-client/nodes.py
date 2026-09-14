@@ -57,10 +57,18 @@ class VideoFlowSeedancePreview:
         Image.fromarray(pixels).save(buffer, format="PNG")
         image_bytes = buffer.getvalue()
         uploaded = client.upload_media(image_bytes, filename="reference.png", mime_type="image/png")
-        summary = {"mode": "preview", "capability": "IMAGE_TO_VIDEO", "prompt": prompt, "input": "reference.png"}
+        summary = {"mode": "preview", "workflowKey": "seedance.reference-image-to-video.v1", "prompt": prompt, "input": "reference.png"}
         task = client.create_task(
-            idempotency_key=client.stable_idempotency_key(prompt, image_bytes),
-            payload={"capability": "IMAGE_TO_VIDEO", "profile": "seedance", "params": {"prompt": prompt, "image_asset_id": uploaded["assetId"]}},
+            idempotency_key=client.stable_idempotency_key(
+                prompt, image_bytes, workflow_key="seedance.reference-image-to-video.v1",
+                duration=5, ratio="16:9", resolution="720p",
+            ),
+            payload={
+                "workflowKey": "seedance.reference-image-to-video.v1",
+                "prompt": {"positive": prompt},
+                "generation": {"duration": 5, "ratio": "16:9", "resolution": "720p"},
+                "media": [{"assetId": uploaded["assetId"], "role": "reference_image"}],
+            },
         )
         return (str(task["id"]), str(summary))
 
