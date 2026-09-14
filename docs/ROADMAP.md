@@ -748,7 +748,7 @@ Backend 只接受用户意图，按 Registry 生成并冻结 `executionPlan`：w
 
 #### W4：Seedance Provider 编译与结果标准化
 
-- [~] 已新增纯 `seedance_execution_policy.py`：对受 Backend 冻结的 `workflowKey`、已解析媒体 URL、ratio/duration 和已取证的特殊字段进行复验，再生成 Ark payload；Worker 已在提交前调用它，并通过 `SeedanceAdapter.create_task_payload()` 原样发送。离线 pytest 覆盖参考图、首尾帧、视频编辑、冲突字段拒绝、编译失败不调用 Provider、已有 Provider ID 的恢复分支不重新提交。Fake Provider 跨包请求体比对仍待补齐。
+- [~] 已新增纯 `seedance_execution_policy.py`：对受 Backend 冻结的 `workflowKey`、已解析媒体 URL、ratio/duration 和已取证的特殊字段进行复验，再生成 Ark payload；Worker 已在提交前调用它，并通过 `SeedanceAdapter.create_task_payload()` 原样发送。离线 pytest 覆盖参考图、首尾帧、视频编辑、冲突字段拒绝、编译失败不调用 Provider、已有 Provider ID 的恢复分支不重新提交。Fake Provider 已保存最后一次 POST body，跨包合同已升级为当前 `workflowKey` 请求格式并加入最终 Ark payload 断言；整套 Docker 合同环境尚未在本轮重跑。
 
 - [ ] 把 Worker 中的 `media_urls` 临时映射改为按 Registry 冻结角色输出 Ark `content`，并只发送 W1 已证实的 Provider 字段。
 - [ ] 为每个已取证模式建立 payload fixture：文生、参考图、首帧、首尾帧、全模态参考、编辑、延长、参考音频。Fixture 只验证 JSON shape，不调用 Ark。

@@ -83,14 +83,10 @@ class LiveMVPContractTests(unittest.TestCase):
                 },
                 json={
                     "mode": "production",
-                    "capability": "IMAGE_TO_VIDEO",
-                    "profile": "seedance",
-                    "params": {
-                        "prompt": prompt,
-                        "image_asset_id": asset_id,
-                        "duration": 5,
-                        "ratio": "16:9",
-                    },
+                    "workflowKey": "seedance.reference-image-to-video.v1",
+                    "prompt": {"positive": prompt},
+                    "generation": {"duration": 5, "ratio": "16:9", "resolution": "720p"},
+                    "media": [{"assetId": asset_id, "role": "reference_image"}],
                 },
             )
             created.raise_for_status()
@@ -125,11 +121,11 @@ class LiveMVPContractTests(unittest.TestCase):
                     "Idempotency-Key": "live-preview-e01",
                 },
                 json={
-                    # 文本生成预览：不需要输入素材，正好隔离出"预览本身不花钱"这一点。
                     "mode": "preview",
-                    "capability": "TEXT_TO_VIDEO",
-                    "profile": "seedance",
-                    "params": {"prompt": "live preview e01"},
+                    "workflowKey": "seedance.text-to-video.v1",
+                    "prompt": {"positive": "live preview e01"},
+                    "generation": {"duration": 5, "ratio": "16:9", "resolution": "720p"},
+                    "media": [],
                 },
             )
         response.raise_for_status()
@@ -153,6 +149,20 @@ class LiveMVPContractTests(unittest.TestCase):
         self._run_one_cycle()
         after_first = provider_stats(self.provider_url)["createCountsByKey"].get(prompt, 0)
         self.assertEqual(after_first, before + 1, "provider was not created exactly once")
+        # 验证真实 Backend → Worker → Adapter 的最终 POST 仍是冻结的 Ark 结构，
+        # 而不是旧 params 或由 Fake Provider 反推的近似值。
+        submitted = provider_stats(self.provider_url)["lastCreatePayload"]
+        self.assertEqual(submitted["content"], [
+            {"type": "text", "text": prompt},
+            {
+                "type": "image_url",
+                "image_url": {"url": submitted["content"][1]["image_url"]["url"]},
+                "role": "reference_image",
+            },
+        ])
+        self.assertEqual(submitted["ratio"], "16:9")
+        self.assertEqual(submitted["duration"], 5)
+        self.assertEqual(submitted["resolution"], "720p")
 
         with self._api() as client:
             first_summary = client.get(

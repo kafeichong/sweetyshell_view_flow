@@ -2,6 +2,7 @@
 
 import os
 from dataclasses import dataclass, field
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -38,6 +39,7 @@ class FakeProviderState:
     task_status: str = "succeeded"
     create_count: int = 0
     create_counts_by_key: dict[str, int] = field(default_factory=dict)
+    last_create_payload: dict[str, Any] | None = None
     objects: dict[str, bytes] = field(default_factory=dict)
     tasks: dict[str, dict[str, Any]] = field(default_factory=dict)
 
@@ -61,6 +63,7 @@ class FakeProviderState:
 
         task_id = f"fake-{uuid4()}"
         self.create_count += 1
+        self.last_create_payload = deepcopy(payload)
         key = correlation_key(payload)
         self.create_counts_by_key[key] = self.create_counts_by_key.get(key, 0) + 1
 
@@ -94,6 +97,7 @@ class FakeProviderState:
     def reset(self) -> None:
         self.create_count = 0
         self.create_counts_by_key = {}
+        self.last_create_payload = None
         self.objects.clear()
         self.tasks.clear()
         self.create_status = 200
@@ -125,6 +129,7 @@ def create_app(state: FakeProviderState | None = None) -> FastAPI:
             "createCount": provider.create_count,
             "createCountsByKey": dict(provider.create_counts_by_key),
             "taskIds": list(provider.tasks),
+            "lastCreatePayload": provider.last_create_payload,
         }
 
     @app.get("/__test__/task-status")

@@ -36,6 +36,10 @@ async def test_fake_provider_counts_create_and_returns_same_task():
         "createCount": 1,
         "createCountsByKey": {"cross-package scenario": 1},
         "taskIds": [task_id],
+        "lastCreatePayload": {
+            "model": "test-model",
+            "content": [{"type": "text", "text": "cross-package scenario"}],
+        },
     }
 
 
@@ -92,6 +96,7 @@ async def test_fake_provider_counts_for_multiple_create_modes_and_usage_modes():
         stats_after_reset = await client.get("/__test__/stats")
     assert stats_after_reset.json()["createCount"] == 0
     assert stats_after_reset.json()["createCountsByKey"] == {}
+    assert stats_after_reset.json()["lastCreatePayload"] is None
 
 
 @pytest.mark.asyncio
