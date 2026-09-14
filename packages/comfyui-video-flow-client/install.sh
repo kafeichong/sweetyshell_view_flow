@@ -47,7 +47,14 @@ if test -n "$TOKEN_SOURCE"; then
   test -s "$TOKEN_SOURCE" || { echo "error: token 文件不存在或为空" >&2; exit 1; }
   mkdir -p "$HOME/.video-flow"
   chmod 700 "$HOME/.video-flow"
-  install -m 600 "$TOKEN_SOURCE" "$HOME/.video-flow/token"
+  TOKEN_DEST="$HOME/.video-flow/token"
+  # 安装器再次运行时，源凭证可能已经是目标文件本身。install 会把这种
+  # 自复制当成错误；保留原文件并重申权限即可。
+  if test -e "$TOKEN_DEST" && test "$TOKEN_SOURCE" -ef "$TOKEN_DEST"; then
+    chmod 600 "$TOKEN_DEST"
+  else
+    install -m 600 "$TOKEN_SOURCE" "$TOKEN_DEST"
+  fi
 fi
 
 echo "Video Flow 客户端已安装到: $TARGET_DIR"

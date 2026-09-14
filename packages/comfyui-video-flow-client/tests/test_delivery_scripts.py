@@ -139,6 +139,30 @@ def test_creative_installer_uses_supplied_comfyui_and_secure_token_file(tmp_path
     assert "vf_creative_token" not in result.stderr
 
 
+def test_installer_accepts_token_already_at_destination(tmp_path):
+    comfy_root = tmp_path / "ComfyUI"
+    python_path = comfy_root / ".venv/bin/python"
+    python_path.parent.mkdir(parents=True)
+    _write_executable(python_path, "#!/bin/sh\nexit 0\n")
+    (comfy_root / "custom_nodes").mkdir()
+    home = tmp_path / "home"
+    token_source = home / ".video-flow/token"
+    token_source.parent.mkdir(parents=True)
+    token_source.write_text("vf_existing_token\n", encoding="utf-8")
+    token_source.chmod(0o600)
+
+    subprocess.run(
+        [str(CLIENT_DIR / "install.sh"), str(comfy_root), str(token_source)],
+        check=True,
+        env={**os.environ, "HOME": str(home)},
+        text=True,
+        capture_output=True,
+    )
+
+    assert token_source.read_text(encoding="utf-8").strip() == "vf_existing_token"
+    assert stat.S_IMODE(token_source.stat().st_mode) == 0o600
+
+
 def test_admin_credential_script_never_prints_issued_token(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
