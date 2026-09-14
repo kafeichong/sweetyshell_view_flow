@@ -1,4 +1,4 @@
-import { normalizeWorkflowTaskRequest } from './workflow-registry';
+import { normalizeWorkflowTaskRequest, validateWorkflowInputAssets } from './workflow-registry';
 
 const spec = {
   version: 'seedance-approved-v1', model: 'test-model', duration: 5,
@@ -37,6 +37,58 @@ describe('workflow registry request normalization', () => {
       generation: { duration: 5, ratio: '16:9', resolution: '720p' },
       media: [{ assetId: 'asset-1', role: 'reference_image' }],
     }, spec)).toThrow('WORKFLOW_MEDIA_NOT_ALLOWED');
+  });
+
+  it('requires both frames in first-to-last order for the first-and-last-frame workflow', () => {
+    const body = {
+      workflowKey: 'seedance.first-last-frame-to-video.v1', prompt: { positive: 'a flower blooms' },
+      generation: { duration: 5, ratio: 'adaptive', resolution: '720p' },
+      media: [
+        { assetId: 'asset-first', role: 'first_frame' },
+        { assetId: 'asset-last', role: 'last_frame' },
+      ],
+    };
+    expect(normalizeWorkflowTaskRequest(body, spec)).toMatchObject({
+      media: body.media, generation: { duration: 5, ratio: 'adaptive', resolution: '720p' },
+    });
+    expect(() => normalizeWorkflowTaskRequest({ ...body, media: [body.media[1], body.media[0]] }, spec)).toThrow('WORKFLOW_MEDIA_ORDER_INVALID');
+    expect(() => normalizeWorkflowTaskRequest({ ...body, media: [body.media[0]] }, spec)).toThrow('WORKFLOW_MEDIA_COUNT_INVALID');
+  });
+
+  it('requires at least one referenced asset for omni reference and preserves the declared media order', () => {
+    const body = {
+      workflowKey: 'seedance.omni-reference.v1', prompt: { positive: 'bright biscuit commercial' },
+      generation: { duration: 15, ratio: '16:9', resolution: '720p' },
+      media: [
+        { assetId: 'image-1', role: 'reference_image' },
+        { assetId: 'video-1', role: 'reference_video' },
+        { assetId: 'audio-1', role: 'reference_audio' },
+      ],
+    };
+    expect(normalizeWorkflowTaskRequest(body, spec)).toMatchObject({ media: body.media });
+    expect(() => normalizeWorkflowTaskRequest({ ...body, media: [] }, spec)).toThrow('WORKFLOW_MEDIA_REQUIRED');
+    expect(() => normalizeWorkflowTaskRequest({ ...body, media: [body.media[1], body.media[0]] }, spec)).toThrow('WORKFLOW_MEDIA_ORDER_INVALID');
+  });
+
+  it('keeps adaptive-only generation constraints explicit for video editing', () => {
+    const body = {
+      workflowKey: 'seedance.video-edit.v1', prompt: { positive: 'remove all people except the hero from @video1' },
+      generation: { duration: -1, ratio: 'adaptive', resolution: '720p' },
+      media: [{ assetId: 'video-1', role: 'reference_video' }],
+    };
+    expect(normalizeWorkflowTaskRequest(body, spec)).toMatchObject({ generation: body.generation });
+    expect(() => normalizeWorkflowTaskRequest({ ...body, generation: { ...body.generation, ratio: '16:9' } }, spec)).toThrow('WORKFLOW_GENERATION_MISMATCH');
+  });
+
+  it('binds every role in a production plan to inspected asset metadata', () => {
+    expect(() => validateWorkflowInputAssets(
+      [{ assetId: 'video-1', role: 'reference_video' }],
+      [{ id: 'video-1', mimeType: 'video/mp4', mediaMetadata: { kind: 'video' } }],
+    )).not.toThrow();
+    expect(() => validateWorkflowInputAssets(
+      [{ assetId: 'image-1', role: 'reference_video' }],
+      [{ id: 'image-1', mimeType: 'image/png', mediaMetadata: { kind: 'image' } }],
+    )).toThrow('WORKFLOW_ASSET_KIND_MISMATCH');
   });
 });
 

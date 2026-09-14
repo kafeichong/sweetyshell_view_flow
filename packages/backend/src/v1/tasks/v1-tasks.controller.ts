@@ -25,7 +25,7 @@ import { AssetsService } from '../../assets/assets.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { isProductionAllowed } from './production-policy';
 import { ProductionExecutionPlan, loadProductionSpec } from '../../tasks/production-spec';
-import { listWorkflows, normalizeWorkflowTaskRequest } from '../../tasks/workflow-registry';
+import { listWorkflows, normalizeWorkflowTaskRequest, validateWorkflowInputAssets } from '../../tasks/workflow-registry';
 
 export function stableStringify(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
@@ -104,6 +104,9 @@ export class V1TasksController {
       workflowName = normalized.workflowKey;
       workflowVersion = normalized.workflowVersion;
       workflowDigest = workflowHash(workflowName, workflowVersion);
+      if (normalized.status === 'disabled') {
+        throw new BadRequestException('WORKFLOW_DISABLED');
+      }
       if (mode === 'production' && normalized.status !== 'production_verified') {
         throw new BadRequestException('WORKFLOW_NOT_PRODUCTION_VERIFIED');
       }
@@ -115,10 +118,17 @@ export class V1TasksController {
         };
       } else {
         const media = [] as { assetId: string; role: string; fileHash?: string | null }[];
+        const inputAssets = [] as { id: string; mimeType: string | null; mediaMetadata: unknown }[];
         for (const item of normalized.media) {
           const inputAsset = await this.assets.findOwnedUploadedInput(item.assetId, actor.actorId);
           if (!inputAsset) throw new ForbiddenException('PRODUCTION_INPUT_NOT_OWNED');
           media.push({ ...item, fileHash: inputAsset.fileHash ?? null });
+          inputAssets.push({ id: inputAsset.id, mimeType: inputAsset.mimeType ?? null, mediaMetadata: inputAsset.mediaMetadata });
+        }
+        try {
+          validateWorkflowInputAssets(normalized.media, inputAssets);
+        } catch (error) {
+          throw new BadRequestException(error instanceof Error ? error.message : 'WORKFLOW_ASSET_INVALID');
         }
         executionPlan = {
           specVersion: spec.version,

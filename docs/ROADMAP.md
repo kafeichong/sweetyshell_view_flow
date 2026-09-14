@@ -1,6 +1,6 @@
 # Video Flow 快速 MVP 路线图（权威）
 
-> 最后更新：2026-09-11。本轮为分析后的建议规划，不授权部署、开放白名单或付费生成。
+> 最后更新：2026-09-14。本轮为分析后的建议规划，不授权部署、开放白名单或付费生成。
 > 实施时必须使用 superpowers:executing-plans 分批执行与复核；本文件按项目规则替代技能默认计划目录。所有复选框初始为未完成，不授权自动部署或付费。
 > 现状与证据只见 [PROJECT_STATUS.md](./PROJECT_STATUS.md)，尤其第 0 节与风险登记册。
 
@@ -733,17 +733,17 @@ Backend 只接受用户意图，按 Registry 生成并冻结 `executionPlan`：w
 
 #### W2：媒体资产能力与上传票据策略
 
-- [~] Backend upload ticket 已支持官网列示的图片/MP4/MOV/WAV/MP3 MIME 与单文件上限，并写入 `mediaType`；尚未完成像素、时长、帧率、数量、总大小/总时长和按 workflow role 的预检。证据：`packages/backend/src/v1/assets/v1-assets.controller.ts`、`v1-assets.controller.spec.ts`。
-- [ ] 在 `/complete` 后提取并保存可信媒体元数据；视频编辑/延长在 Provider 调用前验证源视频时长和编码，音频工作流验证格式和时长。无法解析或不符合策略的 Asset 不得进入 Production。
+- [x] Backend upload ticket 已支持官网列示的图片/MP4/MOV/WAV/MP3 MIME 与单文件上限，并写入 `mediaType`；`/complete` 已提取并保存图片像素、视频时长/帧率/编码、音频时长，并拒绝无法解析或越界的单文件。证据：`packages/backend/src/v1/assets/v1-assets.controller.ts`、`packages/backend/src/assets/media-policy.ts` 及对应 spec。
+- [~] Production 创建前已按 workflow role 复验 Asset 的归属、上传状态、MIME 与已检查媒体类型；视频编辑/延长的单视频特殊时长、全模态的总数量/总时长仍需随每个已取证 workflow policy 补齐。
 - [ ] 保持 actor 所有权、内容 hash、上传完成校验和 Worker 临时下载 URL；媒体临时 URL 绝不进入 requestSnapshot、回执或日志。
 - [ ] 验收：图片、视频、音频的边界值、跨 actor Asset、未完成上传、超数量/超总时长、错误 MIME 均有 Backend 单测与 Worker 契约测试。
 
 #### W3：Registry 与 generation policy
 
 - [x] 已完成基础 Registry：对外创建任务必须提交 `workflowKey`，现有 `seedance.reference-image-to-video.v1` 与 `seedance.text-to-video.v1` 均由服务端注册；旧 `capability/profile/params` 合同已拒绝。当前代码状态见 [PROJECT_STATUS.md](PROJECT_STATUS.md)，该基础不代表新增模式已开放。
-- [ ] 将现有 Registry 拆为 `WorkflowDefinition`、`MediaPolicy`、`GenerationPolicy` 和 `ProviderFieldPolicy`；支持固定值、枚举范围、`adaptive`、按模式必填/禁止字段以及 `preview_only` / `disabled` / `production_verified` 生命周期。
-- [ ] 先注册第 10.2 节八个键。`disabled` 只可被目录读取，不允许创建 Preview 或 Production Task；`preview_only` 可创建不可执行 Preview；`production_verified` 才可经白名单和额度创建 pending Task。
-- [ ] 禁止框架外的 role 组合：首帧/尾帧工作流不能混用 `reference_*`；视频编辑必须有 `reference_video`；音频参考工作流按证据规则限制是否允许纯音频。
+- [~] `WorkflowDefinition` 已含声明式 `MediaPolicy` 与 `GenerationPolicy`：支持固定 Production spec、枚举范围、`adaptive`、`duration=-1` 和 `preview_only` / `disabled` / `production_verified` 生命周期；`ProviderFieldPolicy`（如 `omni_reference_task_type`、`output_format`）尚未进入冻结 `executionPlan`。
+- [x] 已注册第 10.2 节八个键。`disabled` 只可被目录读取，不允许创建 Preview 或 Production Task；`preview_only` 可创建不可执行 Preview；`production_verified` 才可经白名单和额度创建 pending Task。
+- [x] 已拒绝框架外 role 组合，并校验首尾帧顺序、必填数量与全模态至少一份素材；视频编辑必须有 `reference_video`。音频参考的可选图/视频组合仍按后续原始官方 fixture 决定。
 - [ ] 验收：每个 workflow 的合法/非法媒体组合、`adaptive` 约束、时长边界、状态转换、旧 task 快照恢复全部由纯函数单测覆盖。
 
 #### W4：Seedance Provider 编译与结果标准化

@@ -21,7 +21,7 @@ describe('V1TasksController workflow-only task API', () => {
   beforeEach(() => {
     process.env.VIDEO_FLOW_PRODUCTION_ACTORS = 'creative-pilot'; process.env.VIDEO_FLOW_PRODUCTION_SPEC_JSON = spec;
     tasks.findByActorRequest.mockResolvedValue(null); tasks.createPreview.mockReset(); budget.createTaskWithReservation.mockReset();
-    budget.createTaskWithReservation.mockResolvedValue({ id: 'task-1', status: 'pending' }); assets.findOwnedUploadedInput.mockResolvedValue({ id: 'asset-1', fileHash: 'a'.repeat(64) });
+    budget.createTaskWithReservation.mockResolvedValue({ id: 'task-1', status: 'pending' }); assets.findOwnedUploadedInput.mockResolvedValue({ id: 'asset-1', fileHash: 'a'.repeat(64), mimeType: 'image/png', mediaMetadata: { kind: 'image' } });
   });
   it('rejects the retired capability/profile request shape before it can create a task', async () => {
     await expect(new V1TasksController(tasks as never, budget as never, assets as never).create({ actorId: 'creative-pilot' }, 'old-1', { capability: 'IMAGE_TO_VIDEO', profile: 'seedance', params: { prompt: 'x' } } as never)).rejects.toMatchObject({ status: 400, message: 'WORKFLOW_KEY_REQUIRED' });
@@ -50,7 +50,7 @@ describe('V1TasksController workflow-only safety regressions', () => {
   const budget = { createTaskWithReservation: jest.fn() };
   const assets = { findOwnedUploadedInput: jest.fn() };
   const body = { workflowKey: 'seedance.reference-image-to-video.v1', prompt: { positive: 'product orbit' }, generation: { duration: 5, ratio: '16:9', resolution: '720p' }, media: [{ assetId: 'asset-1', role: 'reference_image' }] };
-  beforeEach(() => { process.env.VIDEO_FLOW_PRODUCTION_ACTORS = 'creative-pilot'; process.env.VIDEO_FLOW_PRODUCTION_SPEC_JSON = spec; tasks.findByActorRequest.mockResolvedValue(null); assets.findOwnedUploadedInput.mockResolvedValue({ id: 'asset-1', fileHash: null }); budget.createTaskWithReservation.mockResolvedValue({ id: 'task-1' }); });
+  beforeEach(() => { process.env.VIDEO_FLOW_PRODUCTION_ACTORS = 'creative-pilot'; process.env.VIDEO_FLOW_PRODUCTION_SPEC_JSON = spec; tasks.findByActorRequest.mockResolvedValue(null); assets.findOwnedUploadedInput.mockResolvedValue({ id: 'asset-1', fileHash: null, mimeType: 'image/png', mediaMetadata: { kind: 'image' } }); budget.createTaskWithReservation.mockResolvedValue({ id: 'task-1' }); });
   it('requires an idempotency key', async () => {
     await expect(new V1TasksController(tasks as never, budget as never, assets as never).create({ actorId: 'creative-pilot' }, '', body)).rejects.toMatchObject({ status: 409 });
   });
@@ -70,4 +70,23 @@ describe('V1TasksController workflow-only safety regressions', () => {
     delete process.env.VIDEO_FLOW_PRODUCTION_SPEC_JSON;
     await expect(new V1TasksController(tasks as never, budget as never, assets as never).create({ actorId: 'creative-pilot' }, 'no-spec', body)).rejects.toMatchObject({ status: 503 });
   });
+  it('does not reserve a paid task when an inspected asset does not match its workflow role', async () => {
+    assets.findOwnedUploadedInput.mockResolvedValue({ id: 'asset-1', fileHash: null, mimeType: 'video/mp4', mediaMetadata: { kind: 'video' } });
+    await expect(new V1TasksController(tasks as never, budget as never, assets as never).create({ actorId: 'creative-pilot' }, 'wrong-kind', { ...body, mode: 'production' })).rejects.toMatchObject({ status: 400, message: 'WORKFLOW_ASSET_KIND_MISMATCH' });
+    expect(budget.createTaskWithReservation).not.toHaveBeenCalled();
+  });
+});
+
+it('does not create a preview task for a disabled workflow', async () => {
+  process.env.VIDEO_FLOW_PRODUCTION_SPEC_JSON = spec;
+  const tasks = { findByActorRequest: jest.fn().mockResolvedValue(null), createPreview: jest.fn() };
+  const assets = {};
+  await expect(new V1TasksController(tasks as never, undefined, assets as never).create(
+    { actorId: 'creative-pilot' }, 'disabled-1', {
+      workflowKey: 'seedance.first-frame-to-video.v1', mode: 'preview',
+      prompt: { positive: 'product orbit' }, generation: { duration: 5, ratio: 'adaptive', resolution: '720p' },
+      media: [{ assetId: 'asset-1', role: 'first_frame' }],
+    },
+  )).rejects.toMatchObject({ status: 400, message: 'WORKFLOW_DISABLED' });
+  expect(tasks.createPreview).not.toHaveBeenCalled();
 });
