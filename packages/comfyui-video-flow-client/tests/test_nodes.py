@@ -113,6 +113,16 @@ def test_image_to_video_workflow_is_a_visual_comfyui_graph():
     assert len(workflow["links"]) == 6
 
 
+def test_image_to_video_preview_workflow_is_a_visual_comfyui_graph():
+    workflow_path = Path(__file__).resolve().parents[1] / "workflows/seedance-image-to-video-preview-v1.comfy.json"
+    workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+
+    assert {node["type"] for node in workflow["nodes"]} == {
+        "VideoFlowConfig", "LoadImage", "VideoFlowSeedancePreview"
+    }
+    assert len(workflow["links"]) == 2
+
+
 def test_one_click_product_video_runs_complete_delivery_chain(monkeypatch):
     calls = []
     config = VideoFlowConfig("https://ai.sweetyshell.com", "creative-token")
