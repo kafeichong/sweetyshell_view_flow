@@ -26,3 +26,28 @@ def test_official_reference_edit_fixture_is_redacted_and_has_the_documented_shap
     assert fixture["terminalResponseShape"]["content"] == {
         "video_url": "https://example.invalid/result.mp4"
     }
+
+
+OFFICIAL_MODES_FIXTURE = Path(__file__).parent / "fixtures" / "seedance_2_5_official_modes.json"
+
+
+def test_steven_provided_official_modes_have_only_documented_contract_fields():
+    fixture = json.loads(OFFICIAL_MODES_FIXTURE.read_text(encoding="utf-8"))
+    modes = fixture["modes"]
+
+    assert fixture["source"] == "steven-provided-official-ark-examples"
+    assert fixture["model"] == "doubao-seedance-2-5-260628"
+    assert modes["referenceImage"]["content"][1]["role"] == "reference_image"
+    assert modes["referenceImage"]["ratio"] == "16:9"
+    assert modes["referenceImage"]["duration"] == 30
+    assert modes["omniReference"]["omni_reference_task_type"] == "reference"
+    assert modes["omniReference"]["output_format"] == "mov"
+    assert modes["videoEdit"]["ratio"] == "adaptive"
+    assert modes["videoEdit"]["duration"] == -1
+    assert modes["videoEdit"]["omni_reference_task_type"] == "edit"
+    assert modes["videoExtend"]["duration"] == 11
+    assert modes["videoExtend"]["omni_reference_task_type"] == "extend"
+    assert modes["firstLastFrame"]["contentRoles"] == [
+        ["image_url", "first_frame"],
+        ["image_url", "last_frame"],
+    ]

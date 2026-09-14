@@ -674,7 +674,7 @@ remaining=尚未满足的验收项
 
 | 来源 | 可作为依据的内容 | 不能据此推断的内容 |
 | --- | --- | --- |
-| 火山方舟官方 quickstart：`/Users/steven/Downloads/ark_seedance2.5_quickstart_package/python/demo_standard.py` | Ark SDK 客户端、`content_generation.tasks.create`、`text` / `image_url` / `video_url` / `audio_url` 内容项、`reference_image` / `reference_video` / `reference_audio`、异步 `id` 与 `get(task_id)` 轮询 | 首尾帧、延长、`omni_reference_task_type`、`output_format` 等未在该示例出现的字段名和约束 |
+| 火山方舟官方 quickstart 与 Steven 提供的官方原始 SDK/HTTP 示例；索引见 [契约证据](architecture/seedance-2-5-contract-evidence.md#8-steven-提供的火山方舟官方原始示例2026-09-14) | Ark SDK、异步 `id` / `get(task_id)`；`reference_image`、`first_frame`、`last_frame`、`reference_video`；`reference` / `edit` / `extend`、`adaptive`、`duration=-1`、`output_format="mov"` 的已列示组合 | 无媒体纯文生、纯音频参考、未列示的素材数量限制、错误码和默认值 |
 | Steven 提供的 Seedance 2.5 能力表 | 产品目录、素材/时长/ratio 的待核对范围、当前业务优先级 | 可直接复制到本账号请求体的 JSON 字段、错误码或默认值 |
 | 当前官方 BytePlus ModelArk 文档（仅作同系列交叉参考） | 统一 `content` 输入、异步 `id`、素材类型与上限、`adaptive` 行为、返回末帧概念 | 火山方舟账户必然支持同名字段或相同地区/计费规则 |
 | 本项目真实 Production 记录与测试 | 本账号、当前模型和当前部署实际已验证的调用路径 | 未执行模式的生产可用性或最终计费 |
@@ -687,11 +687,11 @@ remaining=尚未满足的验收项
 | --- | --- | --- | --- | --- | --- |
 | `seedance.text-to-video.v1` | 纯文本生成 | 无 | 明确 ratio；时长仅允许当前批准值 | `preview_only` | 当前账号一次成功任务、结果归档、usage/费用记录 |
 | `seedance.reference-image-to-video.v1` | 将图片作为创作参考 | `reference_image` ×1 | 当前固定 `5s/720p/16:9` | `production_verified` | 已有真实任务证据；规格变更须重新验收 |
-| `seedance.first-frame-to-video.v1` | 指定输出起始画面 | `first_frame` ×1 | `ratio=adaptive`；时长按官方当前范围 | `disabled` | 火山方舟首帧原始请求示例、素材上传验证、一次真实验收 |
-| `seedance.first-last-frame-to-video.v1` | 指定起止画面 | `first_frame` ×1、`last_frame` ×1 | `ratio=adaptive`；两图角色不可互换 | `disabled` | 原始字段/约束证据、两图尺寸验证、一次真实验收 |
+| `seedance.first-frame-to-video.v1` | 指定输出起始画面 | `first_frame` ×1 | `ratio=adaptive`；时长须由 Registry 固定为已取证值 | `disabled` | 素材上传验证、一次真实验收 |
+| `seedance.first-last-frame-to-video.v1` | 指定起止画面 | `first_frame` ×1、`last_frame` ×1 | `ratio=adaptive`；两图角色不可互换 | `disabled` | 两图尺寸验证、一次真实验收 |
 | `seedance.omni-reference.v1` | 图片/视频/音频作为新片的多模态参考 | `reference_image` 0–30、`reference_video` 0–10、`reference_audio` 0–10；至少一项 | `ratio` 与 `duration` 由已取证的模式策略决定 | `disabled` | 当前账号多素材组合成功、总时长/数量限制测试、成本预占规则 |
-| `seedance.video-edit.v1` | 以原视频为基础修改内容 | `reference_video` 至少 1；可附参考图/音频 | `ratio=adaptive`、时长随源视频/官方策略；意图必须为 edit | `disabled` | `omni_reference_task_type=edit` 的原始官方示例、视频元信息校验、一次真实验收 |
-| `seedance.video-extend.v1` | 向前或向后续写视频 | `reference_video` ×1 | `ratio=adaptive`；时长由已取证范围决定；意图必须为 extend | `disabled` | extend 原始示例、方向参数/提示词规则、一次真实验收 |
+| `seedance.video-edit.v1` | 以原视频为基础修改内容 | `reference_video` 至少 1；可附参考图/音频 | `ratio=adaptive`、`duration=-1`；意图必须为 edit | `disabled` | 视频元信息校验、一次真实验收 |
+| `seedance.video-extend.v1` | 向前或向后续写视频 | `reference_video` 至少 1 | `ratio=adaptive`；时长由 Registry 固定为已取证值；意图必须为 extend | `disabled` | 方向提示词规则、一次真实验收 |
 | `seedance.audio-reference-to-video.v1` | 用音频驱动/参考新视频 | `reference_audio` 1–10；可选图片/视频 | 音频时长、总时长、ratio 均按已取证策略 | `disabled` | 纯音频与图/音组合的原始示例、音频上传验证、一次真实验收 |
 
 “参考图片”与“首帧”是两个不同工作流：前者的角色是 `reference_image`，用于创作参考；后者必须显式是 `first_frame`，用于约束输出开头。不得根据图片数量或节点名称猜测其语义。
@@ -726,7 +726,8 @@ Backend 只接受用户意图，按 Registry 生成并冻结 `executionPlan`：w
 
 - [x] 建立 `docs/architecture/seedance-2-5-contract-evidence.md`，每个模式记录官方 URL、SDK/HTTP 请求、创建响应、终态响应、错误示例和取证日期；以“火山方舟当前模型证据 / 同系列交叉参考 / 本项目实测”标记来源等级。首份矩阵已明确未取证字段。
 - [x] 将官方 quickstart 的编辑请求脱敏后保存为测试 fixture；不得保存 API Key、真实临时 URL、真实人物素材或可重放的生产 taskId。
-- [ ] 对 `first_frame`、`last_frame`、`omni_reference_task_type`、`return_last_frame`、`output_format`、延长方向等字段取得火山方舟原始证据；缺任一字段时对应 workflow 保持 `disabled`。
+- [x] 已将 Steven 提供的官方示例固化为脱敏 fixture：`first_frame` / `last_frame`、`omni_reference_task_type=reference|edit|extend`、`output_format="mov"`、编辑 `duration=-1` 和延长数值时长。
+- [ ] 对无媒体纯文生、纯音频参考、`return_last_frame`、素材数量/时长限制、延长方向提示词与错误响应补齐火山方舟原始证据；缺任一项时对应 workflow 保持 `preview_only` 或 `disabled`。
 - [ ] 验收：每个目录项在 Evidence 文档中都有明确“已取证 / 未取证 / 不适用”；任何未取证字段在 Registry/编译器测试中都不可进入 Provider payload。
 
 #### W2：媒体资产能力与上传票据策略

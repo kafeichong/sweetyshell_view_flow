@@ -91,3 +91,91 @@ client.content_generation.tasks.create(
 ## 7. 下一份所需官方材料
 
 优先顺序：首帧/首尾帧 → 文生 → 视频编辑/延长 → 纯音频/全模态参考。每份材料至少应包含 SDK 或 HTTP 创建请求、创建响应、轮询成功响应和一个错误示例；页面若动态加载或需登录，可由 Steven 提供原始导出、复制文本或截图。
+
+## 8. Steven 提供的火山方舟官方原始示例（2026-09-14）
+
+以下代码由 Steven 从火山方舟 Seedance 2.5 教程原样提供，按本文件规则列为 A 级请求字段证据。示例中的官方素材 URL 已在本仓库 fixture 中替换为 `example.invalid`，避免测试触发外部下载或生成。
+
+### 8.1 文本 + 参考图片
+
+Python SDK 示例使用 `content_generation.tasks.create`、模型 `doubao-seedance-2-5-260628`、一条 `text` 和一张 `image_url`，图片 role 为 `reference_image`；示例使用 `generate_audio=True`、`ratio="16:9"`、`duration=30`。提示词以 `@图像1` 引用素材。它证明的是**文本 + 参考图片生视频**，不证明无素材的纯文生视频。
+
+轮询合同与第 2 节一致：创建结果读取 `id`，查询读取 `status`，成功读取结果对象，失败读取 `error`。
+
+### 8.2 全模态参考
+
+HTTP 示例证明：
+
+- `content` 可同时包含 `text`、`image_url` role=`reference_image` 和多个 `video_url` role=`reference_video`；
+- `omni_reference_task_type` 可取 `"reference"`；
+- 请求可明确 `generate_audio=true`、`ratio="16:9"`、`duration=15`、`output_format="mov"`；
+- 提示词以内联编号 `@图像1`、`@视频1` 等关联参考素材。
+
+该示例展示了 1 张图片和 6 段视频。它证明“多参考可组合”，不把示例数量误写为产品允许的最小/最大值。
+
+### 8.3 视频编辑
+
+HTTP 示例为一条编辑意图 text 加一段 `video_url` role=`reference_video`，并明确：
+
+```json
+{
+  "generate_audio": true,
+  "ratio": "adaptive",
+  "duration": -1,
+  "omni_reference_task_type": "edit",
+  "output_format": "mov"
+}
+```
+
+因此编辑工作流的 `adaptive` 与 `duration=-1` 已有当前火山方舟直接示例。实际素材限制、错误响应和当前账号真实验收仍需在 W2/W6 取得证据。
+
+### 8.4 视频延长
+
+HTTP 示例为 text 加 3 段 `reference_video`，并明确：
+
+```json
+{
+  "generate_audio": true,
+  "ratio": "adaptive",
+  "duration": 11,
+  "omni_reference_task_type": "extend",
+  "output_format": "mov"
+}
+```
+
+它证明延长允许多个视频参考以及数值时长；不把该示例推导为“必须三段视频”或任何未提供的延长方向字段。
+
+### 8.5 首帧与首尾帧
+
+HTTP 示例明确图片角色 `first_frame` 和 `last_frame`，并使用：
+
+```json
+{
+  "generate_audio": true,
+  "ratio": "adaptive",
+  "duration": 5
+}
+```
+
+同一请求同时带两种 role 时即为首尾帧；只带 `first_frame` 的单首帧变体还需在实现时通过 Registry 的素材数量规则表达，不从该示例臆造额外 Provider 参数。
+
+### 8.6 本次更新后的边界
+
+已有 A 级请求字段证据的工作流：参考图片、首帧/首尾帧、全模态参考、视频编辑、视频延长。`output_format="mov"` 也已得到 A 级证据。
+
+仍没有 Steven 提供的当前火山方舟原始示例：无媒体的纯文生视频、仅音频参考的生成。它们继续分别保留为 `preview_only` 和 `disabled`，不得借用“文本 + 图片”或 quickstart 的注释音频项推断真实请求合同。
+
+## 9. 取代第 5、6 节的工作流证据矩阵（2026-09-14）
+
+| workflowKey | 当前请求字段证据 | 允许状态 | 进入 Production 前仍缺少 |
+| --- | --- | --- | --- |
+| `seedance.reference-image-to-video.v1` | A：文本+`reference_image`；B：本项目真实验收 | `production_verified`（仅已验收固定规格） | 变更规格、多图、音频时重新验收 |
+| `seedance.text-to-video.v1` | 无媒体的 A 级示例尚缺 | `preview_only` | 纯文本创建/终态原始示例及真实验收 |
+| `seedance.first-frame-to-video.v1` | A：`first_frame`、`adaptive`、数值 duration | `disabled` | 当前账号真实验收、素材校验和错误合同 |
+| `seedance.first-last-frame-to-video.v1` | A：`first_frame` + `last_frame`、`adaptive` | `disabled` | 当前账号真实验收、素材校验和错误合同 |
+| `seedance.omni-reference.v1` | A：图 + 多视频、`omni_reference_task_type="reference"`、`mov` | `disabled` | 当前账号真实验收、素材数量/限制合同 |
+| `seedance.video-edit.v1` | A：`reference_video`、`edit`、`adaptive`、`duration=-1`、`mov` | `disabled` | 当前账号真实验收、素材限制和错误合同 |
+| `seedance.video-extend.v1` | A：多 `reference_video`、`extend`、`adaptive`、数值 duration、`mov` | `disabled` | 当前账号真实验收、素材限制和错误合同 |
+| `seedance.audio-reference-to-video.v1` | 无纯音频 A 级示例 | `disabled` | 纯音频创建/终态原始示例及真实验收 |
+
+第 6 节列出的 `omni_reference_task_type` 和 `output_format` 已不再属于待核对字段；其余未在本节证实的字段仍不得进入 Provider 编译器。

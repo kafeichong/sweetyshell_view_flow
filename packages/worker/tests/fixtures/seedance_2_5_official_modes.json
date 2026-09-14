@@ -1,0 +1,45 @@
+{
+  "source": "steven-provided-official-ark-examples",
+  "model": "doubao-seedance-2-5-260628",
+  "modes": {
+    "referenceImage": {
+      "content": [
+        {"type": "text", "text": "参考@图像1生成视频"},
+        {"type": "image_url", "image_url": {"url": "https://example.invalid/input.png"}, "role": "reference_image"}
+      ],
+      "generate_audio": true,
+      "ratio": "16:9",
+      "duration": 30
+    },
+    "omniReference": {
+      "contentRoles": [["image_url", "reference_image"], ["video_url", "reference_video"], ["video_url", "reference_video"]],
+      "generate_audio": true,
+      "ratio": "16:9",
+      "duration": 15,
+      "omni_reference_task_type": "reference",
+      "output_format": "mov"
+    },
+    "videoEdit": {
+      "contentRoles": [["video_url", "reference_video"]],
+      "generate_audio": true,
+      "ratio": "adaptive",
+      "duration": -1,
+      "omni_reference_task_type": "edit",
+      "output_format": "mov"
+    },
+    "videoExtend": {
+      "contentRoles": [["video_url", "reference_video"], ["video_url", "reference_video"], ["video_url", "reference_video"]],
+      "generate_audio": true,
+      "ratio": "adaptive",
+      "duration": 11,
+      "omni_reference_task_type": "extend",
+      "output_format": "mov"
+    },
+    "firstLastFrame": {
+      "contentRoles": [["image_url", "first_frame"], ["image_url", "last_frame"]],
+      "generate_audio": true,
+      "ratio": "adaptive",
+      "duration": 5
+    }
+  }
+}
