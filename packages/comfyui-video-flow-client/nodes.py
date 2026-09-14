@@ -27,6 +27,34 @@ def requery_nonce() -> str:
     return f"{time.time_ns()}-{next(_requery_counter)}"
 
 
+def _available_product_images() -> list[str]:
+    """读取 ComfyUI input 目录，供单节点的上传控件使用。"""
+    try:
+        import folder_paths
+        input_dir = folder_paths.get_input_directory()
+        files = [
+            path.name for path in Path(input_dir).iterdir()
+            if path.is_file() and path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}
+        ]
+        return sorted(files) or ["上传产品图"]
+    except (ImportError, OSError):
+        return ["上传产品图"]
+
+
+def _load_product_image(filename: str):
+    """从 ComfyUI input 目录加载一张静态产品图，转换为 IMAGE 张量。"""
+    try:
+        import folder_paths
+        import torch
+    except ImportError as error:
+        raise RuntimeError("Video Flow 产品图上传仅能在 ComfyUI 中运行") from error
+
+    path = folder_paths.get_annotated_filepath(filename)
+    with Image.open(path) as source:
+        pixels = np.asarray(source.convert("RGB"), dtype=np.float32) / 255.0
+    return torch.from_numpy(pixels)[None,]
+
+
 class VideoFlowConfigNode:
     @classmethod
     def INPUT_TYPES(cls):
@@ -132,7 +160,7 @@ class VideoFlowSeedanceOneClickProductVideo:
         return {
             "required": {
                 "prompt": ("STRING", {"multiline": True, "default": "产品置于干净的高级摄影棚背景中，镜头缓慢推进，柔和侧光突出产品材质与轮廓，画面稳定、真实、无文字、无人物。"}),
-                "image": ("IMAGE",),
+                "product_image": (_available_product_images(), {"image_upload": True}),
                 "generation_version": ("INT", {"default": 1, "min": 1, "max": 9999}),
                 "timeout_seconds": ("INT", {"default": 1200, "min": 30, "max": 7200}),
             }
@@ -148,8 +176,9 @@ class VideoFlowSeedanceOneClickProductVideo:
     def IS_CHANGED(cls, *args, **kwargs):
         return requery_nonce()
 
-    def generate(self, prompt, image, generation_version=1, timeout_seconds=1200):
+    def generate(self, prompt, product_image, generation_version=1, timeout_seconds=1200):
         config = VideoFlowConfig.from_env()
+        image = _load_product_image(product_image)
         task_id = VideoFlowSeedanceProduction().submit(
             config, prompt, image, generation_version
         )[0]

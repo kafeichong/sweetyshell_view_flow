@@ -121,10 +121,11 @@ def test_one_click_product_video_runs_complete_delivery_chain(monkeypatch):
     monkeypatch.setattr(nodes, "VideoFlowSeedanceProduction", FakeProduction)
     monkeypatch.setattr(nodes, "VideoFlowWaitTask", FakeWait)
     monkeypatch.setattr(nodes, "VideoFlowLoadResult", FakeLoadResult)
-
     image = object()
+    monkeypatch.setattr(nodes, "_load_product_image", lambda filename: image)
+
     result = nodes.VideoFlowSeedanceOneClickProductVideo().generate(
-        "产品在干净摄影棚中缓慢旋转", image, 1, 1200
+        "产品在干净摄影棚中缓慢旋转", "product.png", 1, 1200
     )
 
     assert result == ("/output/video-flow/task-1.mp4", "费用已确认")

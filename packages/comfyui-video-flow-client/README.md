@@ -62,7 +62,7 @@ Production 节点的 `generation_version` 默认是 `1`。相同版本会复用�
 
 `Seedance Reference Image to Video` 是当前唯一可进入 Production 的节点，固定使用已验收的 5 秒 / 720p / 16:9 规格。`Seedance Text to Video (Preview)` 不会调用 Provider；它在当前版本只用于校验统一工作流契约，待单独真实验收后才会开放 Production。
 
-创意同事优先使用 `Seedance Product Video (One Click)`：只接入一张产品图片、填写提示词并点击 Queue。节点会使用本机安全保存的 token，自动完成上传、提交、等待、下载，并输出本地视频路径和费用状态。
+创意同事优先使用 `Seedance Product Video (One Click)`：在节点自身上传/选择一张产品图片、填写提示词并点击 Queue，不需要连接任何节点。节点会使用本机安全保存的 token，自动完成上传、提交、等待、下载，并输出本地视频路径和费用状态。
 
 ## 一次完整提交
 
