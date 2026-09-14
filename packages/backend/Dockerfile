@@ -3,7 +3,9 @@ FROM node:20-slim
 WORKDIR /app
 
 # 安装 OpenSSL 和其他依赖
-RUN apt-get update && apt-get install -y \
+RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get -o Acquire::Retries=3 update \
+    && apt-get install -y --no-install-recommends \
     openssl \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
