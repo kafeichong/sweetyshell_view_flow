@@ -1,5 +1,6 @@
 jest.mock('@nestjs/common', () => ({
   Injectable: () => (target: unknown) => target,
+  Inject: () => () => undefined,
   createParamDecorator: () => () => () => {},
   Controller: () => (target: unknown) => target,
   UseGuards: () => (target: unknown) => target,

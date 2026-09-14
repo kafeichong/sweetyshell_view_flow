@@ -1,10 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { MediaMetadata } from './assets.service';
 
 const execFileAsync = promisify(execFile);
 type ProbeRunner = (url: string) => Promise<string>;
+export const MEDIA_PROBE_RUNNER = 'MEDIA_PROBE_RUNNER';
 
 type ProbeStream = { codec_type?: string; width?: number; height?: number; codec_name?: string; r_frame_rate?: string };
 type ProbeResponse = { format?: { duration?: string }; streams?: ProbeStream[] };
@@ -16,14 +17,16 @@ function frameRate(value?: string): number | undefined {
   return Number.isFinite(result) && result > 0 ? result : undefined;
 }
 
-@Injectable()
-export class MediaInspectorService {
-  constructor(private readonly runProbe: ProbeRunner = async (url) => {
+export const defaultMediaProbeRunner: ProbeRunner = async (url) => {
     const { stdout } = await execFileAsync('ffprobe', [
       '-v', 'error', '-show_format', '-show_streams', '-of', 'json', url,
     ], { timeout: 15_000, maxBuffer: 1024 * 1024 });
     return stdout;
-  }) {}
+};
+
+@Injectable()
+export class MediaInspectorService {
+  constructor(@Inject(MEDIA_PROBE_RUNNER) private readonly runProbe: ProbeRunner) {}
 
   async inspect(url: string): Promise<MediaMetadata> {
     let data: ProbeResponse;

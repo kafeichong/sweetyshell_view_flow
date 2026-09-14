@@ -1,4 +1,4 @@
-jest.mock('@nestjs/common', () => ({ Injectable: () => () => undefined }));
+jest.mock('@nestjs/common', () => ({ Injectable: () => () => undefined, Inject: () => () => undefined }));
 
 import { MediaInspectorService } from './media-inspector.service';
 
