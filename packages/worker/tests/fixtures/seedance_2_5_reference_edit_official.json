@@ -1,0 +1,20 @@
+{
+  "source": "official-quickstart-shape",
+  "request": {
+    "model": "doubao-seedance-2-5-260628",
+    "content": [
+      {"type": "text", "text": "编辑@视频1，并使用@图片1作为产品参考"},
+      {"type": "image_url", "image_url": {"url": "https://example.invalid/reference.jpg"}, "role": "reference_image"},
+      {"type": "video_url", "video_url": {"url": "https://example.invalid/source.mp4"}, "role": "reference_video"}
+    ],
+    "generate_audio": true,
+    "ratio": "adaptive",
+    "duration": -1,
+    "watermark": true
+  },
+  "createResponse": {"id": "fixture-task-id"},
+  "terminalResponseShape": {
+    "status": "succeeded",
+    "content": {"video_url": "https://example.invalid/result.mp4"}
+  }
+}

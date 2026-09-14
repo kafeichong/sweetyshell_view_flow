@@ -663,3 +663,112 @@ remaining=尚未满足的验收项
 - 2026-09-11：由原 Phase 0–3 大阶段规划收敛为 M1–M5；移除 Preview 作为创意交付、已完成安全基线的重复施工、3 条样片硬指标和平台化前置要求。保留真实出片、额度与不确定提交保护；将最小监控/追溯提前到首次交付。现状更正只见 PROJECT_STATUS。
 
 - 2026-09-11：进一步拆成 T00–T12 共 13 项任务，补齐共享状态/接口合同、数据库迁移、测试示例、E01–E13 故障矩阵、安装资源清单与真实交付签收；详细工时参考约 44 小时。
+
+## 10. Seedance 2.5 工作流目录扩展计划（2026-09-14）
+
+> **实施前提：** 本节以 Seedance 2.5 的“一个异步创建接口、`content` 多模态输入、任务状态轮询”为基础扩展目录；不因 SDK 或文档出现某能力就开放 Production。实现前先逐条取得当前火山方舟账号与模型版本的字段证据，部署和真实生成仍须单独授权。
+>
+> **现有实测状态：** 只把已完成真实任务验收的 `seedance.reference-image-to-video.v1` 标为 `production_verified`。所有新增目录项初始为 `preview_only` 或 `disabled`；Preview 只校验、冻结意图、记录 Task，绝不进入 pending 或调用 Provider。
+
+### 10.1 契约来源与证据等级
+
+| 来源 | 可作为依据的内容 | 不能据此推断的内容 |
+| --- | --- | --- |
+| 火山方舟官方 quickstart：`/Users/steven/Downloads/ark_seedance2.5_quickstart_package/python/demo_standard.py` | Ark SDK 客户端、`content_generation.tasks.create`、`text` / `image_url` / `video_url` / `audio_url` 内容项、`reference_image` / `reference_video` / `reference_audio`、异步 `id` 与 `get(task_id)` 轮询 | 首尾帧、延长、`omni_reference_task_type`、`output_format` 等未在该示例出现的字段名和约束 |
+| Steven 提供的 Seedance 2.5 能力表 | 产品目录、素材/时长/ratio 的待核对范围、当前业务优先级 | 可直接复制到本账号请求体的 JSON 字段、错误码或默认值 |
+| 当前官方 BytePlus ModelArk 文档（仅作同系列交叉参考） | 统一 `content` 输入、异步 `id`、素材类型与上限、`adaptive` 行为、返回末帧概念 | 火山方舟账户必然支持同名字段或相同地区/计费规则 |
+| 本项目真实 Production 记录与测试 | 本账号、当前模型和当前部署实际已验证的调用路径 | 未执行模式的生产可用性或最终计费 |
+
+**字段证据规则：** 每个新增 Provider 字段必须记录“官方 URL/SDK 示例 + 摘录位置 + 请求/响应 fixture + 当前模型验收状态”。未取得火山方舟原始证据时，Registry 可以展示为 `disabled`，但 Worker 编译器不得发送该字段。
+
+### 10.2 目标目录与阶段状态
+
+| workflowKey | 创作目的 | 必需媒体角色 | 生成约束 | 初始状态 | 进入 Production 的额外证据 |
+| --- | --- | --- | --- | --- | --- |
+| `seedance.text-to-video.v1` | 纯文本生成 | 无 | 明确 ratio；时长仅允许当前批准值 | `preview_only` | 当前账号一次成功任务、结果归档、usage/费用记录 |
+| `seedance.reference-image-to-video.v1` | 将图片作为创作参考 | `reference_image` ×1 | 当前固定 `5s/720p/16:9` | `production_verified` | 已有真实任务证据；规格变更须重新验收 |
+| `seedance.first-frame-to-video.v1` | 指定输出起始画面 | `first_frame` ×1 | `ratio=adaptive`；时长按官方当前范围 | `disabled` | 火山方舟首帧原始请求示例、素材上传验证、一次真实验收 |
+| `seedance.first-last-frame-to-video.v1` | 指定起止画面 | `first_frame` ×1、`last_frame` ×1 | `ratio=adaptive`；两图角色不可互换 | `disabled` | 原始字段/约束证据、两图尺寸验证、一次真实验收 |
+| `seedance.omni-reference.v1` | 图片/视频/音频作为新片的多模态参考 | `reference_image` 0–30、`reference_video` 0–10、`reference_audio` 0–10；至少一项 | `ratio` 与 `duration` 由已取证的模式策略决定 | `disabled` | 当前账号多素材组合成功、总时长/数量限制测试、成本预占规则 |
+| `seedance.video-edit.v1` | 以原视频为基础修改内容 | `reference_video` 至少 1；可附参考图/音频 | `ratio=adaptive`、时长随源视频/官方策略；意图必须为 edit | `disabled` | `omni_reference_task_type=edit` 的原始官方示例、视频元信息校验、一次真实验收 |
+| `seedance.video-extend.v1` | 向前或向后续写视频 | `reference_video` ×1 | `ratio=adaptive`；时长由已取证范围决定；意图必须为 extend | `disabled` | extend 原始示例、方向参数/提示词规则、一次真实验收 |
+| `seedance.audio-reference-to-video.v1` | 用音频驱动/参考新视频 | `reference_audio` 1–10；可选图片/视频 | 音频时长、总时长、ratio 均按已取证策略 | `disabled` | 纯音频与图/音组合的原始示例、音频上传验证、一次真实验收 |
+
+“参考图片”与“首帧”是两个不同工作流：前者的角色是 `reference_image`，用于创作参考；后者必须显式是 `first_frame`，用于约束输出开头。不得根据图片数量或节点名称猜测其语义。
+
+### 10.3 统一任务与冻结执行计划
+
+对外请求保持一个入口，不增加“每个工作流一个 HTTP endpoint”。Registry 是唯一允许的 workflow key、媒体角色、数量、文件类型和生成策略来源。
+
+```json
+{
+  "workflowKey": "seedance.first-last-frame-to-video.v1",
+  "mode": "preview",
+  "prompt": {"positive": "从@图片1平滑过渡到@图片2"},
+  "generation": {
+    "ratio": "adaptive",
+    "duration": 5,
+    "resolution": "720p",
+    "generateAudio": false
+  },
+  "media": [
+    {"assetId": "asset-start", "role": "first_frame"},
+    {"assetId": "asset-end", "role": "last_frame"}
+  ]
+}
+```
+
+Backend 只接受用户意图，按 Registry 生成并冻结 `executionPlan`：workflow key/version/hash、Provider model、媒体角色与 Asset hash、规范化 generation、已批准的可选输出字段、价格版本和预占金额。Worker 只消费该快照，并把已签发的短期素材 URL 编译为 Ark `content`；不得从前端请求中直传模型、URL、价格或未注册参数。
+
+### 10.4 分批开发任务
+
+#### W1：官方契约取证与 fixture 库
+
+- [x] 建立 `docs/architecture/seedance-2-5-contract-evidence.md`，每个模式记录官方 URL、SDK/HTTP 请求、创建响应、终态响应、错误示例和取证日期；以“火山方舟当前模型证据 / 同系列交叉参考 / 本项目实测”标记来源等级。首份矩阵已明确未取证字段。
+- [x] 将官方 quickstart 的编辑请求脱敏后保存为测试 fixture；不得保存 API Key、真实临时 URL、真实人物素材或可重放的生产 taskId。
+- [ ] 对 `first_frame`、`last_frame`、`omni_reference_task_type`、`return_last_frame`、`output_format`、延长方向等字段取得火山方舟原始证据；缺任一字段时对应 workflow 保持 `disabled`。
+- [ ] 验收：每个目录项在 Evidence 文档中都有明确“已取证 / 未取证 / 不适用”；任何未取证字段在 Registry/编译器测试中都不可进入 Provider payload。
+
+#### W2：媒体资产能力与上传票据策略
+
+- [ ] 扩展 Backend Asset ticket 的工作流策略：图片、视频、音频各自的 MIME、单文件大小、像素/时长/帧率、数量、总大小和总时长限制；只允许目标 workflow 所需的 role。
+- [ ] 在 `/complete` 后提取并保存可信媒体元数据；视频编辑/延长在 Provider 调用前验证源视频时长和编码，音频工作流验证格式和时长。无法解析或不符合策略的 Asset 不得进入 Production。
+- [ ] 保持 actor 所有权、内容 hash、上传完成校验和 Worker 临时下载 URL；媒体临时 URL 绝不进入 requestSnapshot、回执或日志。
+- [ ] 验收：图片、视频、音频的边界值、跨 actor Asset、未完成上传、超数量/超总时长、错误 MIME 均有 Backend 单测与 Worker 契约测试。
+
+#### W3：Registry 与 generation policy
+
+- [ ] 将现有 Registry 拆为 `WorkflowDefinition`、`MediaPolicy`、`GenerationPolicy` 和 `ProviderFieldPolicy`；支持固定值、枚举范围、`adaptive`、按模式必填/禁止字段以及 `preview_only` / `disabled` / `production_verified` 生命周期。
+- [ ] 先注册第 10.2 节八个键。`disabled` 只可被目录读取，不允许创建 Preview 或 Production Task；`preview_only` 可创建不可执行 Preview；`production_verified` 才可经白名单和额度创建 pending Task。
+- [ ] 禁止框架外的 role 组合：首帧/尾帧工作流不能混用 `reference_*`；视频编辑必须有 `reference_video`；音频参考工作流按证据规则限制是否允许纯音频。
+- [ ] 验收：每个 workflow 的合法/非法媒体组合、`adaptive` 约束、时长边界、状态转换、旧 task 快照恢复全部由纯函数单测覆盖。
+
+#### W4：Seedance Provider 编译与结果标准化
+
+- [ ] 把 Worker 中的 `media_urls` 临时映射改为按 Registry 冻结角色输出 Ark `content`，并只发送 W1 已证实的 Provider 字段。
+- [ ] 为每个已取证模式建立 payload fixture：文生、参考图、首帧、首尾帧、全模态参考、编辑、延长、参考音频。Fixture 只验证 JSON shape，不调用 Ark。
+- [ ] 统一读取创建响应 `id` 和终态响应中的状态、视频 URL、可选尾帧、usage/错误；未被 W1 证实的返回字段保留原始受限 payload，不对外编造结构。
+- [ ] 验收：Worker 单测验证每个 Registry 快照只产生预期 `content` 项；未知字段、URL 失效、Provider 4xx、5xx/超时均维持当前“不可判定即 requires_review、不自动重提”的规则。
+
+#### W5：ComfyUI 节点与模板
+
+- [ ] 共用一个“创建工作流任务”节点内部实现，按 `workflowKey` 暴露八个名称明确的节点；节点输入只展示该目录项允许的媒体插槽和 generation 参数。
+- [ ] Production 节点只展示 `production_verified` 工作流；Preview 节点不得连接 `Wait` / `LoadResult` 的交付链，避免用户把不可执行预览当成出片任务。
+- [ ] 生成真实 ComfyUI 导出格式的模板：文生、参考图、首帧、首尾帧、全模态参考、编辑、延长、音频参考、恢复下载各一份。只为当前 Production Verified 项提供完整 `Create → Wait → LoadResult` 模板。
+- [ ] 验收：节点 payload、幂等键、generation version、工作流模板连线及 Production 可见性均有客户端 pytest；实际 ComfyUI 导入验收只在目标实例上执行。
+
+#### W6：逐项 Production 验收与发布
+
+- [ ] 每个 workflow 独立走：Preview 契约 → 隔离 Fake Provider → 单次、明确额度上限的真实任务 → 成片/末帧/费用/归档核对 → 将状态改为 `production_verified`。
+- [ ] 真实视频编辑、延长、音频参考在测试前单独确认素材来源与真人肖像授权；不使用未获授权的真人图像、视频或声音。
+- [ ] 每次只开放一个新工作流和一个固定规格；发现 Provider 约束与文档不一致时立即退回 `disabled`，保留证据，不用客户端兼容代码掩盖差异。
+- [ ] 验收：创意人员只在可见目录中看到已批准的 Production 节点；每个生产任务具备 taskId、冻结快照、Provider ID、交付 Asset 和费用状态。
+
+### 10.5 建议实施顺序与停止线
+
+1. 先完成 W1、W2、W3；此阶段不创建真实任务。
+2. 完成 W4、W5 后，所有已取证但未验收的能力最多进入 Preview。
+3. 按创意部门优先级依次验收：文生视频 → 首帧 → 首尾帧 → 视频编辑 → 视频延长 → 全模态参考 → 音频参考。参考图片保持现有已验收路径。
+4. 任一模式没有火山方舟原始字段证据、对应 Asset 校验或明确的单次预算批准，即停在 `disabled`，不进入 Provider 调用。
+
+**本计划不承诺：** 自动把所有 8 种模式当天开放、沿用旧请求字段、仅凭官方宣传参数估算最终账单、或以 BytePlus 文档替代火山方舟账号验收。

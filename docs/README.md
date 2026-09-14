@@ -1,6 +1,6 @@
 # docs/ 文档索引（唯一入口）
 
-> 最后整理：2026-09-11
+> 最后整理：2026-09-14
 > 本文件是 `docs/` 的唯一入口。新增或修改文档前请先读本文件末尾的【文档规则】。
 
 ---
@@ -40,6 +40,8 @@
 | 文档 | 说明 |
 | --- | --- |
 | [architecture/seedance-integration-baseline.md](./architecture/seedance-integration-baseline.md) | 冻结的系统边界、稳定领域模型（Task / ExecutionAttempt / Asset / ActorCredential）、API 兼容规则、执行与计费规则、迁移与回滚原则 |
+| [architecture/video-workflow-interface-research-2026-09-14.md](./architecture/video-workflow-interface-research-2026-09-14.md) | 视频工作流、统一任务接口与媒体角色调研；记录待决策的 Workflow Registry 方向，不描述当前生产能力 |
+| [architecture/seedance-2-5-contract-evidence.md](./architecture/seedance-2-5-contract-evidence.md) | Seedance 2.5 官方字段证据、脱敏 fixture 与待取证矩阵；不描述当前生产能力 |
 
 ### 运行手册（Runbooks）
 
