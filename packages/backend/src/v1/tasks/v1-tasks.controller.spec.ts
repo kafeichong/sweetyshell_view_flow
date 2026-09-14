@@ -317,3 +317,55 @@ describe('V1TasksController idempotency', () => {
     expect(tasks.createPreview).not.toHaveBeenCalled();
   });
 });
+
+describe('V1TasksController workflow registry', () => {
+  const tasks = { findByActorRequest: jest.fn(), createPreview: jest.fn() };
+  const budget = { createTaskWithReservation: jest.fn() };
+  const assets = { findOwnedUploadedInput: jest.fn() };
+
+  beforeEach(() => {
+    process.env.VIDEO_FLOW_PRODUCTION_ACTORS = 'creative-pilot';
+    process.env.VIDEO_FLOW_PRODUCTION_SPEC_JSON = JSON.stringify({
+      version: 'test-v1', model: 'test-model', duration: 5, ratio: '16:9',
+      resolution: '720p', generateAudio: false, watermark: true,
+      pricingVersion: 'price-v1', reserveCny: '2.000000',
+    });
+    tasks.findByActorRequest.mockResolvedValue(null);
+    tasks.createPreview.mockReset();
+    budget.createTaskWithReservation.mockReset();
+    budget.createTaskWithReservation.mockResolvedValue({ id: 'task-1', status: 'pending' });
+    assets.findOwnedUploadedInput.mockResolvedValue({ id: 'asset-1', fileHash: 'a'.repeat(64) });
+  });
+
+  it('creates the production-verified reference-image workflow with frozen role-based media', async () => {
+    await new V1TasksController(tasks as never, budget as never, assets as never).create(
+      { actorId: 'creative-pilot' }, 'workflow-key-1', {
+        mode: 'production', workflowKey: 'seedance.reference-image-to-video.v1',
+        prompt: { positive: 'product orbit' },
+        generation: { duration: 5, ratio: '16:9', resolution: '720p' },
+        media: [{ assetId: 'asset-1', role: 'reference_image' }],
+      },
+    );
+
+    expect(budget.createTaskWithReservation).toHaveBeenCalledWith(expect.objectContaining({
+      task: expect.objectContaining({
+        workflowName: 'seedance.reference-image-to-video.v1', workflowVersion: 'v1',
+      }),
+      executionPlan: expect.objectContaining({
+        workflowKey: 'seedance.reference-image-to-video.v1',
+        media: [{ assetId: 'asset-1', role: 'reference_image', fileHash: 'a'.repeat(64) }],
+      }),
+    }));
+  });
+
+  it('does not allow preview-only text-to-video to create a production task', async () => {
+    await expect(new V1TasksController(tasks as never, budget as never, assets as never).create(
+      { actorId: 'creative-pilot' }, 'workflow-key-2', {
+        mode: 'production', workflowKey: 'seedance.text-to-video.v1',
+        prompt: { positive: 'product orbit' },
+        generation: { duration: 5, ratio: '16:9', resolution: '720p' }, media: [],
+      },
+    )).rejects.toMatchObject({ status: 400, message: 'WORKFLOW_NOT_PRODUCTION_VERIFIED' });
+    expect(budget.createTaskWithReservation).not.toHaveBeenCalled();
+  });
+});

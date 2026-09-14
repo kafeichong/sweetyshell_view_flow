@@ -88,6 +88,27 @@ class Job(BaseModel):
         """
         if isinstance(self.executionPlan, dict):
             plan = self.executionPlan
+            media = plan.get("media")
+            if isinstance(media, list):
+                normalized_media = []
+                for item in media:
+                    if not isinstance(item, dict):
+                        raise ValueError("executionPlan.media item must be an object")
+                    asset_id = item.get("assetId")
+                    role = item.get("role")
+                    if not isinstance(asset_id, str) or not asset_id or not isinstance(role, str) or not role:
+                        raise ValueError("executionPlan.media item requires assetId and role")
+                    normalized_media.append({"asset_id": asset_id, "role": role})
+                return {
+                    "prompt": plan["prompt"],
+                    "media": normalized_media,
+                    "model": plan["model"],
+                    "duration": plan["duration"],
+                    "ratio": plan["ratio"],
+                    "resolution": plan["resolution"],
+                    "generate_audio": plan["generateAudio"],
+                    "watermark": plan["watermark"],
+                }
             return {
                 "prompt": plan["prompt"],
                 "image_asset_id": plan["imageAssetId"],

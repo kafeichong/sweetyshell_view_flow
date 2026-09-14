@@ -61,6 +61,8 @@ export class TasksService {
     clientRequestId: string;
     capability: string;
     workflowName: string;
+    workflowVersion?: string;
+    workflowHash?: string;
     requestSnapshot: object;
     executionPlan: object;
     prompt: string;
@@ -73,6 +75,8 @@ export class TasksService {
         clientRequestId: data.clientRequestId,
         capability: data.capability,
         workflowName: data.workflowName,
+        workflowVersion: data.workflowVersion,
+        workflowHash: data.workflowHash,
         requestSnapshot: data.requestSnapshot,
         executionPlan: data.executionPlan,
         deliveryStatus: 'not_started',
@@ -99,6 +103,8 @@ export class TasksService {
     clientRequestId: string;
     capability: string;
     workflowName: string;
+    workflowVersion?: string;
+    workflowHash?: string;
     requestSnapshot: object;
     prompt: string;
     imageUrl?: string;
@@ -110,6 +116,8 @@ export class TasksService {
         clientRequestId: data.clientRequestId,
         capability: data.capability,
         workflowName: data.workflowName,
+        workflowVersion: data.workflowVersion,
+        workflowHash: data.workflowHash,
         requestSnapshot: data.requestSnapshot,
         prompt: data.prompt,
         imageUrl: data.imageUrl,

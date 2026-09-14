@@ -471,11 +471,13 @@ class VideoFlowClient:
     @staticmethod
     def stable_idempotency_key(
         prompt: str,
-        image_bytes: bytes,
+        image_bytes: bytes = b"",
         *,
         profile: str = "seedance",
+        workflow_key: str | None = None,
         duration: int | None = None,
         ratio: str | None = None,
+        resolution: str | None = None,
         generation_version: int = 1,
         spec_version: str = "",
     ) -> str:
@@ -483,7 +485,9 @@ class VideoFlowClient:
             {
                 "duration": duration,
                 "profile": profile,
+                "workflow_key": workflow_key,
                 "ratio": ratio,
+                "resolution": resolution,
                 "generation_version": generation_version,
                 "spec_version": spec_version,
             },

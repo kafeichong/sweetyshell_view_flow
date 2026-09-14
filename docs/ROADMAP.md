@@ -663,3 +663,17 @@ remaining=尚未满足的验收项
 - 2026-09-11：由原 Phase 0–3 大阶段规划收敛为 M1–M5；移除 Preview 作为创意交付、已完成安全基线的重复施工、3 条样片硬指标和平台化前置要求。保留真实出片、额度与不确定提交保护；将最小监控/追溯提前到首次交付。现状更正只见 PROJECT_STATUS。
 
 - 2026-09-11：进一步拆成 T00–T12 共 13 项任务，补齐共享状态/接口合同、数据库迁移、测试示例、E01–E13 故障矩阵、安装资源清单与真实交付签收；详细工时参考约 44 小时。
+
+
+## 6. 工作流注册表实施批次（2026-09-14）
+
+本批次将原有能力/profile 请求兼容迁移为“一个任务入口 + 服务端工作流注册表”。实现提交前不部署、不改生产白名单、不创建真实任务。当前模型与账号已真实验收的边界仍见 [PROJECT_STATUS.md](./PROJECT_STATUS.md)。
+
+- [x] Backend 新增代码注册表及 `workflowKey` 请求标准化；旧 `IMAGE_TO_VIDEO + seedance + image_asset_id` 映射到 `seedance.reference-image-to-video.v1`。
+- [x] Production 执行快照记录 workflow key/version/hash 与有角色的 `media[]`；Worker 逐项签发下载 URL，再编译成 Seedance 的统一 `content` 列表。
+- [x] ComfyUI 增加参考图片生视频完整模板，以及文本生视频 Preview 模板；原节点 ID 保留兼容，显示名更新。
+- [x] 将 `seedance.text-to-video.v1` 设为 `preview_only`，Production 返回 `WORKFLOW_NOT_PRODUCTION_VERIFIED`，不创建 pending 任务。
+- [ ] 在独立审批的额度内完成一次文本生视频真实验收后，才把文本工作流改为 `production_verified`。
+- [ ] 扩展 Asset 上传票据的 MIME、大小、时长与数量策略后，再实现官方示例中的参考视频/音频编辑工作流；不能只因 Provider SDK 支持就开放。
+
+官方依据：`/Users/steven/Downloads/ark_seedance2.5_quickstart_package/python/demo_standard.py`。该示例使用 `content_generation.tasks.create`，并展示 `reference_image`、`reference_video` 与可选 `reference_audio`；SDK 支持不等同于本项目当前生产开放状态。

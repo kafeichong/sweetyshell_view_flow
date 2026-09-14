@@ -939,9 +939,20 @@ class JobExecutor:
                         return
 
                 # 2. 无可恢复上下文时，创建新任务并持久化 provider 端 task id。
-                asset_id = provider_params.get("image_asset_id")
-                if asset_id:
-                    provider_params["image_url"] = await self.resolve_asset_url(str(asset_id))
+                media = provider_params.pop("media", None)
+                if isinstance(media, list):
+                    provider_params["media_urls"] = [
+                        {
+                            "url": await self.resolve_asset_url(str(item["asset_id"])),
+                            "role": str(item["role"]),
+                        }
+                        for item in media
+                    ]
+                else:
+                    # 旧 execution plan 的单图字段仍由这里处理，直到全部历史任务完成。
+                    asset_id = provider_params.get("image_asset_id")
+                    if asset_id:
+                        provider_params["image_url"] = await self.resolve_asset_url(str(asset_id))
                 result = await adapter.create_task(provider_params)
                 provider_task_id = result["task_id"]
 

@@ -95,7 +95,23 @@ class SeedanceAdapter:
                 "text": params["prompt"]
             })
 
-        # 参考图片（支持多张，role 标记用途）
+        # 新工作流执行计划按资产角色传入。角色决定 Ark 的 content type；
+        # 后端尚未开放的角色不会到达这里，但保留编译能力便于后续受控启用。
+        for media in params.get("media_urls", []):
+            role = media.get("role")
+            url = media.get("url")
+            if not isinstance(url, str) or not url:
+                raise ValueError("Seedance media_urls requires a URL")
+            if role == "reference_image":
+                content.append({"type": "image_url", "image_url": {"url": url}, "role": role})
+            elif role == "reference_video":
+                content.append({"type": "video_url", "video_url": {"url": url}, "role": role})
+            elif role == "reference_audio":
+                content.append({"type": "audio_url", "audio_url": {"url": url}, "role": role})
+            else:
+                raise ValueError(f"Unsupported Seedance media role: {role}")
+
+        # 兼容早期适配器的图片列表。
         for image_url in params.get("image_urls", []):
             content.append({
                 "type": "image_url",
