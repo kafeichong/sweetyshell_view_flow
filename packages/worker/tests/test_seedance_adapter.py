@@ -157,6 +157,40 @@ async def test_create_task_forwards_frozen_resolution():
 
 
 @pytest.mark.asyncio
+async def test_create_task_payload_transports_compiler_output_without_rewriting_it():
+    requests = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": "fake-provider-task"})
+
+    payload = {
+        "model": "test-model",
+        "content": [
+            {"type": "text", "text": "edit @video1"},
+            {"type": "video_url", "video_url": {"url": "https://example.invalid/input.mp4"}, "role": "reference_video"},
+        ],
+        "generate_audio": True,
+        "ratio": "adaptive",
+        "duration": -1,
+        "watermark": False,
+        "resolution": "720p",
+        "omni_reference_task_type": "edit",
+        "output_format": "mov",
+    }
+    adapter = SeedanceAdapter(api_key="test-only")
+    await adapter.client.aclose()
+    adapter.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        result = await adapter.create_task_payload(payload)
+    finally:
+        await adapter.client.aclose()
+
+    assert result["task_id"] == "fake-provider-task"
+    assert json.loads(requests[0].content) == payload
+
+
+@pytest.mark.asyncio
 async def test_missing_api_key_omits_the_authorization_header():
     adapter = SeedanceAdapter(api_key="")
 

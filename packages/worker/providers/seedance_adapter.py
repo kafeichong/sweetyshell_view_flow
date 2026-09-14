@@ -214,6 +214,50 @@ class SeedanceAdapter:
             "status": "submitted"
         }
 
+    async def create_task_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Submit an already compiled Ark payload without changing its semantics.
+
+        Only the execution-policy compiler may construct this payload for a
+        new approved execution plan.  `create_task` remains for legacy tasks
+        while their old execution snapshots are drained safely.
+        """
+        if not isinstance(payload, dict) or not isinstance(payload.get("content"), list):
+            raise ValueError("Seedance payload requires a content array")
+        url = f"{self.base_url}/contents/generations/tasks"
+        try:
+            response = await self.client.post(url, headers=self._build_headers(), json=payload)
+        except httpx.RequestError as e:
+            raise ProviderSubmissionUncertainError(
+                f"Provider submission outcome unknown: {str(e)}"
+            ) from e
+
+        status_code = response.status_code
+        if 400 <= status_code < 500:
+            error_text = response.text
+            if status_code == 429:
+                raise Exception(f"Rate limit exceeded: {error_text}")
+            if status_code == 400:
+                raise Exception(f"Invalid request: {error_text}")
+            if status_code in (401, 403):
+                raise Exception(f"Authentication failed: {error_text}")
+            raise Exception(f"HTTP {status_code}: {error_text}")
+        if not (200 <= status_code < 300):
+            raise ProviderSubmissionUncertainError(
+                f"Provider returned HTTP {status_code}; submission outcome unknown"
+            )
+        try:
+            data = response.json()
+        except ValueError as e:
+            raise ProviderSubmissionUncertainError(
+                "Provider response could not be parsed; submission outcome unknown"
+            ) from e
+        task_id = data.get("id") if isinstance(data, dict) else None
+        if is_submission_uncertain(status_code, has_task_id=bool(task_id)):
+            raise ProviderSubmissionUncertainError(
+                "Provider response has no task id; submission outcome unknown"
+            )
+        return {"task_id": task_id, "status": "submitted"}
+
     async def get_task_status(self, task_id: str) -> ProviderTaskStatus:
         """
         查询任务状态
