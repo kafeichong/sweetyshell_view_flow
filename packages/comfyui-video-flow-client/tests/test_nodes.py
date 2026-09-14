@@ -98,6 +98,43 @@ def test_config_node_defaults_to_company_backend(monkeypatch):
     assert defaults["backend_url"][1]["default"] == "https://ai.sweetyshell.com"
 
 
+def test_one_click_product_video_runs_complete_delivery_chain(monkeypatch):
+    calls = []
+    config = VideoFlowConfig("https://ai.sweetyshell.com", "creative-token")
+
+    class FakeProduction:
+        def submit(self, received_config, prompt, image, generation_version):
+            calls.append(("submit", received_config, prompt, image, generation_version))
+            return ("task-1",)
+
+    class FakeWait:
+        def wait(self, received_config, task_id, timeout_seconds):
+            calls.append(("wait", received_config, task_id, timeout_seconds))
+            return (task_id,)
+
+    class FakeLoadResult:
+        def download(self, received_config, task_id):
+            calls.append(("download", received_config, task_id))
+            return ("/output/video-flow/task-1.mp4", "费用已确认")
+
+    monkeypatch.setattr(nodes.VideoFlowConfig, "from_env", classmethod(lambda _cls: config))
+    monkeypatch.setattr(nodes, "VideoFlowSeedanceProduction", FakeProduction)
+    monkeypatch.setattr(nodes, "VideoFlowWaitTask", FakeWait)
+    monkeypatch.setattr(nodes, "VideoFlowLoadResult", FakeLoadResult)
+
+    image = object()
+    result = nodes.VideoFlowSeedanceOneClickProductVideo().generate(
+        "产品在干净摄影棚中缓慢旋转", image, 1, 1200
+    )
+
+    assert result == ("/output/video-flow/task-1.mp4", "费用已确认")
+    assert calls == [
+        ("submit", config, "产品在干净摄影棚中缓慢旋转", image, 1),
+        ("wait", config, "task-1", 1200),
+        ("download", config, "task-1"),
+    ]
+
+
 def test_production_node_key_changes_only_when_version_changes(monkeypatch, tmp_path):
     keys = []
 

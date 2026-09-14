@@ -124,6 +124,41 @@ class VideoFlowSeedanceProduction:
         return (str(task["id"]),)
 
 
+class VideoFlowSeedanceOneClickProductVideo:
+    """创意人员的单节点入口：产品图 → 真实出片 → 本地下载。"""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "prompt": ("STRING", {"multiline": True, "default": "产品置于干净的高级摄影棚背景中，镜头缓慢推进，柔和侧光突出产品材质与轮廓，画面稳定、真实、无文字、无人物。"}),
+                "image": ("IMAGE",),
+                "generation_version": ("INT", {"default": 1, "min": 1, "max": 9999}),
+                "timeout_seconds": ("INT", {"default": 1200, "min": 30, "max": 7200}),
+            }
+        }
+
+    RETURN_TYPES = ("STRING", "STRING")
+    RETURN_NAMES = ("local_video_path", "cost_status")
+    OUTPUT_NODE = True
+    FUNCTION = "generate"
+    CATEGORY = "Video Flow/Seedance"
+
+    @classmethod
+    def IS_CHANGED(cls, *args, **kwargs):
+        return requery_nonce()
+
+    def generate(self, prompt, image, generation_version=1, timeout_seconds=1200):
+        config = VideoFlowConfig.from_env()
+        task_id = VideoFlowSeedanceProduction().submit(
+            config, prompt, image, generation_version
+        )[0]
+        task_id = VideoFlowWaitTask().wait(
+            config, task_id, timeout_seconds
+        )[0]
+        return VideoFlowLoadResult().download(config, task_id)
+
+
 class VideoFlowSeedanceTextToVideo:
     """文本生视频节点。后端当前只允许预览，Production 会明确拒绝。"""
 
@@ -241,6 +276,7 @@ NODE_CLASS_MAPPINGS = {
     "VideoFlowConfig": VideoFlowConfigNode,
     "VideoFlowSeedancePreview": VideoFlowSeedancePreview,
     "VideoFlowSeedanceProduction": VideoFlowSeedanceProduction,
+    "VideoFlowSeedanceOneClickProductVideo": VideoFlowSeedanceOneClickProductVideo,
     "VideoFlowSeedanceTextToVideo": VideoFlowSeedanceTextToVideo,
     "VideoFlowWaitTask": VideoFlowWaitTask,
     "VideoFlowLoadResult": VideoFlowLoadResult,
@@ -249,6 +285,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "VideoFlowConfig": "Video Flow Config",
     "VideoFlowSeedancePreview": "Seedance Preview",
     "VideoFlowSeedanceProduction": "Seedance Reference Image to Video",
+    "VideoFlowSeedanceOneClickProductVideo": "Seedance Product Video (One Click)",
     "VideoFlowSeedanceTextToVideo": "Seedance Text to Video (Preview)",
     "VideoFlowWaitTask": "Wait Video Flow Task",
     "VideoFlowLoadResult": "Load Video Flow Result",
