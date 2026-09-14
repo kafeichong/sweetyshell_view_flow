@@ -8,6 +8,20 @@
 
 ## 0. 本轮交付判断
 
+### 2026-09-14：统一预检规范的开发分支增量
+
+此条记录仅描述 `feat/workflow-preflight-confirmation` 本地开发，未提交、未推送、未部署、未安装到实际 ComfyUI、未创建付费任务。
+
+- 新增产品参考图无上传预检接口，使用已有 Preview Task 保存带版本和生产规格摘要的预检记录，有效期 30 分钟；无新增数据库迁移。源码：`packages/backend/src/v1/tasks/workflow-preflight.ts`、`v1-tasks.controller.ts`。
+- 正式提交增加有效预检记录与显式确认校验，绑定 actor、参数及素材；OSS 内容检查读取实际字节计算哈希。源码：`packages/backend/src/assets/asset-presign.service.ts:verifyObjectContent`。
+- 新增同一画布 Preview/Production 分步节点、请求报告和模板，安装清单包含新增模块。源码：`packages/comfyui-video-flow-client/preflight_nodes.py`、`web/preflight_report.js`、`workflows/seedance-product-preflight-v1.comfy.json`、`install.sh`。
+- 已执行编译及离线测试：Backend build 通过，Jest 24 suites / 216 passed；客户端 pytest 69 passed；Worker pytest 201 passed / 26 skipped / 12 deselected。命令分别为 `cd packages/backend && npm run build && npx jest --runInBand`、`cd packages/comfyui-video-flow-client && .venv/bin/python -m pytest -q`、`cd packages/worker && venv/bin/python -m pytest -q`。真实 HTTP Guard smoke 已通过，存储、额度和 OSS 为测试替身，验证命令 `cd packages/backend && node test/preflight-http.smoke.cjs`。
+- 新增 `packages/backend/test/preflight.contract-spec.ts`，在真实 Nest/鉴权/Prisma 数据库上验证无上传预检、无 Attempt/预占、修改提示词或实际字节后拒绝、明确确认后准入，以及重复请求仅一笔预占。下游额度/恢复测试通过 `test/workflow-fixtures.ts` 预置“此前成功”的记录，便于验证预检后暂停或额度变化；这些夹具不替代预检 HTTP 用例。
+- 原 48 项 Backend 契约用例已适配新准入，新增后合计 49 passed；Fake Provider 5 passed；Worker 跨包 10 passed / 2 skipped。验证命令：`VIDEO_FLOW_CONTRACT_DB_PORT=55433 VIDEO_FLOW_CONTRACT_PROVIDER_PORT=19092 bash scripts/run_mvp_contract.sh`。`packages/backend/test/contract-backend.cjs` 仅在测试启动时替换对象存储读取传输，保留真实流式字节哈希校验；不修改正式启动入口。测试图片元信息由夹具写入，不代表真实图片解码与 OSS 验收。跨包沿用明确跳过的独立账号额度竞态 E04、外部告警/容器重建 E12，不能写成全覆盖。
+- 未验证：实际 ComfyUI 导入/报告显示、真实 OSS 上的整链验收；CLI 和旧直接提交模板尚未适配新增预检字段。旧入口不能因已有测试通过视为满足新规范。本分支不得直接发布，收尾计划见 ROADMAP W5。
+- 原有现状记录保持原验证时间与上下文；本增量不回填历史交付结果。
+
+
 **尚不能宣告可交付创意人员独立使用；也不是重新从零开发。** 已有任务、鉴权、上传、Provider 调用和下载接口，但“有这些组件”不等于“同事从 ComfyUI 一次执行能拿到成片”。此前将 R4 / R7 关闭的口径过宽，本轮重新打开其未完成部分。
 
 | 问题 | 本轮源码证据（仓库根相对路径） | 判断 |

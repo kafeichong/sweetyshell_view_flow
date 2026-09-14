@@ -1,3 +1,4 @@
+jest.mock('ali-oss', () => class OSS {});
 jest.mock('@nestjs/common', () => ({
   Injectable: () => (target: unknown) => target, createParamDecorator: () => () => () => {},
   Controller: () => (target: unknown) => target, UseGuards: () => (target: unknown) => target,
@@ -9,6 +10,7 @@ jest.mock('@nestjs/common', () => ({
   HttpStatus: { SERVICE_UNAVAILABLE: 503, TOO_MANY_REQUESTS: 429 },
   ServiceUnavailableException: class ServiceUnavailableException extends Error { status = 503; },
 }));
+import { preflightSnapshot } from './workflow-preflight';
 import { V1TasksController } from './v1-tasks.controller';
 
 const spec = JSON.stringify({ version: 'test-v1', model: 'test-model', duration: 5, ratio: '16:9', resolution: '720p', generateAudio: false, watermark: true, pricingVersion: 'price-v1', reserveCny: '2.000000' });
@@ -33,7 +35,12 @@ describe('V1TasksController workflow-only task API', () => {
     expect(result).toMatchObject({ id: 'preview-1', preview: { workflowKey: referenceRequest.workflowKey, willCallProvider: false } }); expect(budget.createTaskWithReservation).not.toHaveBeenCalled();
   });
   it('creates the production-verified reference workflow with frozen role-based media', async () => {
-    await new V1TasksController(tasks as never, budget as never, assets as never).create({ actorId: 'creative-pilot' }, 'production-1', { ...referenceRequest, mode: 'production' });
+    const descriptor = { sha256: 'a'.repeat(64), role: 'reference_image', mimeType: 'image/png', sizeBytes: 100, metadata: { kind: 'image', width: 500, height: 500 } };
+    const taskAccess = { ...tasks, findOneForActor: jest.fn().mockResolvedValue({ actorId: 'creative-pilot', status: 'preview', createdAt: new Date(), requestSnapshot: preflightSnapshot({ ...referenceRequest, media: [descriptor] }, JSON.parse(spec)) }) };
+    assets.findOwnedUploadedInput.mockResolvedValue({ id: 'asset-1', fileHash: descriptor.sha256, mimeType: descriptor.mimeType, sizeBytes: 100, mediaMetadata: descriptor.metadata, objectKey: 'input' });
+    const presign = { verifyObjectContent: jest.fn().mockResolvedValue(undefined) };
+    await new V1TasksController(taskAccess as never, budget as never, assets as never, presign as never).create({ actorId: 'creative-pilot' }, 'production-1', { ...referenceRequest, mode: 'production', preflightId: 'preview-id', confirmLiveSubmission: true });
+    expect(presign.verifyObjectContent).toHaveBeenCalledWith('input', descriptor.sha256, 100);
     expect(budget.createTaskWithReservation).toHaveBeenCalledWith(expect.objectContaining({ task: expect.objectContaining({ workflowName: referenceRequest.workflowKey, workflowVersion: 'v1' }), executionPlan: expect.objectContaining({ media: [{ assetId: 'asset-1', role: 'reference_image', fileHash: 'a'.repeat(64) }] }) }));
   });
   it('returns a prior task for the same actor, idempotency key and body', async () => {

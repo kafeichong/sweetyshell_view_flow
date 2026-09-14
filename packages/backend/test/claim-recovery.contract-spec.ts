@@ -56,7 +56,7 @@ async function createProductionTask(
       'Authorization': `Bearer ${harness.actorToken}`,
       'Idempotency-Key': idempotencyKey,
     },
-    body: JSON.stringify(referenceImageWorkflowRequest('claim contract', assetId, 'test-resolution')),
+    body: JSON.stringify(await referenceImageWorkflowRequest(harness, 'claim contract', assetId, 'test-resolution')),
   });
   expect(response.status).toBe(201);
   return response.json();

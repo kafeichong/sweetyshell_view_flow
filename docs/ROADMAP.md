@@ -7,6 +7,8 @@
 **目标：** 一位创意人员在自己的 ComfyUI 中，使用公司授权素材，独立完成一次真实生成，得到可播放的视频；遇到故障能凭 taskId 查清阶段、费用状态并继续处理。
 **架构：** 保留 ComfyUI 客户端 → Backend / PostgreSQL → 单 Worker → Ark / OSS。数据库保存执行与资金事实，持久日志补充过程；不为 MVP 建完整运营后台。
 **技术栈：** 现有 NestJS / Prisma / PostgreSQL、Python Worker、ComfyUI 客户端。
+**统一工作流需求：** 后续新增与改造必须遵守 [Preview 与正式生成统一需求规范 v1.1](requirements/2026-09-14/workflow-preview-production-spec.md)。同一画布先预检，再明确确认正式生成；本次需求修订不代表已实现。与下文早期规划冲突的模式行为以该规范为准。
+
 **Spec / 需求依据：** 本文第 1–4 节的 MVP 范围与不变量，以及 [PROJECT_STATUS.md](./PROJECT_STATUS.md) 的缺口证据。创意人员真实出片是最低交付线；不把 Preview、模拟调用或本地单测当作交付。
 
 ## 1. 范围与取舍
@@ -758,9 +760,21 @@ Backend 只接受用户意图，按 Registry 生成并冻结 `executionPlan`：w
 
 #### W5：ComfyUI 节点与模板
 
+本轮首条产品工作流的发布前收尾：
+
+- [x] 将 Docker 跨包合同夹具适配为先预检、再显式确认；验证证据及测试替身边界见 [PROJECT_STATUS.md](PROJECT_STATUS.md)。
+- [ ] 将 CLI 和所有对外交付的正式入口适配为先预检，再显式确认；不保留绕过新准入的兼容开关。
+- [ ] 补齐预检失败逐项报告、实际 ComfyUI 节点展示与导入验收；确认旧插件重名不覆盖新节点。
+- [ ] 完成真实对象哈希验证与 Backend → Worker → Fake Provider → 归档的隔离合同；同一意图网络恢复、新版主动生成、旧任务取片均须验证。
+- [ ] 配套 Backend 和客户端版本协调发布，禁止单独升级服务端造成创意旧入口不可用；回滚仍需保持鉴权、额度及预检确认边界。
+
+
 - [ ] 共用一个“创建工作流任务”节点内部实现，按 `workflowKey` 暴露八个名称明确的节点；节点输入只展示该目录项允许的媒体插槽和 generation 参数。
-- [ ] Production 节点只展示 `production_verified` 工作流；Preview 节点不得连接 `Wait` / `LoadResult` 的交付链，避免用户把不可执行预览当成出片任务。
-- [ ] 生成真实 ComfyUI 导出格式的模板：文生、参考图、首帧、首尾帧、全模态参考、编辑、延长、音频参考、恢复下载各一份。只为当前 Production Verified 项提供完整 `Create → Wait → LoadResult` 模板。
+- [ ] 同一张预连线画布由统一运行方式控制 Preview / 正式生成；Preview 下上传、Create、Wait、Download 安全跳过外部副作用，报告明确未生成视频。普通正式入口仅允许 `production_verified` 工作流。
+- [ ] 按规范 4.1–4.2 落实本地检查文件、服务器检查统一规则；Preview 仅发送参数、元信息与哈希，完整通过必须取得服务器预检结果；安装流程自动检查客户端依赖。
+- [ ] 落实无上传的本地素材检查和服务端预检记录；正式入口验证 actor、内容哈希、参数、规则版本及有效期，上传后复验实际素材，阻止跳过预检或修改内容后沿用确认。
+- [ ] 先适配产品参考图工作流，再依次适配其余目录；覆盖统一需求 AC-01 至 AC-21，保留已有任务恢复与重复计费保护。
+- [ ] 生成真实 ComfyUI 导出格式的模板：文生、参考图、首帧、首尾帧、全模态参考、编辑、延长、音频参考、恢复下载各一份。同一创作模板兼具 Preview 与受控正式执行；未开放工作流不能因模板带有完整节点链而获得付费权限。
 - [ ] 验收：节点 payload、幂等键、generation version、工作流模板连线及 Production 可见性均有客户端 pytest；实际 ComfyUI 导入验收只在目标实例上执行。
 
 #### W6：逐项 Production 验收与发布

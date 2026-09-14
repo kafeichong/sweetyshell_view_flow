@@ -91,7 +91,7 @@ describe('T02: Budget reservation and admission', () => {
         'Authorization': `Bearer ${actorToken}`,
         'Idempotency-Key': 'test-reserve-1',
       },
-      body: JSON.stringify(referenceImageWorkflowRequest('test reservation', assetIds[0], 'test-resolution')),
+      body: JSON.stringify(await referenceImageWorkflowRequest(harness, 'test reservation', assetIds[0], 'test-resolution')),
     });
 
     expect(response.status).toBe(201);
@@ -122,7 +122,7 @@ describe('T02: Budget reservation and admission', () => {
         'Authorization': `Bearer ${actorToken}`,
         'Idempotency-Key': 'test-daily-limit-1',
       },
-      body: JSON.stringify(referenceImageWorkflowRequest('first task', assetIds[0], 'test-resolution')),
+      body: JSON.stringify(await referenceImageWorkflowRequest(harness, 'first task', assetIds[0], 'test-resolution')),
     });
 
     expect(response1.status).toBe(201);
@@ -135,7 +135,7 @@ describe('T02: Budget reservation and admission', () => {
         'Authorization': `Bearer ${actorToken}`,
         'Idempotency-Key': 'test-daily-limit-2',
       },
-      body: JSON.stringify(referenceImageWorkflowRequest('second task', assetIds[1], 'test-resolution')),
+      body: JSON.stringify(await referenceImageWorkflowRequest(harness, 'second task', assetIds[1], 'test-resolution')),
     });
 
     expect(response2.status).toBe(429);
@@ -151,7 +151,7 @@ describe('T02: Budget reservation and admission', () => {
 
   it('allows same idempotency key without double reservation', async () => {
     const assetIds = (global as any).testAssetIds || [];
-    const body = referenceImageWorkflowRequest('idempotent task', assetIds[0], 'test-resolution');
+    const body = await referenceImageWorkflowRequest(harness, 'idempotent task', assetIds[0], 'test-resolution');
 
     // First request
     const response1 = await fetch(`${harness.appUrl}/api/v1/tasks`, {
@@ -193,7 +193,7 @@ describe('T02: Budget reservation and admission', () => {
 
   it('handles concurrent requests with same key correctly', async () => {
     const assetIds = (global as any).testAssetIds || [];
-    const body = referenceImageWorkflowRequest('concurrent task', assetIds[0], 'test-resolution');
+    const body = await referenceImageWorkflowRequest(harness, 'concurrent task', assetIds[0], 'test-resolution');
 
     // Send two concurrent requests
     const [response1, response2] = await Promise.all([
@@ -249,7 +249,7 @@ describe('T02: Budget reservation and admission', () => {
         'Authorization': `Bearer ${actorToken}`,
         'Idempotency-Key': 'test-paused-1',
       },
-      body: JSON.stringify(referenceImageWorkflowRequest('test pause', assetIds[0], 'test-resolution')),
+      body: JSON.stringify(await referenceImageWorkflowRequest(harness, 'test pause', assetIds[0], 'test-resolution')),
     });
 
     expect(response.status).toBe(503);
@@ -280,7 +280,7 @@ describe('T02: Budget reservation and admission', () => {
         'Authorization': `Bearer ${actorToken}`,
         'Idempotency-Key': 'test-no-limits-1',
       },
-      body: JSON.stringify(referenceImageWorkflowRequest('test no limits', assetIds[0], 'test-resolution')),
+      body: JSON.stringify(await referenceImageWorkflowRequest(harness, 'test no limits', assetIds[0], 'test-resolution')),
     });
 
     expect(response.status).toBe(429);
@@ -305,7 +305,7 @@ describe('T02: Budget reservation and admission', () => {
       data: { dailyLimitCny: new Prisma.Decimal('2.000000') },
     });
 
-    const makeRequest = (key: string, assetId: string) =>
+    const makeRequest = async (key: string, assetId: string) =>
       fetch(`${harness.appUrl}/api/v1/tasks`, {
         method: 'POST',
         headers: {
@@ -313,7 +313,7 @@ describe('T02: Budget reservation and admission', () => {
           'Authorization': `Bearer ${actorToken}`,
           'Idempotency-Key': key,
         },
-        body: JSON.stringify(referenceImageWorkflowRequest('race for budget', assetId, 'test-resolution')),
+        body: JSON.stringify(await referenceImageWorkflowRequest(harness, 'race for budget', assetId, 'test-resolution')),
       });
 
     const [response1, response2] = await Promise.all([
@@ -357,7 +357,7 @@ describe('T02: Budget reservation and admission', () => {
         'Authorization': `Bearer ${actorToken}`,
         'Idempotency-Key': 'test-period-keys-1',
       },
-      body: JSON.stringify(referenceImageWorkflowRequest('period keys', assetIds[0], 'test-resolution')),
+      body: JSON.stringify(await referenceImageWorkflowRequest(harness, 'period keys', assetIds[0], 'test-resolution')),
     });
 
     expect(response.status).toBe(201);
@@ -421,7 +421,7 @@ describe('T02: Budget reservation and admission', () => {
           'Authorization': `Bearer ${limitedHarness.actorToken}`,
           'Idempotency-Key': 'test-daily-count-1',
         },
-        body: JSON.stringify(referenceImageWorkflowRequest('first of the day', asset.id, 'test-resolution')),
+        body: JSON.stringify(await referenceImageWorkflowRequest(limitedHarness, 'first of the day', asset.id, 'test-resolution')),
       });
       expect(first.status).toBe(201);
 
@@ -432,7 +432,7 @@ describe('T02: Budget reservation and admission', () => {
           'Authorization': `Bearer ${limitedHarness.actorToken}`,
           'Idempotency-Key': 'test-daily-count-2',
         },
-        body: JSON.stringify(referenceImageWorkflowRequest('second of the day', asset2.id, 'test-resolution')),
+        body: JSON.stringify(await referenceImageWorkflowRequest(limitedHarness, 'second of the day', asset2.id, 'test-resolution')),
       });
       expect(second.status).toBe(429);
       const error = await second.json();

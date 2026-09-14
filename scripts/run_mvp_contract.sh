@@ -119,8 +119,8 @@ else
       ON CONFLICT (actor_id) DO UPDATE SET token_hash = EXCLUDED.token_hash, status = 'active';
       INSERT INTO production_gates (id, paused, reason) VALUES ('production', false, 'live contract')
       ON CONFLICT (id) DO UPDATE SET paused = false, reason = 'live contract';
-      INSERT INTO assets (id, owner_id, role, object_key, file_hash, inspection_status, media_type, mime_type, media_metadata)
-      VALUES (gen_random_uuid(), 'live-contract-actor', 'input', 'live-contract/reference.png', repeat('a', 64), 'uploaded', 'image', 'image/png', json_build_object('kind', 'image', 'width', 1280, 'height', 720))
+      INSERT INTO assets (id, owner_id, role, object_key, file_hash, inspection_status, media_type, mime_type, media_metadata, size_bytes)
+      VALUES (gen_random_uuid(), 'live-contract-actor', 'input', 'live-contract/reference.png', '2bec78f9edca83498eba36c257e0d0a95a0ff0a21c6ff985739c51a5e0c81ec5', 'uploaded', 'image', 'image/png', json_build_object('kind', 'image', 'width', 1280, 'height', 720), 43)
       ON CONFLICT (owner_id, role, file_hash) DO NOTHING;
     " >/dev/null
 
@@ -147,7 +147,7 @@ else
   OSS_REGION="oss-cn-beijing" \
   VIDEO_FLOW_PRODUCTION_SPEC_JSON='{"version":"live-v1","model":"doubao-seedance-2-5-260628","duration":5,"ratio":"16:9","resolution":"720p","generateAudio":false,"watermark":true,"pricingVersion":"seedance-token-v1","reserveCny":"2.000000"}' \
   PORT=$LIVE_PORT \
-  node dist/src/main.js >"$LIVE_LOG" 2>&1 &
+  node test/contract-backend.cjs >"$LIVE_LOG" 2>&1 &
   LIVE_BACKEND_PID="$!"
   cleanup_live() {
     kill "$LIVE_BACKEND_PID" >/dev/null 2>&1 || true

@@ -11,6 +11,7 @@
 | --- | --- |
 | 代码现在到底能做什么、不能做什么？ | **[PROJECT_STATUS.md](./PROJECT_STATUS.md)** |
 | 接下来做什么、什么时候做、怎么验收？ | **[ROADMAP.md](./ROADMAP.md)** |
+| 所有工作流必须遵循什么开发规范？ | [Preview 与正式生成统一需求规范](./requirements/2026-09-14/workflow-preview-production-spec.md) |
 | 系统边界和技术约束是什么？ | [architecture/seedance-integration-baseline.md](./architecture/seedance-integration-baseline.md) |
 | 怎么部署、怎么回滚？ | [runbooks/deploy-and-rollback.md](./runbooks/deploy-and-rollback.md) |
 | 创意同事怎么用？ | [runbooks/creative-user-guide.md](./runbooks/creative-user-guide.md) |
@@ -33,7 +34,11 @@
 | [PROJECT_STATUS.md](./PROJECT_STATUS.md) | 唯一权威现状：已完成能力、已知缺口、风险登记册、验证命令 | 每次合并到 `main` 后；发现文档与代码不符时 |
 | [ROADMAP.md](./ROADMAP.md) | 唯一权威计划：阶段目标、任务、出口门禁、里程碑、度量指标 | 每阶段开始/结束时；范围变更时 |
 
-## 3. 参考文档
+## 3. 需求规范与参考文档
+
+### 强制需求规范
+
+- [工作流 Preview 与正式生成统一需求规范 v1.1](./requirements/2026-09-14/workflow-preview-production-spec.md)：所有新增与改造工作流的需求依据；规定同一画布、Preview 无上传和生成副作用、有效预检后明确确认、服务端准入和防重复计费。此文档描述应达到的行为，不代表已实现。
 
 ### 架构与约束
 
@@ -46,6 +51,8 @@
 | [architecture/seedance-workflow-development-acceleration-2026-09-14.md](./architecture/seedance-workflow-development-acceleration-2026-09-14.md) | Seedance 工作流的主实现者、Agent 与 Skills 协作策略；不描述当前生产能力 |
 
 ### 运行手册（Runbooks）
+
+- [产品参考图预检与正式确认](./runbooks/product-preflight.md)：配套接口、模板及无付费验证；是否发布以 PROJECT_STATUS 为准。
 
 | 文档 | 说明 |
 | --- | --- |

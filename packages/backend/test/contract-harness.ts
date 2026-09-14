@@ -34,6 +34,7 @@ export type ContractHarness = {
   appUrl: string;
   prisma: PrismaClient;
   actorId: string;
+  productionSpec?: Record<string, unknown>;
   actorToken: string;
   workerToken: string;
   adminToken: string;
@@ -116,7 +117,7 @@ export async function createContractHarness(
     },
   });
 
-  const child = spawn(process.execPath, ['dist/src/main.js'], {
+  const child = spawn(process.execPath, ['test/contract-backend.cjs'], {
     cwd: process.cwd(),
     env: {
       ...process.env,
@@ -147,6 +148,7 @@ export async function createContractHarness(
 
   return {
     appUrl,
+    productionSpec: options.productionSpec,
     prisma,
     actorId,
     actorToken,

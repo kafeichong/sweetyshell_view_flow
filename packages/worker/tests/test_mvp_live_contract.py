@@ -17,6 +17,9 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import hashlib
+import json
+import threading
 import os
 import subprocess
 import sys
@@ -49,6 +52,40 @@ def provider_stats(base_url: str) -> dict:
     return response.json()
 
 
+_preflight_receipts = {}
+_preflight_lock = threading.Lock()
+
+
+def preflight_production(client, payload, headers=None):
+    """Exercise the authenticated preflight route; reuse one receipt per test intent."""
+    intent = {key: payload[key] for key in ("workflowKey", "prompt", "generation")}
+    content = b"contract-object:live-contract/reference.png"
+    intent["media"] = [{"role": "reference_image", "sha256": hashlib.sha256(content).hexdigest(),
+                        "sizeBytes": len(content), "mimeType": "image/png",
+                        "metadata": {"kind": "image", "width": 1280, "height": 720}}]
+    cache_key = (str(client.base_url), (headers or {}).get("Authorization", client.headers.get("Authorization")), json.dumps(intent, sort_keys=True))
+    with _preflight_lock:
+        if cache_key not in _preflight_receipts:
+            response = client.post("/api/v1/tasks/preflight", headers=headers, json=intent)
+            if response.status_code != 201:
+                return response, None
+            report = response.json()
+            assert report["willCallProvider"] is False
+            assert report["willUploadMedia"] is False
+            _preflight_receipts[cache_key] = report["preflightId"]
+        return None, {**payload, "preflightId": _preflight_receipts[cache_key], "confirmLiveSubmission": True}
+
+
+def post_confirmed(client, payload, headers=None):
+    error, confirmed = preflight_production(client, payload, headers)
+    if error is not None:
+        return error
+    response = client.post("/api/v1/tasks", headers=headers, json=confirmed)
+    if response.status_code >= 400:
+        print("confirmed submission rejected:", response.status_code, response.json().get("message"))
+    return response
+
+
 class LiveMVPContractTests(unittest.TestCase):
     """E01/E06/E09 的跨包版本：真实 Worker 跑完整条链路。"""
 
@@ -75,13 +112,13 @@ class LiveMVPContractTests(unittest.TestCase):
 
     def _create_production_task(self, prompt: str, asset_id: str) -> dict:
         with self._api() as client:
-            created = client.post(
-                "/api/v1/tasks",
+            created = post_confirmed(
+                client,
                 headers={
                     "Authorization": f"Bearer {self.actor_token}",
                     "Idempotency-Key": f"live-{prompt}",
                 },
-                json={
+                payload={
                     "mode": "production",
                     "workflowKey": "seedance.reference-image-to-video.v1",
                     "prompt": {"positive": prompt},
@@ -114,23 +151,17 @@ class LiveMVPContractTests(unittest.TestCase):
         before = provider_stats(self.provider_url)["createCount"]
 
         with self._api() as client:
-            response = client.post(
-                "/api/v1/tasks",
-                headers={
-                    "Authorization": f"Bearer {self.actor_token}",
-                    "Idempotency-Key": "live-preview-e01",
-                },
-                json={
-                    "mode": "preview",
-                    "workflowKey": "seedance.text-to-video.v1",
-                    "prompt": {"positive": "live preview e01"},
-                    "generation": {"duration": 5, "ratio": "16:9", "resolution": "720p"},
-                    "media": [],
-                },
-            )
-        response.raise_for_status()
-        task = response.json()
-        self.assertTrue(task.get("preview"), "preview plan missing")
+            error, confirmed = preflight_production(client, {
+                "workflowKey": "seedance.reference-image-to-video.v1",
+                "prompt": {"positive": "live product preview e01"},
+                "generation": {"duration": 5, "ratio": "16:9", "resolution": "720p"},
+                "media": [{"assetId": required_env("VIDEO_FLOW_LIVE_ASSET_ID"), "role": "reference_image"}],
+            }, {"Authorization": f"Bearer {self.actor_token}"})
+            self.assertIsNone(error)
+            response = client.get(f"/api/v1/tasks/{confirmed['preflightId']}",
+                                  headers={"Authorization": f"Bearer {self.actor_token}"})
+            response.raise_for_status()
+            self.assertEqual(response.json()["status"], "preview")
 
         self._run_one_cycle()
 
@@ -256,13 +287,13 @@ class WorkerRestartRecoveryTests(unittest.TestCase):
     def test_restart_after_provider_id_is_persisted_delivers_without_a_second_create(self):
         prompt = "live restart e06"
         with self._api() as client:
-            created = client.post(
-                "/api/v1/tasks",
+            created = post_confirmed(
+                client,
                 headers={
                     "Authorization": f"Bearer {self.actor_token}",
                     "Idempotency-Key": f"live-{prompt}",
                 },
-                json={
+                payload={
                     "mode": "production",
                     "workflowKey": "seedance.reference-image-to-video.v1",
                     "prompt": {"positive": prompt},
@@ -360,10 +391,10 @@ class AdmissionBoundaryTests(unittest.TestCase):
             headers["Authorization"] = f"Bearer {token}"
 
         with self._api() as client:
-            return client.post(
-                "/api/v1/tasks",
+            return post_confirmed(
+                client,
                 headers=headers,
-                json={
+                payload={
                     "mode": "production",
                     "workflowKey": "seedance.reference-image-to-video.v1",
                     "prompt": {"positive": params["prompt"]},
@@ -431,6 +462,15 @@ class AdmissionBoundaryTests(unittest.TestCase):
         )
 
     def test_pausing_the_gate_blocks_new_admission_only(self):
+        # Prepare before pausing: production must recheck admission after a successful Preview.
+        with self._api() as client:
+            error, _ = preflight_production(client, {
+                "mode": "production", "workflowKey": "seedance.reference-image-to-video.v1",
+                "prompt": {"positive": "e13 paused admission"},
+                "generation": {"duration": 5, "ratio": "16:9", "resolution": "720p"},
+                "media": [{"assetId": self.asset_id, "role": "reference_image"}],
+            }, {"Authorization": f"Bearer {self.actor_token}"})
+            self.assertIsNone(error)
         try:
             paused = self._set_gate(True, "contract: admission boundary check")
             self.assertEqual(paused.status_code, 200)
@@ -507,10 +547,10 @@ class AdditionalCrossPackageScenariosTests(unittest.TestCase):
             "media": [{"assetId": asset_id or self.asset_id, "role": "reference_image"}],
         }
         with self._api(token=token) as client:
-            return client.post(
-                "/api/v1/tasks",
+            return post_confirmed(
+                client,
                 headers={"Idempotency-Key": idempotency_key},
-                json=payload,
+                payload=payload,
             )
 
     def _post_task_concurrently(self, *, prompt: str, key: str, token: Optional[str] = None, parallel: int = 2):

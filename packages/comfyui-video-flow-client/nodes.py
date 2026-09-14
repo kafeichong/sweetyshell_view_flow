@@ -319,3 +319,11 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "VideoFlowWaitTask": "Wait Video Flow Task",
     "VideoFlowLoadResult": "Load Video Flow Result",
 }
+
+# Keep the familiar staged graph without colliding with legacy Ark node IDs.
+try:
+    from .preflight_nodes import CLASSES, NAMES
+except ImportError:
+    from preflight_nodes import CLASSES, NAMES
+NODE_CLASS_MAPPINGS.update(CLASSES)
+NODE_DISPLAY_NAME_MAPPINGS.update(NAMES)

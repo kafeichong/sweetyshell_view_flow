@@ -1,4 +1,4 @@
-import { createContractHarness } from './contract-harness';
+import { createContractHarness, ContractHarness } from './contract-harness';
 import { inspectedImageFixture, referenceImageWorkflowRequest } from './workflow-fixtures';
 
 const testSpec = {
@@ -14,20 +14,20 @@ const testSpec = {
 };
 
 async function createProduction(
-  appUrl: string,
+  harness: ContractHarness,
   token: string,
   key: string,
   assetId: string,
   paramsOverride: Record<string, unknown> = {},
 ) {
-  return fetch(`${appUrl}/api/v1/tasks`, {
+  return fetch(`${harness.appUrl}/api/v1/tasks`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
       'Idempotency-Key': key,
     },
-    body: JSON.stringify({ ...referenceImageWorkflowRequest('contract product', assetId, 'test-resolution'), ...paramsOverride }),
+    body: JSON.stringify({ ...await referenceImageWorkflowRequest(harness, 'contract product', assetId, 'test-resolution'), ...paramsOverride }),
   });
 }
 
@@ -61,25 +61,25 @@ describe('production input contract', () => {
         },
       });
       const response = await createProduction(
-        harness.appUrl,
+        harness,
         harness.actorToken,
         'contract-production-owned',
         input.id,
       );
       const task = await response.json();
 
-      expect(response.status).toBe(201);
+      expect({ status: response.status, message: task.message }).toEqual({ status: 201, message: undefined });
       expect(task.executionPlan).toMatchObject({
         specVersion: 'test-v1',
         model: 'test-model',
         imageAssetId: input.id,
-        inputFileHash: 'a'.repeat(64),
+        inputFileHash: (await harness.prisma.asset.findUnique({ where: { id: input.id } }))!.fileHash,
         resolution: 'test-resolution',
       });
       expect(task.deliveryStatus).toBe('not_started');
 
       const repeated = await createProduction(
-        harness.appUrl,
+        harness,
         harness.actorToken,
         'contract-production-owned',
         input.id,
@@ -88,7 +88,7 @@ describe('production input contract', () => {
       expect((await repeated.json()).id).toBe(task.id);
       expect(
         await harness.prisma.task.count({
-          where: { actorId: harness.actorId },
+          where: { actorId: harness.actorId, status: { not: 'preview' } },
         }),
       ).toBe(1);
     } finally {
@@ -108,7 +108,7 @@ describe('production input contract', () => {
         },
       });
       const response = await createProduction(
-        harness.appUrl,
+        harness,
         harness.actorToken,
         'contract-production-forbidden',
         input.id,
@@ -140,7 +140,7 @@ describe('production input contract', () => {
         },
       });
       const response = await createProduction(
-        harness.appUrl,
+        harness,
         harness.actorToken,
         `contract-production-${role}-${inspectionStatus}`,
         input.id,
@@ -167,7 +167,7 @@ describe('production input contract', () => {
         },
       });
       const response = await createProduction(
-        harness.appUrl,
+        harness,
         harness.actorToken,
         `contract-production-invalid-${randomName(override)}`,
         input.id,

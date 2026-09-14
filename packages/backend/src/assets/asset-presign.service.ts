@@ -1,3 +1,5 @@
+import { createHash } from 'crypto';
+import { Readable } from 'stream';
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 
 // ali-oss publishes CommonJS. Resolve both CommonJS and transpiled ESM shapes
@@ -9,6 +11,7 @@ const OssConstructor = ((require('ali-oss') as { default?: unknown }).default ??
   bucket: string;
   secure: boolean;
 }) => {
+  getStream: (objectKey: string) => Promise<{ stream: Readable }>;
   signatureUrl: (objectKey: string, options: Record<string, unknown>) => string;
   head: (objectKey: string) => Promise<{
     res?: { headers?: Record<string, string | number | undefined> };
@@ -99,6 +102,22 @@ export class AssetPresignService {
       mimeType: typeof rawMimeType === 'string' ? rawMimeType.split(';')[0].trim().toLowerCase() : undefined,
       fileHash: typeof rawHash === 'string' ? rawHash.trim().toLowerCase() : undefined,
     };
+  }
+
+  async verifyObjectContent(objectKey: string, expectedHash: string, expectedSize: number): Promise<void> {
+    if (!this.client) throw new ServiceUnavailableException('OSS presign service is not configured');
+    const { stream } = await this.client.getStream(objectKey);
+    const timer = setTimeout(() => stream.destroy(new Error('CONTENT_CHECK_TIMEOUT')), 60_000);
+    try {
+      const hash = createHash('sha256');
+      let size = 0;
+      for await (const chunk of stream) {
+        size += chunk.length;
+        if (size > expectedSize) throw new Error('CONTENT_SIZE_MISMATCH');
+        hash.update(chunk);
+      }
+      if (size !== expectedSize || hash.digest('hex') !== expectedHash) throw new Error('CONTENT_HASH_MISMATCH');
+    } finally { clearTimeout(timer); stream.destroy(); }
   }
 
   createDownloadUrl(objectKey: string) {

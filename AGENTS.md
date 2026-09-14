@@ -61,3 +61,9 @@ This repository is a three-package workspace:
 - 现状只写在 `docs/PROJECT_STATUS.md`，计划只写在 `docs/ROADMAP.md`。其他文档需要现状时用链接引用，不要复制结论。
 - 文档入口是 `docs/README.md`；被取代的文档移入 `docs/archive/` 并在 `docs/archive/README.md` 记录归档原因，不要直接删除。
 - 现状类结论必须附文件路径（必要时到行号）与验证命令；接口变更时同步更新 `docs/runbooks/` 下的对应手册。
+
+## Workflow Requirements
+- 新增或改造任何工作流前，必须阅读并遵守 `docs/requirements/2026-09-14/workflow-preview-production-spec.md`。
+- 同一画布默认 Preview；Preview 不上传素材、不调用生成 Provider、不产生可执行任务、付费 Attempt 或预算预占。正式提交必须具备匹配当前内容的有效预检记录和明确确认，并通过服务端准入；不得仅以客户端布尔值替代校验。
+- Preview 必须采用“本地插件检查文件 + 公司服务器检查统一规则”：仅发送参数、素材元信息与哈希，不发送素材本体；完整预检必须通过服务器。正式上传后校验实际文件内容，不以客户端或 OSS 自定义哈希声明代替内容验证。
+- 工作流变更必须提供该规范适用验收场景的证据；计划写入 `docs/ROADMAP.md`，实现与验证结果写入 `docs/PROJECT_STATUS.md`。

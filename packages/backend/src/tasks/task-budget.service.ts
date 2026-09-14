@@ -55,6 +55,12 @@ export class TaskBudgetService {
 
   constructor(private readonly prisma: PrismaService) {}
 
+  async preflightAvailability(actorId: string, reserveCny: string) {
+    const gate = await this.prisma.productionGate.findUnique({ where: { id: 'production' } });
+    if (!gate || gate.paused) return { canProceed: false, reason: 'PRODUCTION_PAUSED' };
+    return this.checkBudgetAvailability(this.prisma as unknown as Prisma.TransactionClient, actorId, reserveCny);
+  }
+
   async createTaskWithReservation(data: ProductionTaskData) {
     return this.prisma.$transaction(async (tx) => {
       if (typeof (tx as any).$executeRaw === 'function') {

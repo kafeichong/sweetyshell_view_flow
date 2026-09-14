@@ -14,7 +14,9 @@ import {
   ServiceUnavailableException,
   UseGuards,
 } from '@nestjs/common';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
+import { AssetPresignService } from '../../assets/asset-presign.service';
+import { PREFLIGHT_TTL_MS, preflightSnapshot, verifyPreflightRecord } from './workflow-preflight';
 import { Prisma } from '@prisma/client';
 import { ApiBearerAuth, ApiHeader, ApiTags } from '@nestjs/swagger';
 import { ApiCredentialGuard } from '../../auth/api-credential.guard';
@@ -51,11 +53,48 @@ export class V1TasksController {
     private readonly tasks: TasksService,
     private readonly budget?: TaskBudgetService,
     private readonly assets?: AssetsService,
+    private readonly presign?: AssetPresignService,
   ) {}
 
   @Get('/workflows')
   workflows() {
     return { workflows: listWorkflows() };
+  }
+
+  @Post('preflight')
+  async preflight(@CurrentActor() actor: { actorId: string }, @Body() body: unknown) {
+    const spec = loadProductionSpec();
+    if (!spec) throw new ServiceUnavailableException('PRODUCTION_SPEC_UNAVAILABLE');
+    if (!isProductionAllowed(actor.actorId)) throw new ForbiddenException('Production mode is not enabled for this actor');
+    if (!this.budget) throw new ServiceUnavailableException('PREFLIGHT_BUDGET_UNAVAILABLE');
+    const availability = await this.budget.preflightAvailability(actor.actorId, spec.reserveCny);
+    if (!availability.canProceed) throw new BadRequestException(availability.reason);
+    let snapshot;
+    try { snapshot = preflightSnapshot(body, spec); }
+    catch (error) { throw new BadRequestException(error instanceof Error ? error.message : 'PREFLIGHT_INVALID'); }
+    const task = await this.tasks.createPreview({
+      actorId: actor.actorId, clientRequestId: `preflight:${randomUUID()}`,
+      capability: 'IMAGE_TO_VIDEO', workflowName: snapshot.intent.workflowKey,
+      workflowVersion: 'v1', requestSnapshot: snapshot, prompt: snapshot.intent.prompt.positive,
+    });
+    return { preflightId: task.id, expiresAt: new Date(new Date(task.createdAt).getTime() + PREFLIGHT_TTL_MS).toISOString(),
+      status: 'preview', willCallProvider: false, willUploadMedia: false,
+      intent: snapshot.intent, effectiveSpec: spec,
+      checks: { parameters: 'passed', mediaMetadata: 'client_report_validated', actualFile: 'pending_upload',
+        budget: 'available_now_rechecked_at_submission' } };
+  }
+
+  @Get('preflight/:id/check')
+  async checkPreflight(@CurrentActor() actor: { actorId: string }, @Param('id') id: string) {
+    const record = await this.tasks.findOneForActor(id, actor.actorId);
+    const spec = loadProductionSpec();
+    if (!spec || !this.budget) throw new ServiceUnavailableException('PRODUCTION_SPEC_UNAVAILABLE');
+    if (!isProductionAllowed(actor.actorId)) throw new ForbiddenException('Production mode is not enabled for this actor');
+    try { verifyPreflightRecord(record, actor.actorId, (record?.requestSnapshot as any)?.intent, spec); }
+    catch (error) { throw new BadRequestException(error instanceof Error ? error.message : 'PREFLIGHT_INVALID'); }
+    const availability = await this.budget.preflightAvailability(actor.actorId, spec.reserveCny);
+    if (!availability.canProceed) throw new BadRequestException(availability.reason);
+    return { valid: true, preflightId: id, willCallProvider: false };
   }
 
   @Post()
@@ -69,6 +108,7 @@ export class V1TasksController {
     const mode = body?.mode ?? 'preview';
     if (mode !== 'preview' && mode !== 'production') throw new BadRequestException('mode must be "preview" or "production"');
 
+    if (Object.keys(body ?? {}).some(k => !['workflowKey', 'prompt', 'generation', 'media', 'mode', 'preflightId', 'confirmLiveSubmission'].includes(k)) && body?.workflowKey) throw new BadRequestException('WORKFLOW_FIELDS_INVALID');
     const requestSnapshot = stableStringify(body);
     const existing = await this.tasks.findByActorRequest(actor.actorId, idempotencyKey);
     if (existing) {
@@ -131,6 +171,28 @@ export class V1TasksController {
         } catch (error) {
           throw new BadRequestException(error instanceof Error ? error.message : 'WORKFLOW_ASSET_INVALID');
         }
+        // A historical preview or a client boolean is not a server preflight receipt.
+        if (body.confirmLiveSubmission !== true || !body.preflightId) throw new BadRequestException('PREFLIGHT_CONFIRMATION_REQUIRED');
+        const record = await this.tasks.findOneForActor(body.preflightId, actor.actorId);
+        const descriptors = [];
+        for (const item of normalized.media) {
+          const asset = await this.assets.findOwnedUploadedInput(item.assetId, actor.actorId);
+          if (!asset) throw new ForbiddenException('PRODUCTION_INPUT_NOT_OWNED');
+          descriptors.push({ role: item.role, sha256: asset.fileHash, mimeType: asset.mimeType,
+            sizeBytes: Number(asset.sizeBytes), metadata: asset.mediaMetadata });
+        }
+        const intent = { workflowKey: body.workflowKey, prompt: body.prompt, generation: body.generation, media: descriptors };
+        try { verifyPreflightRecord(record, actor.actorId, intent, spec); }
+        catch (error) { throw new BadRequestException(error instanceof Error ? error.message : 'PREFLIGHT_INVALID'); }
+        if (!this.presign) throw new ServiceUnavailableException('PREFLIGHT_CONTENT_CHECK_UNAVAILABLE');
+        for (let index = 0; index < normalized.media.length; index++) {
+          const asset = await this.assets.findOwnedUploadedInput(normalized.media[index].assetId, actor.actorId);
+          try { await this.presign.verifyObjectContent(asset!.objectKey, descriptors[index].sha256!, descriptors[index].sizeBytes); }
+          catch { throw new BadRequestException('PREFLIGHT_ACTUAL_CONTENT_MISMATCH'); }
+        }
+        // Content verification may take time; do not accept a receipt that expired meanwhile.
+        try { verifyPreflightRecord(record, actor.actorId, intent, spec); }
+        catch (error) { throw new BadRequestException(error instanceof Error ? error.message : 'PREFLIGHT_INVALID'); }
         executionPlan = {
           specVersion: spec.version,
           pricingVersion: spec.pricingVersion,

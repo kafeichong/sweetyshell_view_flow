@@ -57,3 +57,12 @@ describe('AssetPresignService object verification', () => {
     });
   });
 });
+
+it('checks actual object bytes rather than trusting OSS hash metadata', async () => {
+  const { Readable } = require('stream');
+  const { createHash } = require('crypto');
+  const service = new AssetPresignService();
+  (service as any).client = { getStream: async () => ({ stream: Readable.from([Buffer.from('real')]) }) };
+  await expect(service.verifyObjectContent('key', 'a'.repeat(64), 4)).rejects.toThrow('CONTENT_HASH_MISMATCH');
+  await expect(service.verifyObjectContent('key', createHash('sha256').update('real').digest('hex'), 4)).resolves.toBeUndefined();
+});

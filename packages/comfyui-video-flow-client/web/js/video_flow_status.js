@@ -3,8 +3,8 @@
 // 这里刻意不做完整前端：用户需要知道的只有"任务 id 是什么""片存到哪了""费用是否
 // 已核实"。任何一步失败都不能影响 ComfyUI 本身，所以整体包在 try/catch 里。
 
-import { app } from "../../scripts/app.js";
-import { api } from "../../scripts/api.js";
+import { app } from "../../../scripts/app.js";
+import { api } from "../../../scripts/api.js";
 
 const WATCHED_NODES = new Set([
   "VideoFlowSeedanceProduction",
