@@ -6,6 +6,7 @@ import { ApiCredentialGuard } from '../../auth/api-credential.guard';
 import { CurrentActor } from '../../auth/current-actor.decorator';
 import { AssetsService } from '../../assets/assets.service';
 import { AssetPresignService } from '../../assets/asset-presign.service';
+import { MediaInspectorService } from '../../assets/media-inspector.service';
 import { TasksService } from '../../tasks/tasks.service';
 import { UploadTicketDto } from './dto/upload-ticket.dto';
 
@@ -38,6 +39,7 @@ export class V1AssetsController {
     private readonly assets: AssetsService,
     private readonly presign: AssetPresignService,
     private readonly tasks?: TasksService,
+    private readonly inspector?: MediaInspectorService,
   ) {}
 
   /**
@@ -220,10 +222,20 @@ export class V1AssetsController {
       throw new BadRequestException('Uploaded object SHA-256 does not match upload ticket');
     }
 
+    let mediaMetadata;
+    if (this.inspector) {
+      try {
+        const signed = this.presign.createDownloadUrl(asset.objectKey);
+        mediaMetadata = await this.inspector.inspect(signed.downloadUrl);
+      } catch {
+        throw new BadRequestException('Uploaded media could not be inspected');
+      }
+    }
     const uploaded = await this.assets.markUploaded(id, actor.actorId, {
       bucket: this.presign.getBucketName(),
       sizeBytes: actual.sizeBytes,
       mimeType: actual.mimeType,
+      mediaMetadata,
     });
     if (!uploaded) {
       throw new NotFoundException('Asset not found');

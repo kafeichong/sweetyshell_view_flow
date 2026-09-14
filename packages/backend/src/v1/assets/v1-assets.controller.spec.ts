@@ -451,3 +451,25 @@ describe('V1AssetsController official Seedance media ticket policy', () => {
     )).rejects.toMatchObject({ status: 400, message: 'sizeBytes must be between 1 and 209715200 for video' });
   });
 });
+
+describe('V1AssetsController media inspection', () => {
+  const asset = { id: 'asset-1', ownerId: 'actor-a', objectKey: 'inputs/a.mp4', sizeBytes: BigInt(10), mimeType: 'video/mp4', fileHash: null };
+  const actual = { sizeBytes: 10, mimeType: 'video/mp4', fileHash: undefined };
+  it('persists inspected metadata before marking an upload complete', async () => {
+    const assets = { findOwned: jest.fn().mockResolvedValue(asset), markUploaded: jest.fn().mockResolvedValue({ ...asset, bucket: 'bucket', inspectionStatus: 'uploaded' }) };
+    const presign = { inspectObject: jest.fn().mockResolvedValue(actual), getBucketName: jest.fn().mockReturnValue('bucket'), createDownloadUrl: jest.fn().mockReturnValue({ downloadUrl: 'https://oss/signed' }) };
+    const inspector = { inspect: jest.fn().mockResolvedValue({ kind: 'video', width: 1280, height: 720, durationSeconds: 5, videoCodec: 'h264' }) };
+    const controller = new V1AssetsController(assets as never, presign as never, undefined, inspector as never);
+    await controller.completeUpload({ actorId: 'actor-a' }, 'asset-1');
+    expect(inspector.inspect).toHaveBeenCalledWith('https://oss/signed');
+    expect(assets.markUploaded).toHaveBeenCalledWith('asset-1', 'actor-a', expect.objectContaining({ mediaMetadata: expect.objectContaining({ kind: 'video', width: 1280 }) }));
+  });
+  it('does not mark an upload complete when media inspection fails', async () => {
+    const assets = { findOwned: jest.fn().mockResolvedValue(asset), markUploaded: jest.fn() };
+    const presign = { inspectObject: jest.fn().mockResolvedValue(actual), getBucketName: jest.fn().mockReturnValue('bucket'), createDownloadUrl: jest.fn().mockReturnValue({ downloadUrl: 'https://oss/signed' }) };
+    const inspector = { inspect: jest.fn().mockRejectedValue(new Error('MEDIA_INSPECTION_FAILED')) };
+    const controller = new V1AssetsController(assets as never, presign as never, undefined, inspector as never);
+    await expect(controller.completeUpload({ actorId: 'actor-a' }, 'asset-1')).rejects.toMatchObject({ status: 400 });
+    expect(assets.markUploaded).not.toHaveBeenCalled();
+  });
+});
