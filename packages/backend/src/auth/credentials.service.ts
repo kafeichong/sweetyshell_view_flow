@@ -12,11 +12,19 @@ export class CredentialsService {
 
   async create(actorId: string, name: string) {
     const token = `vf_${randomBytes(32).toString('hex')}`;
-    await this.prisma.actorCredential.create({
-      data: {
+    await this.prisma.actorCredential.upsert({
+      where: { actorId },
+      create: {
         actorId,
         name,
         tokenHash: this.hashToken(token),
+        status: 'active',
+      },
+      update: {
+        name,
+        tokenHash: this.hashToken(token),
+        status: 'active',
+        lastUsedAt: null,
       },
     });
     return { actorId, token };
