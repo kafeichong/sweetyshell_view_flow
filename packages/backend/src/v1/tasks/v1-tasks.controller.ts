@@ -68,7 +68,10 @@ export class V1TasksController {
     if (!isProductionAllowed(actor.actorId)) throw new ForbiddenException('Production mode is not enabled for this actor');
     if (!this.budget) throw new ServiceUnavailableException('PREFLIGHT_BUDGET_UNAVAILABLE');
     const availability = await this.budget.preflightAvailability(actor.actorId, spec.reserveCny);
-    if (!availability.canProceed) throw new BadRequestException(availability.reason);
+    const budgetWarning = !availability.canProceed &&
+      (availability.reason === 'DAILY_LIMIT_EXCEEDED' || availability.reason === 'MONTHLY_LIMIT_EXCEEDED')
+      ? availability.reason : undefined;
+    if (!availability.canProceed && !budgetWarning) throw new BadRequestException(availability.reason);
     let snapshot;
     try { snapshot = preflightSnapshot(body, spec); }
     catch (error) { throw new BadRequestException(error instanceof Error ? error.message : 'PREFLIGHT_INVALID'); }
@@ -81,7 +84,8 @@ export class V1TasksController {
       status: 'preview', willCallProvider: false, willUploadMedia: false,
       intent: snapshot.intent, effectiveSpec: spec,
       checks: { parameters: 'passed', mediaMetadata: 'client_report_validated', actualFile: 'pending_upload',
-        budget: 'available_now_rechecked_at_submission' } };
+        budget: budgetWarning ? 'warning' : 'available_now_rechecked_at_submission',
+        ...(budgetWarning ? { budgetWarning } : {}) } };
   }
 
   @Get('preflight/:id/check')

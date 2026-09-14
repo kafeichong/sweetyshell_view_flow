@@ -18,12 +18,19 @@ const referenceRequest = { workflowKey: 'seedance.reference-image-to-video.v1', 
 
 describe('V1TasksController workflow-only task API', () => {
   const tasks = { findByActorRequest: jest.fn(), createPreview: jest.fn(), findSummaryForActor: jest.fn() };
-  const budget = { createTaskWithReservation: jest.fn() };
+  const budget = { preflightAvailability: jest.fn(), createTaskWithReservation: jest.fn() };
   const assets = { findOwnedUploadedInput: jest.fn() };
   beforeEach(() => {
     process.env.VIDEO_FLOW_PRODUCTION_ACTORS = 'creative-pilot'; process.env.VIDEO_FLOW_PRODUCTION_SPEC_JSON = spec;
-    tasks.findByActorRequest.mockResolvedValue(null); tasks.createPreview.mockReset(); budget.createTaskWithReservation.mockReset();
+    tasks.findByActorRequest.mockResolvedValue(null); tasks.createPreview.mockReset(); budget.preflightAvailability.mockReset(); budget.createTaskWithReservation.mockReset();
     budget.createTaskWithReservation.mockResolvedValue({ id: 'task-1', status: 'pending' }); assets.findOwnedUploadedInput.mockResolvedValue({ id: 'asset-1', fileHash: 'a'.repeat(64), mimeType: 'image/png', mediaMetadata: { kind: 'image' } });
+  });
+  it('returns a preview warning instead of failing when the budget is currently insufficient', async () => {
+    const request = { workflowKey: 'seedance.reference-image-to-video.v1', prompt: { positive: 'product orbit' }, generation: { duration: 5, ratio: '16:9', resolution: '720p' }, media: [{ sha256: 'a'.repeat(64), role: 'reference_image', mimeType: 'image/png', sizeBytes: 100, metadata: { kind: 'image', width: 500, height: 500 } }] };
+    budget.preflightAvailability.mockResolvedValue({ canProceed: false, reason: 'DAILY_LIMIT_EXCEEDED' });
+    tasks.createPreview.mockResolvedValue({ id: 'preview-warning', status: 'preview', createdAt: new Date() });
+    await expect(new V1TasksController(tasks as never, budget as never, assets as never).preflight({ actorId: 'creative-pilot' }, request)).resolves.toMatchObject({ preflightId: 'preview-warning', checks: { budget: 'warning', budgetWarning: 'DAILY_LIMIT_EXCEEDED' } });
+    expect(tasks.createPreview).toHaveBeenCalled();
   });
   it('rejects the retired capability/profile request shape before it can create a task', async () => {
     await expect(new V1TasksController(tasks as never, budget as never, assets as never).create({ actorId: 'creative-pilot' }, 'old-1', { capability: 'IMAGE_TO_VIDEO', profile: 'seedance', params: { prompt: 'x' } } as never)).rejects.toMatchObject({ status: 400, message: 'WORKFLOW_KEY_REQUIRED' });

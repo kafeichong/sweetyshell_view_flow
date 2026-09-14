@@ -41,7 +41,7 @@
 
 成功 HTTP 201：`preflightId`、`expiresAt`、`status=preview`、`willCallProvider=false`、`willUploadMedia=false`、规范化 `intent`、`effectiveSpec`、`checks`。保存不可执行的 Preview Task，不写 Attempt 或预算预占。素材元信息校验基于客户端声明；实际文件检查明确为 `pending_upload`。
 
-错误：无凭证 401；无效凭证/非生产白名单账号 403；参数、媒体描述、暂停或额度检查不通过 400；生产规格或必要服务缺失 503。HTTP 错误中的 message 指明错误原因，客户端不得保留旧的通过状态。
+错误：无凭证 401；无效凭证/非生产白名单账号 403；参数、媒体描述、生产暂停或必要服务缺失 400/503。每日或月度金额不足时 Preview 仍返回 201，并在 `checks.budget=warning`、`checks.budgetWarning` 中提示，不创建预算预占；正式 Production 提交仍严格返回额度错误。HTTP 错误中的 message 指明错误原因，客户端不得保留旧的通过状态。
 
 ### GET /api/v1/tasks/preflight/:id/check
 

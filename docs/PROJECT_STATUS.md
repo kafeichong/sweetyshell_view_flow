@@ -19,6 +19,7 @@
 - 新增 `packages/backend/test/preflight.contract-spec.ts`，在真实 Nest/鉴权/Prisma 数据库上验证无上传预检、无 Attempt/预占、修改提示词或实际字节后拒绝、明确确认后准入，以及重复请求仅一笔预占。下游额度/恢复测试通过 `test/workflow-fixtures.ts` 预置“此前成功”的记录，便于验证预检后暂停或额度变化；这些夹具不替代预检 HTTP 用例。
 - 原 48 项 Backend 契约用例已适配新准入，新增后合计 49 passed；Fake Provider 5 passed；Worker 跨包 10 passed / 2 skipped。验证命令：`VIDEO_FLOW_CONTRACT_DB_PORT=55433 VIDEO_FLOW_CONTRACT_PROVIDER_PORT=19092 bash scripts/run_mvp_contract.sh`。`packages/backend/test/contract-backend.cjs` 仅在测试启动时替换对象存储读取传输，保留真实流式字节哈希校验；不修改正式启动入口。测试图片元信息由夹具写入，不代表真实图片解码与 OSS 验收。跨包沿用明确跳过的独立账号额度竞态 E04、外部告警/容器重建 E12，不能写成全覆盖。
 - 未验证：实际 ComfyUI 导入/报告显示、真实 OSS 上的整链验收；CLI 和旧直接提交模板尚未适配新增预检字段。旧入口不能因已有测试通过视为满足新规范。本分支不得直接发布，收尾计划见 ROADMAP W5。
+- Preview 额度体验调整：每日/月度金额不足仅在 Preview 报告中返回 warning，不再阻断无付费预检；Production 仍严格执行额度准入。当前改动待重新完成三包回归和线上部署后生效。
 - 原有现状记录保持原验证时间与上下文；本增量不回填历史交付结果。
 
 

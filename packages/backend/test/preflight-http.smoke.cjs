@@ -15,7 +15,7 @@ const intent = { workflowKey: 'seedance.reference-image-to-video.v1', prompt: { 
 async function main() {
   process.env.VIDEO_FLOW_PRODUCTION_ACTORS = 'actor-a';
   process.env.VIDEO_FLOW_PRODUCTION_SPEC_JSON = JSON.stringify(spec);
-  const records = new Map(); let paid = 0, contentChecks = 0, mismatch = false;
+  const records = new Map(); let paid = 0, contentChecks = 0, mismatch = false, budgetAvailable = true;
   const tasks = {
     findByActorRequest: async () => null,
     createPreview: async data => { const r = { ...data, id: 'preview-id', status: 'preview', createdAt: new Date() }; records.set(r.id,r); return r; },
@@ -25,7 +25,7 @@ async function main() {
   Module({ controllers: [V1TasksController], providers: [ApiCredentialGuard,
     { provide: CredentialsService, useValue: { authenticate: async token => token === 'test-token' ? { actorId: 'actor-a' } : null } },
     { provide: TasksService, useValue: tasks },
-    { provide: TaskBudgetService, useValue: { preflightAvailability: async () => ({ canProceed: true }), createTaskWithReservation: async () => { paid++; return {id:'task-id'}; } } },
+    { provide: TaskBudgetService, useValue: { preflightAvailability: async () => budgetAvailable ? ({ canProceed: true }) : ({ canProceed: false, reason: 'DAILY_LIMIT_EXCEEDED' }), createTaskWithReservation: async () => { paid++; return {id:'task-id'}; } } },
     { provide: AssetsService, useValue: { findOwnedUploadedInput: async () => ({ id: 'asset-id', objectKey: 'input', fileHash: descriptor.sha256, mimeType: descriptor.mimeType, sizeBytes: 100, mediaMetadata: descriptor.metadata }) } },
     { provide: AssetPresignService, useValue: { verifyObjectContent: async () => { contentChecks++; if(mismatch) throw Error('different bytes'); } } },
   ] })(HttpTestModule);
@@ -43,6 +43,11 @@ async function main() {
     const preview = await post('/preflight',intent); assert.equal(preview.status,201);
     const report = await preview.json(); assert.equal(report.willCallProvider,false); assert.equal(report.willUploadMedia,false);
     assert.equal(paid,0); assert.equal(contentChecks,0);
+    budgetAvailable = false;
+    const warningPreview = await post('/preflight', intent); assert.equal(warningPreview.status,201);
+    const warningReport = await warningPreview.json(); assert.equal(warningReport.checks.budget, 'warning'); assert.equal(warningReport.checks.budgetWarning, 'DAILY_LIMIT_EXCEEDED');
+    assert.equal(paid,0); assert.equal(contentChecks,0);
+    budgetAvailable = true;
     assert.equal((await post('',{...prod,prompt:{positive:'changed'}})).status,400);
     mismatch=true; assert.equal((await post('',prod)).status,400); assert.equal(paid,0);
     mismatch=false; assert.equal((await post('',prod)).status,201); assert.equal(paid,1);
