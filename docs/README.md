@@ -42,6 +42,7 @@
 | [architecture/seedance-integration-baseline.md](./architecture/seedance-integration-baseline.md) | 冻结的系统边界、稳定领域模型（Task / ExecutionAttempt / Asset / ActorCredential）、API 兼容规则、执行与计费规则、迁移与回滚原则 |
 | [architecture/video-workflow-interface-research-2026-09-14.md](./architecture/video-workflow-interface-research-2026-09-14.md) | 视频工作流、统一任务接口与媒体角色调研；记录待决策的 Workflow Registry 方向，不描述当前生产能力 |
 | [architecture/seedance-2-5-contract-evidence.md](./architecture/seedance-2-5-contract-evidence.md) | Seedance 2.5 官方字段证据、脱敏 fixture 与待取证矩阵；不描述当前生产能力 |
+| [architecture/seedance-2-5-official-pdf-digest-2026-09-14.md](./architecture/seedance-2-5-official-pdf-digest-2026-09-14.md) | Steven 下载的火山方舟官网 PDF 整理：字段、媒体限制、查询/取消合同与提示词落地规则；不描述当前生产能力 |
 
 ### 运行手册（Runbooks）
 

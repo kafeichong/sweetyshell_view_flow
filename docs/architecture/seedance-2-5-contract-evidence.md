@@ -179,3 +179,31 @@ HTTP 示例明确图片角色 `first_frame` 和 `last_frame`，并使用：
 | `seedance.audio-reference-to-video.v1` | 无纯音频 A 级示例 | `disabled` | 纯音频创建/终态原始示例及真实验收 |
 
 第 6 节列出的 `omni_reference_task_type` 和 `output_format` 已不再属于待核对字段；其余未在本节证实的字段仍不得进入 Provider 编译器。
+
+## 10. 官网 PDF 补充证据（2026-09-14）
+
+**来源：** Steven 下载的 `创建视频生成任务`、`查询视频生成任务`、`查询视频生成任务列表`、`取消或删除视频生成任务`、`Doubao Seedance 2.5 教程` 与 `提示词指南` PDF；逐项摘要见 [官网 PDF 整理](seedance-2-5-official-pdf-digest-2026-09-14.md)。这些是当前火山方舟 API 字段表与教程，列为 A 级证据。
+
+本批补齐了此前尚缺的合同：
+
+- 纯文生：`content` 可以只有 `{"type":"text","text":"..."}`；因此 `seedance.text-to-video.v1` 已有 A 级请求字段证据，但仍仅 `preview_only`，等待本账号单次真实验收。
+- 纯音频：Seedance 2.5 可只提交 `audio_url` role=`reference_audio`，也可与图片/视频组合；因此音频工作流已有 A 级字段与媒体限制证据，但仍 `disabled`，等待上传链路和真实验收。
+- 素材数量与限制：参考图 1–30；参考视频最多 10 段、总时长不超过 30 秒；参考音频最多 10 段、总时长不超过 30 秒；视频编辑输入视频为 4–30 秒。
+- 返回尾帧：`return_last_frame=true` 时，查询结果 `content.last_frame_url` 返回无水印 PNG 尾帧；视频与尾帧 URL 均 24 小时有效，Seedance 2.5 每 URL 下载最多 100 次。
+- 任务终态：查询结果有 `content.video_url`、`usage.completion_tokens` / `total_tokens`、`error.code` / `message`、`output_format`、`ratio`、`resolution`、`duration` 或 `frames`。任务仅保留最近 7 天。
+- 任务状态与删除：`queued` 可取消为 `cancelled`；`running` 不可 DELETE；`succeeded`、`failed`、`expired` 可删除记录。
+
+第 7 节的“下一份所需官方材料”被上述 PDF 取代：目前 W1 缺的不是字段名称，而是各模式在当前账号的受控真实验收、项目 Asset 预检实现，以及可归档的失败样例。
+
+## 11. 取代第 9 节的工作流证据矩阵（2026-09-14）
+
+| workflowKey | 当前请求字段证据 | 允许状态 | 进入 Production 前仍缺少 |
+| --- | --- | --- | --- |
+| `seedance.reference-image-to-video.v1` | A：`reference_image` 及限制；B：本项目真实验收 | `production_verified`（仅已验收固定规格） | 变更规格、多图、音频时重新验收 |
+| `seedance.text-to-video.v1` | A：纯 text 组合、ratio/duration 规则 | `preview_only` | 本账号一次受控真实验收、结果/费用归档 |
+| `seedance.first-frame-to-video.v1` | A：`first_frame`、`adaptive`、单图规则 | `disabled` | Asset 预检、当前账号真实验收 |
+| `seedance.first-last-frame-to-video.v1` | A：`first_frame` + `last_frame`、`adaptive`、两图规则 | `disabled` | Asset 预检、当前账号真实验收 |
+| `seedance.omni-reference.v1` | A：三类 `reference_*`、1–30 图/10 视频/10 音频、`reference` | `disabled` | 项目总量校验、当前账号真实验收 |
+| `seedance.video-edit.v1` | A：`reference_video`、`edit`、`adaptive`、`duration=-1`、4–30 秒 | `disabled` | 视频 metadata 校验、当前账号真实验收 |
+| `seedance.video-extend.v1` | A：`reference_video`、`extend`、`adaptive` | `disabled` | 视频 metadata 校验、当前账号真实验收 |
+| `seedance.audio-reference-to-video.v1` | A：纯 `reference_audio`、音频格式/时长/数量限制 | `disabled` | 音频上传与 metadata 校验、当前账号真实验收 |

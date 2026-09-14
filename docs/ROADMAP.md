@@ -727,7 +727,8 @@ Backend 只接受用户意图，按 Registry 生成并冻结 `executionPlan`：w
 - [x] 建立 `docs/architecture/seedance-2-5-contract-evidence.md`，每个模式记录官方 URL、SDK/HTTP 请求、创建响应、终态响应、错误示例和取证日期；以“火山方舟当前模型证据 / 同系列交叉参考 / 本项目实测”标记来源等级。首份矩阵已明确未取证字段。
 - [x] 将官方 quickstart 的编辑请求脱敏后保存为测试 fixture；不得保存 API Key、真实临时 URL、真实人物素材或可重放的生产 taskId。
 - [x] 已将 Steven 提供的官方示例固化为脱敏 fixture：`first_frame` / `last_frame`、`omni_reference_task_type=reference|edit|extend`、`output_format="mov"`、编辑 `duration=-1` 和延长数值时长。
-- [ ] 对无媒体纯文生、纯音频参考、`return_last_frame`、素材数量/时长限制、延长方向提示词与错误响应补齐火山方舟原始证据；缺任一项时对应 workflow 保持 `preview_only` 或 `disabled`。
+- [x] 已从 Steven 提供的火山方舟官网 PDF 补齐无媒体纯文生、纯音频参考、`return_last_frame`、素材数量/时长限制、延长方向提示词与 `InvalidParameter.TaskTypeConstraint` / `InvalidParameter.TaskTypeMismatch` 的字段证据；摘要见 [官网 PDF 整理](architecture/seedance-2-5-official-pdf-digest-2026-09-14.md)。
+- [ ] 为每个 workflow 补齐当前账号的受控真实验收、项目 Asset 预检与可归档失败样例；未完成前保持 `preview_only` 或 `disabled`。
 - [ ] 验收：每个目录项在 Evidence 文档中都有明确“已取证 / 未取证 / 不适用”；任何未取证字段在 Registry/编译器测试中都不可进入 Provider payload。
 
 #### W2：媒体资产能力与上传票据策略
