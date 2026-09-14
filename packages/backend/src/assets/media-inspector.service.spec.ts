@@ -1,0 +1,25 @@
+jest.mock('@nestjs/common', () => ({ Injectable: () => () => undefined }));
+
+import { MediaInspectorService } from './media-inspector.service';
+
+describe('MediaInspectorService', () => {
+  it('normalizes a video ffprobe response into durable metadata', async () => {
+    const inspect = new MediaInspectorService(async () => JSON.stringify({
+      format: { duration: '12.5' },
+      streams: [
+        { codec_type: 'video', width: 1280, height: 720, codec_name: 'h264', r_frame_rate: '30000/1001' },
+        { codec_type: 'audio', codec_name: 'aac' },
+      ],
+    }));
+
+    await expect(inspect.inspect('https://oss.example/signed.mp4')).resolves.toEqual({
+      kind: 'video', width: 1280, height: 720, durationSeconds: 12.5,
+      frameRate: 29.97002997002997, videoCodec: 'h264', audioCodec: 'aac',
+    });
+  });
+
+  it('rejects an ffprobe response without a media stream', async () => {
+    const inspect = new MediaInspectorService(async () => JSON.stringify({ format: {}, streams: [] }));
+    await expect(inspect.inspect('https://oss.example/invalid')).rejects.toThrow('MEDIA_INSPECTION_FAILED');
+  });
+});
