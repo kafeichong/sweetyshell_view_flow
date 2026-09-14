@@ -16,21 +16,32 @@ from artifact_delivery import (  # noqa: E402
 
 class ArtifactObjectKeyTests(unittest.TestCase):
     def test_artifact_key_is_stable_and_task_scoped(self):
-        assert artifact_object_key("task-1", "attempt-1") == "videos/task-1/attempt-1/result.mp4"
-        assert artifact_object_key("task-2", "attempt-1") != artifact_object_key(
-            "task-1", "attempt-1"
+        created_at = "2026-09-14T23:30:00-07:00"
+        assert artifact_object_key(
+            "task-1", "attempt-1", created_at
+        ) == "videos/2026/09/15/task-1/attempt-1/result.mp4"
+        assert artifact_object_key("task-2", "attempt-1", created_at) != artifact_object_key(
+            "task-1", "attempt-1", created_at
         )
 
     def test_key_is_stable_across_calls(self):
-        # 归档重跑必须落到同一个对象上，不能靠时间戳另起一份。
-        first = artifact_object_key("task-1", "attempt-1")
-        second = artifact_object_key("task-1", "attempt-1")
+        # 归档重跑可能跨越午夜，仍必须落到任务创建日的同一个对象上。
+        first = artifact_object_key("task-1", "attempt-1", "2026-09-10T00:00:00+00:00")
+        second = artifact_object_key("task-1", "attempt-1", "2026-09-10T00:00:00+00:00")
         self.assertEqual(first, second)
+
+    def test_key_rejects_invalid_created_at(self):
+        with self.assertRaises(ValueError):
+            artifact_object_key("task-1", "attempt-1", "not-a-date")
+
+    def test_key_rejects_missing_created_at(self):
+        with self.assertRaises(ValueError):
+            artifact_object_key("task-1", "attempt-1", "")
 
     def test_key_rejects_missing_identifiers(self):
         for args in (("", "attempt-1"), ("task-1", ""), ("", "")):
             with self.assertRaises(ValueError):
-                artifact_object_key(*args)
+                artifact_object_key(*args, "2026-09-10T00:00:00+00:00")
 
 
 class ArtifactFileValidationTests(unittest.TestCase):

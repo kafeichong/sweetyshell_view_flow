@@ -49,7 +49,7 @@
 
 - 火山生产密钥只在 Worker；OSS 凭证限受信任的服务器组件：Worker 上传，Backend 签发上传/下载 URL 与 HEAD 校验（`docker-compose.yml`、`packages/backend/src/assets/asset-presign.service.ts`）。历史“只有 Worker 持有 OSS 密钥”的文字与实现不符。
 - 同事电脑只有 Video Flow 的可撤销凭证，永不接触 Ark / OSS 密钥。
-- PostgreSQL 是任务与执行状态的权威数据源；数据库只永久保存 `objectKey`，签名 URL 按需生成。
+- PostgreSQL 是任务与执行状态的权威数据源；数据库只永久保存 `objectKey`，签名 URL 按需生成。新归档产物按 Task 创建日（UTC）存为 `videos/YYYY/MM/DD/{taskId}/{attemptId}/result.mp4`；创建日使跨日补偿仍覆盖同一对象，历史对象键保持原样可读（`packages/worker/artifact_delivery.py`、`packages/worker/executor.py`）。
 - 不在服务器上集中部署 ComfyUI 或 Seedance 模型。
 
 ---

@@ -247,7 +247,7 @@ class JobExecutor:
         if not attempt_id:
             return False
 
-        object_key = artifact_object_key(job.id, attempt_id)
+        object_key = artifact_object_key(job.id, attempt_id, job.createdAt)
 
         if not task_status.result_url:
             await self._report_delivery(

@@ -8,15 +8,35 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, Tuple
 
 
-def artifact_object_key(task_id: str, attempt_id: str) -> str:
-    """产物在对象存储中的固定位置：videos/{taskId}/{attemptId}/result.mp4。"""
+def artifact_object_key(task_id: str, attempt_id: str, created_at: str) -> str:
+    """按任务创建日生成稳定对象键。
+
+    归档补偿可能跨越午夜，因此目录日期取 Task 的 ``created_at``，并统一转换为
+    UTC；不能取执行/上传时的当前时间。产物位置为
+    ``videos/YYYY/MM/DD/{taskId}/{attemptId}/result.mp4``。
+    """
     if not task_id or not attempt_id:
         raise ValueError("task_id and attempt_id are required for an artifact key")
-    return f"videos/{task_id}/{attempt_id}/result.mp4"
+    if not created_at:
+        raise ValueError("created_at is required for an artifact key")
+
+    try:
+        parsed = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+    except (TypeError, ValueError) as error:
+        raise ValueError("created_at must be an ISO 8601 timestamp") from error
+    if parsed.tzinfo is None:
+        raise ValueError("created_at must include a timezone")
+
+    created_utc = parsed.astimezone(timezone.utc)
+    return (
+        f"videos/{created_utc:%Y/%m/%d}/"
+        f"{task_id}/{attempt_id}/result.mp4"
+    )
 
 
 def validate_artifact_file(local_path: str | Path) -> Tuple[bool, Optional[str]]:

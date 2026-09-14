@@ -328,7 +328,7 @@ test('uses decimal arithmetic for the budget ledger', () => {
 
 **修改：** Backend `src/assets/assets.service.ts`、`src/v1/assets/v1-assets.controller.ts`、`src/v1/internal/v1-worker.controller.ts`、`src/tasks/tasks.service.ts`、`src/v1/tasks/v1-tasks.controller.ts`；Worker `executor.py`、`models.py`、`recovery.py`。
 **修改管理入口：** T05 新增的 `packages/backend/src/v1/admin/v1-task-operations.controller.ts` 及对应 spec；保留已有模块注册。新增 Worker `artifact_delivery.py`、`tests/test_artifact_delivery.py`，Backend `test/artifact-delivery.contract-spec.ts`。
-**接口：** `artifact_object_key(task_id, attempt_id) -> str` 固定为 `videos/{taskId}/{attemptId}/result.mp4`。
+**接口：** `artifact_object_key(task_id, attempt_id, created_at) -> str` 固定为 `videos/YYYY/MM/DD/{taskId}/{attemptId}/result.mp4`；日期取任务创建时间并统一为 UTC，保证跨日补偿归档仍覆盖同一对象。
 `POST /api/v1/admin/tasks/:taskId/resume-delivery`，Admin Guard，body={reason,operator,evidenceRef}；仅恢复原 Provider 成功任务的归档，不创建新 Attempt/Provider Task。
 
 - [x] 将生成与归档分支分离，恢复 archiving 时直接使用已知 Provider ID 查回下载地址，不经过 create。Provider URL 过期则查询原任务；无法恢复就明确失败，不生成替代品。
@@ -339,15 +339,16 @@ test('uses decimal arithmetic for the budget ledger', () => {
 - [x] 人工恢复与 Worker 自动恢复不能并发执行同一归档：通过状态 CAS/归档租约限制。MVP 不开放用户任意重置状态接口。
 - [x] 验证无 URL、空文件、上传失败、Asset 500、最后回写失败、重复登记、签名过期、越权取片；恢复后仅一条输出记录且 Provider create 增量为 0。
 
-**完成状态（2026-09-13）：** 以上检查项均已实现，过程中修掉一个会重复扣费的缺陷：`findRecoverable` 原先只返回 submitted/running，archiving 任务不在恢复集合里，Worker 从 `/api/tasks/recover` 拿到 archiving 任务后会落进 create 分支再提交一个付费任务。现在恢复集合纳入 archiving，`should_resume_job` 同步允许该状态，executor 在提交分支之前先判归档分支（用已知 providerTaskId 查回产物，不经过 create）；归档任务不再套用生成超时；没有 providerTaskId 的归档请求直接写 `NO_PROVIDER_TASK_ID_FOR_ARCHIVING` 明确失败，不做替代品。Worker 新增 `artifact_delivery.py`：`artifact_object_key(taskId, attemptId) = videos/{taskId}/{attemptId}/result.mp4` 稳定键取代秒级时间戳命名，`validate_artifact_file`（存在/非空）与 `verify_uploaded_object`（上传后 HEAD 且大小一致）把关；`deliver_artifact` 按下载→本地校验→上传→HEAD 校验→登记→确认交付的顺序推进，任何一步失败都写 `deliveryStatus=failed` + 阶段错误，不把归档失败伪装成还在生成。Backend：`AssetsService.registerOutputOnce` 作为唯一输出登记入口，owner 从 Task 继承、校验 Attempt 属于 Task、taskId+attemptId 事务 advisory lock 串行化「查重+插入」、同 objectKey 返回既有行；新增 `PATCH /api/v1/internal/attempts/:attemptId/delivery`（ready 必须先有已登记产物，CAS 从 archiving 转 ready/failed，重复相同结果幂等）；`GET /api/v1/tasks/:id` 增加 execution/delivery/costSummary 三段（金额一律十进制字符串）；结果接口按 5.2 节区分 `RESULT_NOT_READY`/`DELIVERY_FAILED`/`RESULT_REQUIRES_REVIEW`，越权与不存在同样 404；`POST /api/v1/admin/tasks/:taskId/resume-delivery` 只对「Provider 已成功且交付失败」的任务做 CAS 回 archiving，不创建 Attempt/Provider 任务，并记录 reason/operator/evidenceRef（operator 标注为声明值）。另修两处既有缺陷：`Asset.sizeBytes` 是 BigInt 列而 Worker 传 JSON number，登记必然 500（此前无测试覆盖）；advisory lock 参数需显式 `::int`，否则 Prisma 按 bigint 传参会报 42883。测试：后端 170 通过，Worker 152 通过 / 26 跳过，合同套件 6 specs / 48 tests 通过（新增 artifact-delivery，覆盖无产物不得交付、分阶段失败、重复登记单行、人工恢复后 Provider create 增量为 0、越权取片）。
+**完成状态（2026-09-13）：** 以上检查项均已实现，过程中修掉一个会重复扣费的缺陷：`findRecoverable` 原先只返回 submitted/running，archiving 任务不在恢复集合里，Worker 从 `/api/tasks/recover` 拿到 archiving 任务后会落进 create 分支再提交一个付费任务。现在恢复集合纳入 archiving，`should_resume_job` 同步允许该状态，executor 在提交分支之前先判归档分支（用已知 providerTaskId 查回产物，不经过 create）；归档任务不再套用生成超时；没有 providerTaskId 的归档请求直接写 `NO_PROVIDER_TASK_ID_FOR_ARCHIVING` 明确失败，不做替代品。Worker 新增 `artifact_delivery.py`：`artifact_object_key(taskId, attemptId, createdAt) = videos/YYYY/MM/DD/{taskId}/{attemptId}/result.mp4` 稳定键取代秒级时间戳命名，目录日期由 Task 创建时间归一到 UTC，跨日补偿仍写同一对象；`validate_artifact_file`（存在/非空）与 `verify_uploaded_object`（上传后 HEAD 且大小一致）把关；`deliver_artifact` 按下载→本地校验→上传→HEAD 校验→登记→确认交付的顺序推进，任何一步失败都写 `deliveryStatus=failed` + 阶段错误，不把归档失败伪装成还在生成。Backend：`AssetsService.registerOutputOnce` 作为唯一输出登记入口，owner 从 Task 继承、校验 Attempt 属于 Task、taskId+attemptId 事务 advisory lock 串行化「查重+插入」、同 objectKey 返回既有行；新增 `PATCH /api/v1/internal/attempts/:attemptId/delivery`（ready 必须先有已登记产物，CAS 从 archiving 转 ready/failed，重复相同结果幂等）；`GET /api/v1/tasks/:id` 增加 execution/delivery/costSummary 三段（金额一律十进制字符串）；结果接口按 5.2 节区分 `RESULT_NOT_READY`/`DELIVERY_FAILED`/`RESULT_REQUIRES_REVIEW`，越权与不存在同样 404；`POST /api/v1/admin/tasks/:taskId/resume-delivery` 只对「Provider 已成功且交付失败」的任务做 CAS 回 archiving，不创建 Attempt/Provider 任务，并记录 reason/operator/evidenceRef（operator 标注为声明值）。另修两处既有缺陷：`Asset.sizeBytes` 是 BigInt 列而 Worker 传 JSON number，登记必然 500（此前无测试覆盖）；advisory lock 参数需显式 `::int`，否则 Prisma 按 bigint 传参会报 42883。测试：后端 170 通过，Worker 152 通过 / 26 跳过，合同套件 6 specs / 48 tests 通过（新增 artifact-delivery，覆盖无产物不得交付、分阶段失败、重复登记单行、人工恢复后 Provider create 增量为 0、越权取片）。
 
 代表性测试：
 
 ```python
 def test_artifact_key_is_stable_and_task_scoped():
     from artifact_delivery import artifact_object_key
-    assert artifact_object_key("task-1", "attempt-1") == "videos/task-1/attempt-1/result.mp4"
-    assert artifact_object_key("task-2", "attempt-1") != artifact_object_key("task-1", "attempt-1")
+    created_at = "2026-09-10T00:00:00+00:00"
+    assert artifact_object_key("task-1", "attempt-1", created_at) == "videos/2026/09/10/task-1/attempt-1/result.mp4"
+    assert artifact_object_key("task-2", "attempt-1", created_at) != artifact_object_key("task-1", "attempt-1", created_at)
 ```
 
 运行：Backend `npx jest assets.service v1-assets.controller v1-worker.controller v1-task-operations --runInBand`、`npm run test:contract -- artifact-delivery --runInBand`；Worker `venv/bin/python -m pytest tests/test_artifact_delivery.py tests/test_mvp_backend_contract.py -q`。建议提交：`fix: make artifact delivery resumable and truthful`。

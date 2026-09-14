@@ -328,7 +328,9 @@ class ProviderSubmissionRecoveryTests(unittest.TestCase):
             with patch.object(executor_module, "settings", settings):
                 asyncio.run(job_executor.execute_job(job))
 
-        expected_key = artifact_object_key("job-output-1", "attempt-output-1")
+        expected_key = artifact_object_key(
+            "job-output-1", "attempt-output-1", job.createdAt
+        )
         # 上传与登记都落在同一个稳定 key 上：重跑归档只会覆盖自己。
         self.assertEqual(job_executor.oss_uploader.uploaded[0][0], expected_key)
         self.assertEqual(job_executor.create_asset.await_args.args[1], expected_key)
@@ -1025,7 +1027,7 @@ class ProviderSubmissionRecoveryTests(unittest.TestCase):
         # 留下的是产物身份（objectKey），不是会过期的下载地址。
         self.assertEqual(
             delivered[0]["objectKey"],
-            "videos/job-audit/attempt-plan-1/result.mp4",
+            "videos/2026/09/10/job-audit/attempt-plan-1/result.mp4",
         )
         self.assertEqual(delivered[0]["taskId"], "job-audit")
 
