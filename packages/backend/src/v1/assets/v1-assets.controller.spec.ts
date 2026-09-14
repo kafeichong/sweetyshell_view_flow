@@ -458,7 +458,7 @@ describe('V1AssetsController media inspection', () => {
   it('persists inspected metadata before marking an upload complete', async () => {
     const assets = { findOwned: jest.fn().mockResolvedValue(asset), markUploaded: jest.fn().mockResolvedValue({ ...asset, bucket: 'bucket', inspectionStatus: 'uploaded' }) };
     const presign = { inspectObject: jest.fn().mockResolvedValue(actual), getBucketName: jest.fn().mockReturnValue('bucket'), createDownloadUrl: jest.fn().mockReturnValue({ downloadUrl: 'https://oss/signed' }) };
-    const inspector = { inspect: jest.fn().mockResolvedValue({ kind: 'video', width: 1280, height: 720, durationSeconds: 5, videoCodec: 'h264' }) };
+    const inspector = { inspect: jest.fn().mockResolvedValue({ kind: 'video', width: 1280, height: 720, durationSeconds: 5, frameRate: 24, videoCodec: 'h264' }) };
     const controller = new V1AssetsController(assets as never, presign as never, undefined, inspector as never);
     await controller.completeUpload({ actorId: 'actor-a' }, 'asset-1');
     expect(inspector.inspect).toHaveBeenCalledWith('https://oss/signed');

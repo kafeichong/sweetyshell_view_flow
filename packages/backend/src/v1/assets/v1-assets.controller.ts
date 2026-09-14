@@ -7,6 +7,7 @@ import { CurrentActor } from '../../auth/current-actor.decorator';
 import { AssetsService } from '../../assets/assets.service';
 import { AssetPresignService } from '../../assets/asset-presign.service';
 import { MediaInspectorService } from '../../assets/media-inspector.service';
+import { validateSeedanceMediaMetadata } from '../../assets/media-policy';
 import { TasksService } from '../../tasks/tasks.service';
 import { UploadTicketDto } from './dto/upload-ticket.dto';
 
@@ -227,6 +228,7 @@ export class V1AssetsController {
       try {
         const signed = this.presign.createDownloadUrl(asset.objectKey);
         mediaMetadata = await this.inspector.inspect(signed.downloadUrl);
+        validateSeedanceMediaMetadata(actual.mimeType, mediaMetadata);
       } catch {
         throw new BadRequestException('Uploaded media could not be inspected');
       }
