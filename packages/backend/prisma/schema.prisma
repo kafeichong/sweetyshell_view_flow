@@ -148,6 +148,7 @@ model Asset {
   sizeBytes        BigInt?           @map("size_bytes")
   fileHash         String?           @map("file_hash")
   inspectionStatus String?           @map("inspection_status")
+  mediaMetadata   Json?             @map("media_metadata")
   createdAt        DateTime          @default(now()) @map("created_at")
 
   @@unique([ownerId, role, fileHash])

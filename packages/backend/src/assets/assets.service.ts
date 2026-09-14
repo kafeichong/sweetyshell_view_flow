@@ -26,10 +26,13 @@ export interface RegisterAssetInput {
 
 export interface RegisterAssetOutput extends RegisterAssetInput {}
 
+export type MediaMetadata = { kind: 'image' | 'video' | 'audio'; width?: number; height?: number; durationSeconds?: number; frameRate?: number; videoCodec?: string; audioCodec?: string };
+
 export type UploadedAssetMetadata = {
   bucket: string;
   sizeBytes: number;
   mimeType: string;
+  mediaMetadata?: MediaMetadata;
 };
 
 export type RegisterOutputOnceInput = {
@@ -300,6 +303,7 @@ export class AssetsService {
         bucket: metadata.bucket,
         sizeBytes: metadata.sizeBytes,
         mimeType: metadata.mimeType,
+        mediaMetadata: metadata.mediaMetadata,
         inspectionStatus: 'uploaded',
       },
     });

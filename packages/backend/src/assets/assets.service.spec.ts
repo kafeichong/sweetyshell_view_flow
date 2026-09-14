@@ -99,6 +99,7 @@ describe('AssetsService contract', () => {
       bucket: 'sweetyshell-ai-assets',
       sizeBytes: 10,
       mimeType: 'image/png',
+      mediaMetadata: { kind: 'image', width: 1280, height: 720 },
     });
 
     expect(mockAsset.updateMany).toHaveBeenCalledWith({
@@ -107,6 +108,7 @@ describe('AssetsService contract', () => {
         bucket: 'sweetyshell-ai-assets',
         sizeBytes: 10,
         mimeType: 'image/png',
+        mediaMetadata: { kind: 'image', width: 1280, height: 720 },
         inspectionStatus: 'uploaded',
       },
     });
