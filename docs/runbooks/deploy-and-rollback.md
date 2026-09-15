@@ -187,6 +187,38 @@ python3 scripts/video_flow_monitor.py --base-url https://ai.sweetyshell.com
 
 ## 6.2 管理员查询、恢复与暂停（T09/T10）
 
+### 6.2.1 交互式界面（Swagger）
+
+管理动作有现成的网页界面，**不需要写代码**：Backend 已挂载 Swagger，并且配好了两种鉴权（`actor-token` 用 Bearer、`admin-token` 用 `X-Admin-Token` 头）。覆盖面包括建 actor / 改额度 / 撤销凭证 / 暂停恢复生产闸门 / 任务报表 / 费用人工核实 / 健康检查。
+
+它默认**关着两道门**，这是有意的（避免额外暴露接口结构）：
+
+- `docker-compose.yml` 里 `NODE_ENV: production`，Swagger 默认不启用；
+- Nginx 只转发 `location /api/`，`/docs` 不在其中，公网到不了。
+
+临时打开（**走 SSH 隧道，保持 loopback，不要加进 Nginx**）：
+
+```bash
+# 1) 服务器：临时启用并重启 Backend
+echo 'VIDEO_FLOW_ENABLE_SWAGGER=true' >> /data/video-flow/.env
+cd /data/video-flow && docker compose up -d video-backend
+docker compose logs --tail=20 video-backend   # 应出现 "Swagger UI: http://localhost:3000/docs"
+
+# 2) 本机：建立隧道（Backend 只监听宿主 127.0.0.1:3100）
+ssh -L 3100:127.0.0.1:3100 <user>@8.140.49.56
+
+# 3) 浏览器打开 http://localhost:3100/docs ，点 Authorize 填入 admin token
+```
+
+- **用完把 `VIDEO_FLOW_ENABLE_SWAGGER` 去掉并重启**，不要把它留在 `.env` 里。
+- 建凭证（`POST /v1/admin/credentials`）的响应里**直接带 token**，且**只返回这一次**：库里只存
+  `sha256`，丢了取不回来；对同一 actorId 再建一次会覆盖 `tokenHash`，**旧 token 立即失效**。
+- Swagger 是"发请求看响应"的开发者形态，适合管理员排障与一次性配置；给创意同事自助使用需要另外的表单界面，不在本手册范围。
+
+### 6.2.2 命令行等价操作
+
+不方便开隧道时，下面这些 curl 与管理脚本覆盖同样的动作（都需要 admin token）：
+
 ```bash
 # 一条 taskId 的完整报表（只读；默认脱敏，不含完整 Prompt 与签名地址）
 export VIDEO_FLOW_ADMIN_TOKEN_FILE=~/.video-flow/admin-token
