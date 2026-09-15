@@ -12,13 +12,15 @@ const rawContract = require('./resources/seedance-workflows.v2.json') as Workflo
 
 // **允许**处于开启状态的付费工作流。没列在这里却被打开 = 回归。
 // 唯一依据是 docs/runbooks/r8-production-acceptance-scope.md 的授权记录：
-// §8 text-to-video、§9 first-frame、§10 first-last-frame，都是同一口径的长期开放
-// （同一 Actor、100 元/日 上限、全部参数）。再打开任何其他工作流都必须先有一条
-// 对应授权，并在这里显式声明——这是本测试存在的意义：未声明的开放会被抓住。
+// §8 text-to-video、§9 first-frame、§10 first-last-frame、§11 omni-reference，
+// 都是同一口径的长期开放（同一 Actor、100 元/日 上限、全部参数）。再打开任何其他
+// 工作流都必须先有一条对应授权，并在这里显式声明——这是本测试存在的意义：
+// 未声明的开放会被抓住。
 const DECLARED_OPEN_WORKFLOWS: string[] = [
   'seedance.text-to-video.v1',
   'seedance.first-frame-to-video.v1',
   'seedance.first-last-frame-to-video.v1',
+  'seedance.omni-reference.v1',
 ];
 
 function textIntent(workflowKey = 'seedance.text-to-video.v1') {
