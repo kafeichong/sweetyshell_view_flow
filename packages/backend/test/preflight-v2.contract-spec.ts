@@ -52,11 +52,11 @@ test('authenticated v2 Preview creates only an independent preflight record and 
       effectiveRequest: intent,
       model: 'doubao-seedance-2-5-260628',
     });
-    // text-to-video 已验收完链路（implementation=ready），但 R8 收口后准入关闭，
-    // 所以这里只剩"未准入"而没有 WORKFLOW_NOT_READY；那条 blocker 由其余七类
-    // 仍处 incomplete 的工作流覆盖（见 PreflightService 单测）。
+    // text-to-video 已验收并长期开放（见 R8 授权清单 §8），所以对它不再有
+    // WORKFLOW_* 系列 blocker——剩下的是账号与全局闸门。WORKFLOW_NOT_READY /
+    // WORKFLOW_NOT_ENABLED 由其余七类仍处 incomplete 的工作流覆盖（见单测）。
     expect(report.productionAdmission.blockers.map((item: { code: string }) => item.code)).toEqual(expect.arrayContaining([
-      'PRODUCTION_NOT_ALLOWED', 'WORKFLOW_NOT_ENABLED', 'PRODUCTION_PAUSED',
+      'PRODUCTION_NOT_ALLOWED', 'PRODUCTION_PAUSED',
     ]));
     expect(await h.prisma.preflightRecord.count({ where: { actorId: h.actorId } })).toBe(1);
     expect(await h.prisma.task.count({ where: { actorId: h.actorId } })).toBe(before.tasks);
@@ -84,11 +84,11 @@ test('authenticated v2 Preview creates only an independent preflight record and 
     expect(catalog.contractDigest).toMatch(/^[a-f0-9]{64}$/);
     expect(catalog.model).toBe('doubao-seedance-2-5-260628');
     expect(catalog.workflows).toHaveLength(8);
-    // 目录里第一条是 text-to-video：链路已验收（validation 有记录），但 R8 第一轮
-    // 验收未走完 30 秒边界，所以准入仍然关闭。
+    // 目录里第一条是 text-to-video：链路已验收（validation 带记录），并已按
+    // R8 授权清单 §8 作为正式产能长期开放。
     expect(catalog.workflows[0].state).toEqual(expect.objectContaining({
       capability: 'confirmed', implementation: 'ready',
-      admission: { enabled: false, reason: 'R8_ACCEPTANCE_INCOMPLETE' },
+      admission: { enabled: true, reason: null },
     }));
 
     const retired = await fetch(`${h.appUrl}/api/v1/tasks`, {
