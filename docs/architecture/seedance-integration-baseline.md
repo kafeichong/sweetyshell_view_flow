@@ -1,10 +1,10 @@
 # 统一 Seedance 接入架构基线
 
-> 日期：2026-09-10（最后整理 2026-09-11）
+> 日期：2026-09-10（最后整理 2026-09-15）
 > 状态：**现行架构基线**，冻结边界不退回到"服务器集中部署 ComfyUI"方案
 > 适用范围：`/Users/steven/works/20260909video_flow`
 >
-> 相关文档：[PROJECT_STATUS.md](../PROJECT_STATUS.md)（现状与风险）、[ROADMAP.md](../ROADMAP.md)（计划与门禁）。
+> 相关文档：[PROJECT_STATUS.md](../PROJECT_STATUS.md)（现状与风险）、[ROADMAP.md](../ROADMAP.md)（计划与门禁）、[ADR-0001](./adr/0001-production-execution-slot.md)（Production 执行槽与重复生成）。
 > 本文描述架构约定与规则，不描述实现进度；实现进度以 PROJECT_STATUS 为准。
 
 ## 1. 目标
@@ -36,13 +36,21 @@
 
 ### Task
 
-表示一次用户意图。重复查看、轮询或下载不能创建新的 Task。
+表示一次请求输出的视频。同一 Production 节点顺序“再生成一版”会创建新的 Task；重复查看、轮询、恢复或下载当前版本不能创建新的 Task。
 
 关键字段：
 
 - `id`
 - `actorId`
+- `executionSlotId`
+- `slotSequence`
 - `clientRequestId`
+- `preflightId`
+- `contractDigest`
+- `intentDigest`
+- `quoteDigest`
+- `clientDeliveryStatus`
+- `clientDeliveredAt`
 - `capability`
 - `workflowName`
 - `workflowVersion`
@@ -52,11 +60,25 @@
 - `createdAt`
 - `completedAt`
 
-`actorId + clientRequestId` 必须唯一，用于阻止客户端超时重试造成重复付费。
+`actorId + clientRequestId` 必须唯一，用于阻止同一次创建请求因超时重试造成重复付费。Backend 还必须在事务或等效串行化边界内保证同一 `actorId + executionSlotId` 最多只有一个尚未完成本地交付的 Task。
+
+### Production execution slot
+
+每个 ComfyUI Production 节点持有稳定的 `executionSlotId`：修改 Prompt、素材或生成参数不改变槽，复制节点生成新槽。执行槽不单独建立领域表，以 Task 上的槽标识和序号形成权威历史。
+
+同一槽不支持并行生成。当前 Task 在 Provider、归档、交付或客户端下载阶段尚未完成时，重复 Queue 只恢复该 Task；客户端下载校验后先持久化本地回执，再向 Backend 确认 client delivery，最后由节点返回本地路径。下一次 Queue 才创建下一 Task。Backend 以 Task 的 client delivery 状态作为槽权威依据，客户端回执只是按 actor 隔离的恢复缓存。
+
+详细状态、释放条件和失败语义见 [ADR-0001](./adr/0001-production-execution-slot.md)。
+
+### PreflightRecord
+
+表示不可执行的 Preview 快照，保存 actor、有效期、规范化请求、合同摘要、意图摘要、报价摘要、报告和报价快照。它不属于 Task 状态机，不可被 Worker 领取，也不产生 Attempt 或预算预占。
+
+只要内容、合同和报价仍匹配且记录有效，同一预检可用于同一内容的多个顺序 Task；每个 Task 仍单独进行当时准入、预占和计费。
 
 ### ExecutionAttempt
 
-表示一次真实或潜在付费执行。用户明确“重新生成”时创建新 Attempt，不覆盖历史 Attempt。
+表示同一 Task 内的一次执行、恢复或受控技术重试。用户明确“再生成一版”创建新 Task，不用新 Attempt 表示新的视频版本。
 
 关键字段：
 
@@ -120,6 +142,9 @@
 - API 只允许增加可选字段；删除、改名或改变语义必须发布新版本。
 - `createdBy` 仅作旧接口兼容展示，新接口的实际身份由凭证解析得到。
 - `POST /api/v1/tasks` 必须接受 `Idempotency-Key` 或等价的 `clientRequestId`。
+- `POST /api/v1/tasks` 必须接收 `preflightId`、`executionSlotId` 和 `slotId → assetId` 映射；不接受第二份可与预检冲突的创作参数。
+- Backend 创建 Task 时按 `actorId + executionSlotId` 串行化；槽被未完成本地交付的 Task 占用时返回原 Task，而不是创建新任务。
+- 按槽恢复已有 Task 与新任务准入分离；恢复不要求原预检仍有效或当前仍有新建任务额度。
 - 所有内部 Worker 更新接口必须使用独立服务凭证，不能和创意人员凭证共用。
 
 ## 5. 执行和计费规则
@@ -129,6 +154,10 @@
 - Worker 领取任务必须使用数据库原子 claim 或租约，禁止多个 Worker 同时执行一个 Attempt。
 - `preview` 只做本地或服务端请求校验，不调用付费视频生成接口。
 - `production` 才允许创建 Provider 任务。
+- 新画布默认 Preview；用户切换到 Production 后模式保持不变。当前内容没有有效预检时，本次 Queue 只执行 Preview 并停止，下一次 Queue 才可正式生成。
+- Production 模式不是服务端授权凭证；每次新建 Task 仍检查有效预检、权限、工作流启用、报价和额度。
+- 当前 Task 只有在 Provider 成功、OSS 归档、Backend 交付就绪、客户端下载校验完成且节点返回本地路径后，才允许同槽创建下一 Task。
+- Provider 是否受理不确定、已有 Provider ID、归档或下载失败时恢复同一 Task；只有能确认不会产生结果的终态才释放槽。
 - `estimated`、`usage_calculated`、`billed`、`unavailable` 是不同费用状态，不得混用。
 - 没有 usage 或账单证据时不得把费用写成 `0`。
 - 测试默认使用 mock；真实 Seedance 任务必须单独获得付费测试批准。
@@ -136,7 +165,8 @@
 ## 6. 素材规则
 
 - ComfyUI 本地路径不能直接传给 Seedance。
-- 客户端先从 Backend 获取短期上传凭证，再直传 OSS。
+- Preview 只在本地读取实际文件、计算元信息与 SHA-256，并将描述发送给 Backend，不上传素材。
+- Production 具备匹配当前内容的有效预检且通过当时准入后，客户端才从 Backend 获取短期上传凭证并直传 OSS。
 - Backend 校验 MIME、大小、角色和 object key 前缀。
 - Provider 请求使用可访问的 HTTPS URL。
 - 输出完成后由 Worker归档到 OSS，并登记 Asset。
@@ -171,4 +201,3 @@
 - 新旧 API 至少保留一个完整灰度周期。
 - ComfyUI 客户端声明协议版本；服务端拒绝不兼容版本并返回可理解的升级提示。
 - 新客户端先给 1 名同事灰度，再扩大到 2 至 3 人，最后才全员使用。
-

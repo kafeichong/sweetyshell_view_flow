@@ -137,6 +137,7 @@ def test_execution_plan_uses_structured_media_roles():
 def test_execution_plan_preserves_frozen_workflow_and_provider_fields():
     job = _job(
         executionPlan={
+            "contractDigest": "contract-digest",
             "workflowKey": "seedance.video-extend.v1",
             "workflowVersion": "v1",
             "model": "test-model",
@@ -147,7 +148,7 @@ def test_execution_plan_preserves_frozen_workflow_and_provider_fields():
             "resolution": "720p",
             "generateAudio": True,
             "watermark": False,
-            "omniReferenceTaskType": "extend",
+            "omni_reference_task_type": "extend",
             "outputFormat": "mov",
         },
     )
@@ -163,6 +164,7 @@ def test_execution_plan_preserves_frozen_workflow_and_provider_fields():
         "watermark": False,
         "workflow_key": "seedance.video-extend.v1",
         "workflow_version": "v1",
+        "contract_digest": "contract-digest",
         "omni_reference_task_type": "extend",
         "output_format": "mov",
     }

@@ -6,6 +6,7 @@ jest.mock('@nestjs/common', () => ({
 }));
 
 import { ExecutionsService, ExecutionMode, AttemptStatus } from './executions.service';
+import { PricingCatalog } from '../tasks/pricing-catalog';
 
 const mockExecutionAttempt = {
   findFirst: jest.fn(),
@@ -199,6 +200,34 @@ describe('ExecutionsService contract', () => {
           }),
         }),
       );
+    });
+
+    it('passes the complete frozen pricing snapshot into settlement', async () => {
+      const snapshot = new PricingCatalog({
+        confirmedPromotionIds: ['seedance-2.5-1080p-2026-08-14-2026-09-17'],
+      }).select('doubao-seedance-2-5-260628', '1080p', false, new Date('2026-09-17T05:45:00.000Z'))!;
+      mockExecutionAttempt.findUnique.mockResolvedValue(attemptRecord({
+        task: {
+          ...attemptRecord().task,
+          executionPlan: {
+            pricingVersion: snapshot.pricingVersion,
+            model: snapshot.model,
+            resolution: '1080p',
+            pricingSnapshot: snapshot,
+          },
+        },
+      }));
+      mockExecutionAttempt.update.mockResolvedValue({ id: 'attempt-1' });
+      mockTask.update.mockResolvedValue({ id: 'task-1' });
+
+      const result = await service.recordProviderOutcome('attempt-1', {
+        providerTaskId: 'provider-1',
+        status: 'succeeded',
+        usage: { completion_tokens: 100000 },
+      });
+
+      expect(result.cost.amountCny).toBe('5.544000');
+      expect(budget.settleInTransaction).toHaveBeenCalledWith(prisma, 'task-1', '5.544000');
     });
 
     it('keeps the reservation in review but still allows archiving when usage is missing', async () => {

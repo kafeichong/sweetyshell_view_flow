@@ -1,5 +1,7 @@
 # Seedance 工作流开发提速策略（2026-09-14）
 
+> 归档说明：本文依赖旧 W2–W6 顺序和 `preview_only / production_verified / disabled` 单状态，已被 [开发工作流](../DEVELOPMENT_WORKFLOW.md)、[统一需求规范 v2](../requirements/2026-09-15/workflow-preview-production-spec-v2.md)和[当前 ROADMAP](../ROADMAP.md)取代。本文只保留历史决策过程，不得用于当前实现或准入判断。
+>
 > 用途：记录本项目如何使用主实现者、并行 Agent 与 Skills 加快 Seedance 2.5 工作流开发，同时保持 Backend、Worker 与 ComfyUI 的接口一致。本文件是架构与协作参考，不描述当前系统能力；当前事实见 [PROJECT_STATUS.md](../PROJECT_STATUS.md)，唯一实施计划见 [ROADMAP.md](../ROADMAP.md)。
 
 ## 1. 结论

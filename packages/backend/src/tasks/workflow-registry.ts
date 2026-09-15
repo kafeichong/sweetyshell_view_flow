@@ -20,6 +20,8 @@ export type WorkflowDefinition = {
 
 const STANDARD_RESOLUTIONS = ['480p', '720p', '1080p'] as const;
 const STANDARD_DURATIONS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30] as const;
+const VERIFIED_REFERENCE_DURATIONS = STANDARD_DURATIONS;
+const STANDARD_RATIOS = ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'] as const;
 
 const WORKFLOWS: readonly WorkflowDefinition[] = [
   {
@@ -30,7 +32,7 @@ const WORKFLOWS: readonly WorkflowDefinition[] = [
     capability: 'IMAGE_TO_VIDEO',
     profile: 'seedance',
     media: [{ role: 'reference_image', min: 1, max: 1 }],
-    generation: { duration: 'production_spec', ratio: 'production_spec', resolution: 'production_spec' },
+    generation: { duration: VERIFIED_REFERENCE_DURATIONS, ratio: STANDARD_RATIOS, resolution: STANDARD_RESOLUTIONS },
   },
   {
     key: 'seedance.text-to-video.v1',
@@ -40,7 +42,7 @@ const WORKFLOWS: readonly WorkflowDefinition[] = [
     capability: 'TEXT_TO_VIDEO',
     profile: 'seedance',
     media: [],
-    generation: { duration: STANDARD_DURATIONS, ratio: ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'], resolution: STANDARD_RESOLUTIONS },
+    generation: { duration: STANDARD_DURATIONS, ratio: STANDARD_RATIOS, resolution: STANDARD_RESOLUTIONS },
   },
   {
     key: 'seedance.first-frame-to-video.v1', version: 'v1', label: 'Seedance First Frame to Video', status: 'disabled', capability: 'IMAGE_TO_VIDEO', profile: 'seedance', media: [{ role: 'first_frame', min: 1, max: 1 }],

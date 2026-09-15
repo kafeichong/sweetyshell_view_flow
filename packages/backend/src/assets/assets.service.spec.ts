@@ -93,13 +93,14 @@ describe('AssetsService contract', () => {
 
   it('markUploaded updates only an asset owned by the actor', async () => {
     mockAsset.updateMany.mockResolvedValue({ count: 1 });
-    mockAsset.findUnique.mockResolvedValue({ id: 'asset-1', inspectionStatus: 'uploaded' });
+    mockAsset.findUnique.mockResolvedValue({ id: 'asset-1', inspectionStatus: 'verified' });
 
     const result = await service.markUploaded('asset-1', 'actor-a', {
       bucket: 'sweetyshell-ai-assets',
       sizeBytes: 10,
       mimeType: 'image/png',
       mediaMetadata: { kind: 'image', width: 1280, height: 720 },
+      inspectionStatus: 'verified',
     });
 
     expect(mockAsset.updateMany).toHaveBeenCalledWith({
@@ -109,10 +110,10 @@ describe('AssetsService contract', () => {
         sizeBytes: 10,
         mimeType: 'image/png',
         mediaMetadata: { kind: 'image', width: 1280, height: 720 },
-        inspectionStatus: 'uploaded',
+        inspectionStatus: 'verified',
       },
     });
-    expect(result).toMatchObject({ id: 'asset-1', inspectionStatus: 'uploaded' });
+    expect(result).toMatchObject({ id: 'asset-1', inspectionStatus: 'verified' });
   });
 
   it('findOwnedUploaded excludes pending uploads', async () => {

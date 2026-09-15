@@ -1,4 +1,6 @@
 import subprocess
+import json
+import sys
 from pathlib import Path
 
 import httpx
@@ -6,6 +8,17 @@ import pytest
 from starlette.testclient import TestClient
 
 from fake_provider import FakeProviderState, app, create_app
+
+
+WORKER_ROOT = Path(__file__).resolve().parents[2] / "packages" / "worker"
+if str(WORKER_ROOT) not in sys.path:
+    sys.path.insert(0, str(WORKER_ROOT))
+
+from providers.seedance_execution_policy import compile_seedance_payload, workflow_execution_digest  # noqa: E402
+
+
+CONTRACT = json.loads((WORKER_ROOT / "resources" / "seedance-workflows.v2.json").read_text())
+CONTRACT_DIGEST = workflow_execution_digest(CONTRACT)
 
 
 @pytest.mark.asyncio
@@ -41,6 +54,70 @@ async def test_fake_provider_counts_create_and_returns_same_task():
             "content": [{"type": "text", "text": "cross-package scenario"}],
         },
     }
+
+
+@pytest.mark.asyncio
+async def test_frozen_execution_plan_compiles_and_reaches_fake_provider_unchanged(monkeypatch):
+    monkeypatch.chdir(WORKER_ROOT)
+    from providers.seedance_adapter import SeedanceAdapter
+
+    state = FakeProviderState()
+    transport = httpx.ASGITransport(app=create_app(state))
+    adapter = SeedanceAdapter.__new__(SeedanceAdapter)
+    adapter.api_key = ""
+    adapter.base_url = "http://fake-provider.test/api/v3"
+    adapter.client = httpx.AsyncClient(transport=transport)
+
+    frozen_params = {
+        "workflow_key": "seedance.text-to-video.v1",
+        "workflow_version": CONTRACT["contractRevision"],
+        "contract_digest": CONTRACT_DIGEST,
+        "model": CONTRACT["model"]["id"],
+        "prompt": "雨后的街道，镜头缓慢推进",
+        "media_urls": [],
+        "duration": 4,
+        "ratio": "16:9",
+        "resolution": "720p",
+        "generate_audio": True,
+        "watermark": False,
+        "output_format": "mp4",
+    }
+    expected_payload = compile_seedance_payload(frozen_params)
+
+    try:
+        result = await adapter.create_task({"_compiled_payload": expected_payload})
+        async with httpx.AsyncClient(transport=transport, base_url="http://fake-provider.test") as client:
+            stats = (await client.get("/__test__/stats")).json()
+    finally:
+        await adapter.client.aclose()
+
+    assert result["task_id"]
+    assert stats["createCount"] == 1
+    assert stats["lastCreatePayload"] == expected_payload
+
+
+@pytest.mark.asyncio
+async def test_rejected_frozen_plan_never_calls_fake_provider_create(monkeypatch):
+    state = FakeProviderState()
+    params = {
+        "workflow_key": "seedance.text-to-video.v1",
+        "workflow_version": CONTRACT["contractRevision"],
+        "contract_digest": CONTRACT_DIGEST,
+        "model": CONTRACT["model"]["id"],
+        "prompt": "invalid duration",
+        "media_urls": [],
+        "duration": 31,
+        "ratio": "16:9",
+        "resolution": "720p",
+        "generate_audio": False,
+        "watermark": False,
+        "output_format": "mp4",
+    }
+
+    with pytest.raises(ValueError, match="duration"):
+        compile_seedance_payload(params)
+
+    assert state.create_count == 0
 
 
 @pytest.mark.asyncio

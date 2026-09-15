@@ -914,31 +914,8 @@ class JobExecutor:
                     or getattr(adapter, "default_model", "")
                 ).strip()
 
-                if attempt_id:
-                    # 先把 attempt 写成已提交，避免网络抖动时重复提交造成二次计费。
-                    submitted_recorded = await self.update_job_status(
-                        job.id,
-                        JobStatus.SUBMITTED,
-                        attempt_id=attempt_id,
-                        attempt_status="submitted",
-                        attempt_model=effective_model or None,
-                        started_at=datetime.now(timezone.utc),
-                    )
-
-                    if not submitted_recorded:
-                        await self.update_job_status(
-                            job.id,
-                            JobStatus.FAILED,
-                            attempt_id=attempt_id,
-                            attempt_status="requires_review",
-                            failure_type=FailureType.UNKNOWN,
-                            failure_code="REQUIRES_REVIEW",
-                            failure_message="provider submission state could not be persisted",
-                            task_status="requires_review",
-                        )
-                        return
-
-                # 2. 无可恢复上下文时，创建新任务并持久化 provider 端 task id。
+                # 2. 无可恢复上下文时，先在本地解析素材并编译快照。任何失败都
+                # 发生在“已提交”标记和 Provider 请求之前，不能制造虚假的付费状态。
                 media = provider_params.pop("media", None)
                 if isinstance(media, list):
                     provider_params["media_urls"] = [
@@ -966,6 +943,30 @@ class JobExecutor:
                             failure_type=FailureType.INVALID_INPUT,
                             failure_code="EXECUTION_PLAN_COMPILE_FAILED",
                             failure_message=str(error),
+                            task_status="requires_review",
+                        )
+                        return
+                if attempt_id:
+                    # 编译成功后、真正发请求前写 submitted 意图。此后网络结果不确定
+                    # 时只允许核查/恢复，不能自动重提。
+                    submitted_recorded = await self.update_job_status(
+                        job.id,
+                        JobStatus.SUBMITTED,
+                        attempt_id=attempt_id,
+                        attempt_status="submitted",
+                        attempt_model=effective_model or None,
+                        started_at=datetime.now(timezone.utc),
+                    )
+
+                    if not submitted_recorded:
+                        await self.update_job_status(
+                            job.id,
+                            JobStatus.FAILED,
+                            attempt_id=attempt_id,
+                            attempt_status="requires_review",
+                            failure_type=FailureType.UNKNOWN,
+                            failure_code="REQUIRES_REVIEW",
+                            failure_message="provider submission state could not be persisted",
                             task_status="requires_review",
                         )
                         return

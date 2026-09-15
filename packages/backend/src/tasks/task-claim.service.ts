@@ -14,9 +14,9 @@ const MAX_INFLIGHT_GENERATIONS = 1;
 // 可领取条件：旧接口创建的 Task 的 taskStatus 为 null，v1 创建的为 'pending'。
 // 两者都必须能被 claim，否则 v1 任务会永久停留在 pending。
 //
-// 安全不变量：只有 status='pending' 的任务可被领取。Preview 任务以
-// status='preview' 落库（见 TasksService.createPreview），因此永远不会进入
-// 这里，也就永远不会调用 Provider 产生费用。放宽这个条件等于放开免费预览的闸门。
+// 安全不变量：只有 status='pending' 的正式 Task 可被领取。v2 Preview 写入
+// 独立 preflight_records 表，不创建 Task；历史 status='preview' Task 也不匹配
+// 此条件。放宽这个条件等于打开未经确认的付费执行路径。
 const CLAIMABLE_TASK_WHERE = {
   status: 'pending',
   OR: [{ taskStatus: null }, { taskStatus: 'pending' }],

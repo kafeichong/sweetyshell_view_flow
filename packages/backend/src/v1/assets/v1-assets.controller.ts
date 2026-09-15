@@ -7,29 +7,14 @@ import { CurrentActor } from '../../auth/current-actor.decorator';
 import { AssetsService } from '../../assets/assets.service';
 import { AssetPresignService } from '../../assets/asset-presign.service';
 import { MediaInspectorService } from '../../assets/media-inspector.service';
-import { validateSeedanceMediaMetadata } from '../../assets/media-policy';
+import {
+  SEEDANCE_INPUT_MEDIA_POLICIES,
+  seedanceMediaSizeAllowed,
+  validateSeedanceMediaMetadata,
+} from '../../assets/media-policy';
 import { TasksService } from '../../tasks/tasks.service';
 import { UploadTicketDto } from './dto/upload-ticket.dto';
 
-
-type InputMediaPolicy = { mediaType: 'image' | 'video' | 'audio'; maxSizeBytes: number };
-
-// Seedance 2.5 官网创建任务文档的单文件 MIME 与大小限制。时长、分辨率、帧率
-// 和多素材总量必须读取文件本体，不能在签发 PUT ticket 时凭客户端声明判断。
-const INPUT_MEDIA_POLICIES: Readonly<Record<string, InputMediaPolicy>> = {
-  'image/jpeg': { mediaType: 'image', maxSizeBytes: 30 * 1024 * 1024 },
-  'image/png': { mediaType: 'image', maxSizeBytes: 30 * 1024 * 1024 },
-  'image/webp': { mediaType: 'image', maxSizeBytes: 30 * 1024 * 1024 },
-  'image/bmp': { mediaType: 'image', maxSizeBytes: 30 * 1024 * 1024 },
-  'image/tiff': { mediaType: 'image', maxSizeBytes: 30 * 1024 * 1024 },
-  'image/gif': { mediaType: 'image', maxSizeBytes: 30 * 1024 * 1024 },
-  'image/heic': { mediaType: 'image', maxSizeBytes: 30 * 1024 * 1024 },
-  'image/heif': { mediaType: 'image', maxSizeBytes: 30 * 1024 * 1024 },
-  'video/mp4': { mediaType: 'video', maxSizeBytes: 200 * 1024 * 1024 },
-  'video/quicktime': { mediaType: 'video', maxSizeBytes: 200 * 1024 * 1024 },
-  'audio/wav': { mediaType: 'audio', maxSizeBytes: 15 * 1024 * 1024 },
-  'audio/mpeg': { mediaType: 'audio', maxSizeBytes: 15 * 1024 * 1024 },
-};
 
 @ApiTags('assets')
 @ApiBearerAuth('actor-token')
@@ -110,11 +95,11 @@ export class V1AssetsController {
     @Body() body: UploadTicketDto,
   ) {
     const mimeType = typeof body?.mimeType === 'string' ? body.mimeType.trim().toLowerCase() : '';
-    const policy = INPUT_MEDIA_POLICIES[mimeType];
+    const policy = SEEDANCE_INPUT_MEDIA_POLICIES[mimeType];
     if (!body?.filename?.trim() || !policy) {
       throw new BadRequestException('filename and supported Seedance input mimeType are required');
     }
-    if (!Number.isInteger(body.sizeBytes) || body.sizeBytes <= 0 || body.sizeBytes > policy.maxSizeBytes) {
+    if (!seedanceMediaSizeAllowed(policy, body.sizeBytes)) {
       throw new BadRequestException(`sizeBytes must be between 1 and ${policy.maxSizeBytes} for ${policy.mediaType}`);
     }
     if (!this.presign.isConfigured()) {
@@ -137,6 +122,7 @@ export class V1AssetsController {
             assetId: existing.id,
             objectKey: existing.objectKey,
             alreadyUploaded: true,
+            ...(existing.inspectionStatus === 'uploaded' ? { requiresInspection: true } : {}),
             inspectionStatus: existing.inspectionStatus,
           };
         }
@@ -223,21 +209,23 @@ export class V1AssetsController {
       throw new BadRequestException('Uploaded object SHA-256 does not match upload ticket');
     }
 
+    if (!this.inspector) {
+      throw new ServiceUnavailableException('Media inspection service is not configured');
+    }
     let mediaMetadata;
-    if (this.inspector) {
-      try {
-        const signed = this.presign.createDownloadUrl(asset.objectKey);
-        mediaMetadata = await this.inspector.inspect(signed.downloadUrl, actual.mimeType);
-        validateSeedanceMediaMetadata(actual.mimeType, mediaMetadata);
-      } catch {
-        throw new BadRequestException('Uploaded media could not be inspected');
-      }
+    try {
+      const signed = this.presign.createDownloadUrl(asset.objectKey);
+      mediaMetadata = await this.inspector.inspect(signed.downloadUrl, expectedMime);
+      validateSeedanceMediaMetadata(expectedMime, mediaMetadata, actual.sizeBytes);
+    } catch {
+      throw new BadRequestException('Uploaded media could not be inspected');
     }
     const uploaded = await this.assets.markUploaded(id, actor.actorId, {
       bucket: this.presign.getBucketName(),
       sizeBytes: actual.sizeBytes,
       mimeType: actual.mimeType,
       mediaMetadata,
+      inspectionStatus: 'verified',
     });
     if (!uploaded) {
       throw new NotFoundException('Asset not found');

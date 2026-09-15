@@ -1,8 +1,8 @@
 {
   "id": "98c9464a-6922-4b9a-a41f-5580a409888d",
   "revision": 0,
-  "last_node_id": 8,
-  "last_link_id": 11,
+  "last_node_id": 9,
+  "last_link_id": 12,
   "nodes": [
     {
       "id": 1,
@@ -315,11 +315,47 @@
         {
           "name": "local_video_path",
           "type": "STRING",
-          "links": []
+          "links": [
+            12
+          ]
         }
       ],
       "properties": {
         "Node name for S&R": "VideoFlowPolicyDownload"
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 9,
+      "type": "VideoFlowPolicyPreview",
+      "title": "⑧ 成片预览｜本地播放",
+      "pos": [
+        2620,
+        30
+      ],
+      "size": [
+        320,
+        180
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "local_video_path",
+          "type": "STRING",
+          "link": 12
+        }
+      ],
+      "outputs": [
+        {
+          "name": "local_video_path",
+          "type": "STRING",
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VideoFlowPolicyPreview"
       },
       "widgets_values": []
     }
@@ -412,6 +448,14 @@
       8,
       0,
       "VIDEO_FLOW_CONFIG"
+    ],
+    [
+      12,
+      8,
+      0,
+      9,
+      0,
+      "STRING"
     ]
   ],
   "groups": [],

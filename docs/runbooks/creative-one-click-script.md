@@ -1,80 +1,31 @@
-# 创意同事一键脚本（Seedance）
+# 创意同事一键脚本状态
 
-> 最后更新：2026-09-11
-> 脚本位置：`scripts/seedance_cli_smoke.sh`
-> 相关文档：[creative-user-guide.md](./creative-user-guide.md)（手工调用与返回码）、[PROJECT_STATUS.md](../PROJECT_STATUS.md)
+> 更新日期：2026-09-15。
+> 当前结论：`scripts/seedance_cli_smoke.sh` 仍发送旧 `capability/profile/params` 和 `mode=preview|production` 协议，不兼容当前 v2 Preview，也不具备 v2 Production 冻结快照确认流程。
 
----
+## 当前禁止用于新任务
 
-## 1. 重要：默认不会出片
-
-脚本默认 `MODE=preview`：**只创建一条不可执行的预览记录并打印请求摘要，不产生任何 Provider 调用与费用。**
-
-要真实出片必须同时满足两个条件：
-
-1. 显式设置 `MODE=production`；
-2. 该 `ACTOR_ID` 已在服务端 `VIDEO_FLOW_PRODUCTION_ACTORS` 白名单中（否则返回 403）。
+不要使用该脚本创建 Preview 或 Production 任务，包括：
 
 ```bash
-export MODE=production
-```
-
----
-
-## 2. 依赖
-
-- `bash`、`curl`、`python3`
-
-## 3. 最小运行（Preview，零付费）
-
-先按 [creative-user-guide.md](./creative-user-guide.md) 安装个人 token；默认位置为 `~/.video-flow/token`。
-
-```bash
-export ACTOR_ID="alice-creative"           # 同事唯一 ID，可选
-export PROMPT="A premium product hero video"
-export DURATION=5
-export PROFILE=seedance
-
 ./scripts/seedance_cli_smoke.sh
+MODE=production ./scripts/seedance_cli_smoke.sh
 ```
 
-Preview 模式下脚本会打印请求摘要后退出，重点看 `status=preview` 与 `preview.willCallProvider=false`。
+旧脚本默认 Preview 仍会调用已经退休的 Task 创建语义；Production 缺少 v2 `PreflightRecord`、内容/报价摘要确认和冻结执行快照。修改环境变量不能使它变成合规的 v2 客户端。
 
-## 4. 有参考图的写法
+历史操作说明已归档为 [v1 一键脚本手册](../archive/2026-09-15-creative-one-click-script-v1-superseded.md)，只能用于追溯，不能照做。
 
-```bash
-export IMAGE_URL="https://xxx/your_reference_image.png"
-./scripts/seedance_cli_smoke.sh
-```
+## 后续恢复条件
 
-脚本会自动切换为 `IMAGE_TO_VIDEO`，并把 `IMAGE_URL` 放进 `params.image_url`；不设置时使用 `TEXT_TO_VIDEO`。
+脚本只有在以下事项完成后才能重新作为受支持入口：
 
-> 走 ComfyUI 客户端时优先用 `image_asset_id`（见调用手册第 2 节）；`image_url` 需要是 Provider 可访问的 HTTPS 地址。
+- 使用 v2 `POST /api/v1/tasks/preflight` 获取完整报告；
+- 显示唯一 effectiveRequest、Production blockers 和 Quote；
+- Production 只提交已确认的预检引用、摘要和素材映射；
+- 已有 taskId 优先进入只读查询/取片，不先要求新预检；
+- 默认不创建付费任务，且没有隐式时间戳导致重复生成；
+- 自动化测试覆盖 Preview 零副作用、幂等、恢复和 Provider create 次数；
+- 对应 Backend 版本完成部署和实际验收。
 
-## 5. 真实出片（会付费）
-
-```bash
-export ACTOR_ID="alice-creative"
-export PROMPT="A premium product hero video"
-export MODE=production
-export IDEMPOTENCY_KEY="alice-20260911-001"   # 强烈建议固定，防止重复扣费
-./scripts/seedance_cli_smoke.sh
-```
-
-脚本会轮询到 `completed` / `failed` / `cancelled` 并打印最终任务 JSON，重点看：
-
-- `id`、`status`
-- `videoUrl`（注意：当前是 7 天有效的签名地址，见 PROJECT_STATUS R4）
-- `cost` 与费用状态
-- `errorMsg`
-
-## 6. 强制幂等（防重复扣费）
-
-固定 `IDEMPOTENCY_KEY` 即可：同一个 `IDEMPOTENCY_KEY + 参数组合` 会返回同一任务，不会提交第二次付费任务。不设置时脚本会按时间戳生成新 key，**每次都是新任务**。
-
-## 7. 安全说明
-
-- 脚本读取 `VIDEO_FLOW_TOKEN`，或 `VIDEO_FLOW_TOKEN_FILE` 指向的文件；未设置时读取 `~/.video-flow/token`。
-- `VIDEO_FLOW_ADMIN_TOKEN` 只应由管理员持有，脚本不会读取它。
-- 脚本不会打印 token 明文。
-- 出片前确认 Worker 在线，否则任务会停留在 `pending`。
+改造计划属于 [ROADMAP R5、R7](../ROADMAP.md#4-逐阶段实施清单)。当前创意同事可执行的安全操作只看 [v2 重构期间使用说明](./creative-user-guide.md)。

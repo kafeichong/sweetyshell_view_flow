@@ -109,7 +109,8 @@ class Job(BaseModel):
                     "watermark": plan["watermark"],
                     "workflow_key": plan.get("workflowKey"),
                     "workflow_version": plan.get("workflowVersion"),
-                    "omni_reference_task_type": plan.get("omniReferenceTaskType"),
+                    "contract_digest": plan.get("contractDigest"),
+                    "omni_reference_task_type": plan.get("omni_reference_task_type", plan.get("omniReferenceTaskType")),
                     "output_format": plan.get("outputFormat"),
                 }
             return {

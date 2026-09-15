@@ -1,14 +1,136 @@
 # Video Flow 项目现状（权威）
 
-> 最后核验：2026-09-14
-> 本轮核验方式：本地三包回归与隔离 Docker 跨包合同；仅使用本地 Fake Provider，未部署、未推送、未创建付费任务。
+> 最后核验：2026-09-15
+> 本轮核验方式：本地源码评审、三包回归、合同资源校验、隔离 PostgreSQL 全新/历史迁移和真实 Nest HTTP/数据库合同；未部署、未推送、未上传素材、未调用 Provider、未创建付费任务。
 > 本文是**唯一**描述"系统现在是什么样"的文档。任何历史文档与本文冲突时，以本文为准；如果本文与代码冲突，以代码为准并立即更新本文。
 
 ---
 
 ## 0. 本轮交付判断
 
-### 2026-09-14：统一预检规范的开发分支增量
+### 2026-09-15：R4 正式提交、执行槽与唯一 Worker 编译器已完成（仅本地分支）
+
+R4 已实现新的正式提交服务。`POST /api/v1/tasks` 的 Production 请求只接受 `preflightId`、稳定 `executionSlotId` 和 `media[{slotId,assetId}]`；不接受客户端重复提交 Prompt、生成规格、摘要、价格或 Provider 字段，也不再使用一次性 `confirmLiveSubmission`。服务端从有效 `PreflightRecord` 重建冻结 executionPlan，原样固化合同/意图/报价摘要、服务端模型、实际生成参数、`reserveCny` 和 `pricingSnapshot`。素材工作流按 `slotId` 精确绑定同账号 `verified` 输入 Asset，并在创建前流式复验对象实际 SHA-256/大小，事务内再次检查预检、报价、素材、Production 暂停、Actor 权限和额度。源码：`packages/backend/src/tasks/production-submission.service.ts`、`preflight.service.ts`、`task-budget.service.ts`。
+
+Task 已增加 `executionSlotId`、`slotSequence`、`preflightId`、三个摘要和客户端交付状态。`actorId + executionSlotId` 在 advisory lock 下串行化：同槽已有未交付或结果不确定 Task 时，无论新提交使用什么幂等键、预检是否过期或当前新任务准入是否暂停，都先恢复原 Task，不会重复创建或重复预占；只有客户端确认本地交付，或系统能够证明该 Task 不会再产生结果时，才能创建下一序号。新增 `GET /api/v1/tasks/slots/:slotId/current` 和 `POST /api/v1/tasks/:id/client-delivery`；交付确认要求 Task 所有权和服务端产物已就绪，重复确认幂等。数据库由 `20260915150000_add_production_execution_slots` migration 增量扩展，不新增 ExecutionSlot 表，不改写历史 Task。
+
+Worker 新任务只经过 `providers/seedance_execution_policy.py::compile_seedance_payload`：它校验冻结执行规则摘要、服务端模型、workflow 官方能力、媒体角色/顺序、4/30 秒边界、编辑特殊 `-1`、比例、分辨率、输出格式和 Provider 特殊字段，再构造 Ark payload。完整目录使用独立 `catalogDigest`；Task/Preflight 的 `contractDigest` 只覆盖模型、官方能力、媒体角色、生成参数和 Provider 字段，不包含当前 `implementation`、`admission`、验收、展示或价格状态。Worker 要求冻结 `workflowVersion` 存在，但不再要求等于最新目录 revision，也不读取当前准入状态；工作流关闭只阻止 Backend 创建新 Task，不否定已创建 Task。重复的 `seedance_compiler.py` 已移除。编译发生在写入 Provider submitted 证据之前；编译失败时 Provider create 为 0，并释放确认未调用 Provider 的预算预占。已有 `providerTaskId`、提交结果不确定、归档恢复和 usage 证据边界保持不变。源码：`packages/backend/src/tasks/workflow-catalog.service.ts`、`packages/worker/providers/seedance_execution_policy.py`。
+
+R4 完成的是通用 Backend/Worker 正式执行层，不等于 8 类工作流已经对用户开放。按照 v2.1 规范，当前 8 类工作流仍保持 `capability=confirmed`、`implementation=incomplete`、`admission.enabled=false`、`validation=not_run`。生产源码没有打开工作流的测试环境变量；Backend 单元测试使用测试文件内的 Catalog fixture，真实 Nest 合同通过 `test/contract-backend.cjs` 在测试模块中替换依赖。客户端仍发送旧一次性确认字段，稳定槽、本地回执和交付确认尚待 R5；各工作流模板及完整纵向合同尚待 R6。含输入视频的最低 Token 规则仍未取得可执行值，因此相关报价继续 `unavailable`。当前本地代码不可直接作为已可用 Production 客户端发布。首次改变执行规则前仍须把旧摘要对应合同加入 Worker 版本注册并保留到旧 Task 排空；当前尚未上线，没有旧 v2 正式 Task 需要迁移。
+
+本次实际验证：
+
+- Backend：`cd packages/backend && npm run build && npx jest --runInBand`，29 suites / 294 passed；R0/R2/R4 定向回归为 8 suites / 93 passed；
+- Worker：`cd packages/worker && venv/bin/python -m pytest -q -rs`，205 passed / 26 个仓库外 workflow JSON 缺失导致的预期 skip / 12 deselected；R4 编译、参数和恢复定向 43 passed；
+- 客户端：`cd packages/comfyui-video-flow-client && .venv/bin/python -m pytest -q -rs`，98 passed；该结果只证明现有客户端回归，不能替代 R5 新协议实现；
+- 合同资源：revision `2026-09-15.3` 的三份 `seedance-workflows.v2.json` 字节一致；Node 合同/同步 6 passed；Backend 与 Worker 的执行规则摘要均为 `2e95034c85ad474935befa206d2b7721eb4c3748653a83c5f6a40fdf390e8ecc`；脚本回归 26 passed，其中 Fake Provider 7 passed，证明冻结 4 秒 payload 原样到达，31 秒在编译阶段拒绝且 create=0；
+- HTTP/数据库：隔离 PostgreSQL 的空库和模拟历史库均成功应用全部 13 个 migration；`20260915170000_decimal_execution_costs` 将 `Task.cost` 和 Attempt 的估算、usage 推算、账单金额统一为 `Decimal(18,6)`，历史有限浮点值保留为数据库实际值并规范到 6 位，`NaN/Infinity` 会使迁移明确失败；`test/preflight-v2.contract-spec.ts` 2 passed，真实 Nest/Guard/Prisma 下验证同槽并发只创建 1 个 Task/1 次预占、原 Task 恢复、客户端交付确认及下一序号创建，全程无 Attempt/Provider 调用；容器、网络和临时卷已清理；
+- 现有 CI 完整合同仍有 42/51 个旧用例失败：这些用例继续构造旧 Preview Task、`confirmLiveSubmission` 和固定 `test-resolution`。它们不是 R4 新合同失败，也没有为保绿恢复旧接口；按 ROADMAP R7 将改为新纵向合同或归档。在 R7 完成前不能宣称完整合同 CI 全绿。
+
+未部署、未安装新客户端、未上传素材、未调用 Ark/真实 OSS、未创建真实 Provider Task 或付费任务。
+
+### 2026-09-15：R3 唯一报价与冻结定价解释已完成（仅本地分支）
+
+R3 新增 `PricingCatalog` 与 `TaskQuoteService`，v2 Preview 不再返回固定 2 元或 `R3_PRICING_NOT_IMPLEMENTED`。无输入视频时，服务端使用请求的实际输出时长、合同中的精确分辨率/比例像素、24 FPS 和适用单价，以 Decimal 计算 Token 与六位小数金额；例如 4 秒、720p、16:9 为 86,400 Token、6.048000 元。固定比例不再通过短边重新近似，首帧/首尾帧 `adaptive` 可从已检查首帧比例映射；无法锁定的 adaptive 使用该分辨率官方像素表最大值形成 `bounded` 预占，不伪造精确估算。源码：`packages/backend/src/tasks/pricing-catalog.ts`、`task-quote.service.ts`、`preflight.service.ts`。
+
+含输入视频的公式会累加每个实际 `durationSeconds`，不再出现“只要有视频就按 30 秒”的旧逻辑；2 秒、30 秒和合法多视频总时长均有回归。由于官方价格页把 Seedance 2.5 最低 Token 明细放在独立表格/计算器，本轮网页检索与两次浏览器只读访问仍未取得可执行数值，因此含输入视频的报价会展示公式 Token 和 42/46 元刊例价，但保持 `status=unavailable`、`reserveCny=null`、缺项 `INPUT_VIDEO_MINIMUM_TOKENS_UNRESOLVED`。这会阻止相关新 Production，而不是用可能低估的公式金额预占。
+
+公开刊例价默认只作为估算/预算依据，不冒充最终账单。1080p 72 折只有在 `VIDEO_FLOW_SEEDANCE_25_CONFIRMED_PROMOTION_IDS` 明确确认当前账户适用时才生效，报价有效期不跨促销结束时间；已确认账户/订单价可通过带 `pricingVersion`、来源、完整分辨率价格和有效期的 `VIDEO_FLOW_SEEDANCE_25_ACCOUNT_PRICING_JSON` 注入，缺档或格式错误 fail-closed。Preview 和 check 保存同一 `quoteDigest`；报价到期、促销/账户价变化或内容被篡改时要求重新预检，不静默更价。
+
+新结算解释优先读取冻结 `pricingSnapshot` 和 `usage.completion_tokens`，按快照中的 rate 计算；当前价格变化不会覆盖旧任务。快照损坏、usage 缺失或无效时保留 `unavailable/review`，`usage_calculated` 仍不等同于 Provider 账单确认。旧 `pricingVersion` 静态表只保留已有历史任务解释；无调用者且包含“有视频固定 30 秒”的旧 `estimateSeedanceCost` 已移除。R4 的快照消费现已由顶部结果完成；工作流实际开放仍等待 R5/R6。
+
+本次实际验证：
+
+- Backend：`cd packages/backend && npm run build && npx jest --runInBand`，28 suites / 257 passed；R3 定向报价、预检、预算、结算为 5 suites / 81 passed；
+- 客户端：`cd packages/comfyui-video-flow-client && .venv/bin/python -m pytest -q`，96 passed；
+- Worker：`cd packages/worker && venv/bin/python -m pytest -q`，202 passed / 26 skipped / 12 deselected，另有 7 条既有 pytest-asyncio/Pydantic 弃用警告；
+- 合同与同步：`node scripts/sync_workflow_contracts.mjs --check && node --test scripts/tests/workflow_contract_sync.test.mjs scripts/tests/workflow_contract_v2.test.mjs`，6 passed，`git diff --check` 通过；
+- 报价回归：公开刊例、账户价、促销跨期、固定/自适应比例、2/30 秒和多视频、编辑 `-1`、未知模型/时长、最低 Token 阻断及账户价格缺档 fail-closed 均通过；
+- HTTP/数据库：隔离 PostgreSQL 应用全部 11 个 migration；`test/preflight-v2.contract-spec.ts` 真实 Nest/Guard/Prisma 1 passed，验证 4 秒 720p Preview 返回 6.048000 元、check 保留同一报价，同时 Task/Attempt/Reservation 不变；容器、网络和临时卷已清理。
+
+未部署、未安装 ComfyUI、未调用 Ark/OSS、未创建正式 Task/Attempt/预算预占或付费任务。
+
+### 2026-09-15：R2 本地与服务端素材识别已完成（仅本地分支）
+
+R2 新增客户端共用 `media_inspection.py`：PNG/JPEG/WebP 使用 Pillow 读取实际内容，MP4/MOV/WAV/MP3 使用 `ffprobe` 读取容器与流；输出稳定 `slotId`、实际 SHA-256、检测 MIME、字节数及规范化 metadata，不保留原始文件字节。产品图、首帧、首尾帧和多参考图节点共用该入口并强制同名文件重检；上传前 `read_verified_media` 再次识别完整描述，内容变化返回 `MEDIA_CONTENT_CHANGED`。Preview HTTP payload 只包含 descriptor，不包含本机路径、文件、Base64 或缩略图。源码：`packages/comfyui-video-flow-client/media_inspection.py`、`preflight_nodes.py`。
+
+Backend `MediaInspectorService` 不再根据 expected MIME 决定媒体类型，而是根据 ffprobe 的格式、文件品牌、流和编码识别 PNG/JPEG/WebP/BMP/TIFF/GIF、HEIC/HEIF、MP4/MOV、WAV/MP3；expected MIME 只是一致性约束。时长和 FPS 统一规范为最多 6 位小数。统一 Preview 规则同时检查图片/视频尺寸和比例、视频像素/FPS/编码/单段时长、音频单段时长，以及视频和音频各自不超过 30 秒的总时长。源码：`packages/backend/src/assets/media-inspector.service.ts`、`media-policy.ts`、`tasks/workflow-catalog.service.ts`。
+
+R2 对照仓库内官方接口原文修正了合同中的文件大小边界：图片 `<30MB`、视频 `≤200MB`、音频 `≤15MB`。源合同 revision 更新为 `2026-09-15.3` 并同步到 Backend/Worker；客户端真实文件检查与 Backend Preview 描述检查执行相同的包含/不包含边界，视频恰好 200MB 和音频恰好 15MB 合法，图片恰好 30MB 拒绝。源码：`contracts/seedance-workflows.v2.json`、`packages/comfyui-video-flow-client/media_inspection.py`、`packages/backend/src/assets/media-policy.ts`。
+
+上传完成现在必须具备实际内容 Inspector，缺失时 fail-closed；通过 OSS 实际字节 SHA-256、对象大小、Content-Type、签名对象 ffprobe 和媒体规则后，输入 Asset 标记为 `verified`。已验证的同内容 Asset 可直接复用；历史 `uploaded` Asset 不覆盖对象，但客户端会先调用 complete 补做实际内容复验。Actor 所有权、实际流式哈希和未完成上传隔离保持不变。源码：`packages/backend/src/v1/assets/v1-assets.controller.ts`、`assets.service.ts`、`packages/comfyui-video-flow-client/client.py`。
+
+R2 不在 Worker 再实现媒体探测器：`slotId → verified Asset` 的正式提交复验和冻结已由顶部 R4 完成，Worker 只消费该快照。该边界避免 Backend 与 Worker 出现两套可能漂移的 MIME/时长判断。
+
+本次实际验证：
+
+- Backend：`cd packages/backend && npm run build && npx jest --runInBand`，27 suites / 244 passed；其中 `media-inspector.integration.spec.ts` 使用本机真实 ffmpeg/ffprobe/cwebp 临时生成并识别 PNG/JPEG/WebP、MP4/MOV、WAV/MP3，7 项通过；
+- 客户端：`cd packages/comfyui-video-flow-client && .venv/bin/python -m pytest -q`，96 passed；其中真实媒体、损坏/伪装、同名内容变化、依赖缺失、总时长和文件大小边界 13 项通过；
+- Worker：`cd packages/worker && venv/bin/python -m pytest -q`，202 passed / 26 skipped / 12 deselected；skip 仍是仓库外 ComfyUI workflow 资产缺失的预期结果；
+- 合同与同步：`node scripts/sync_workflow_contracts.mjs --check && node --test scripts/tests/workflow_contract_sync.test.mjs scripts/tests/workflow_contract_v2.test.mjs`，6 passed；三份合同资源字节一致；
+- HTTP/数据库：隔离 PostgreSQL 应用全部 11 个 migration；`test/preflight-v2.contract-spec.ts` 真实 Nest/Guard/Prisma 合同 1 passed，验证 Preview 只新增 PreflightRecord，Task/Attempt/Reservation 不变；测试容器、网络与临时卷已清理。
+
+上述媒体集成测试只操作本机临时文件；没有安装到创意 ComfyUI、没有连接真实 OSS 或 Ark、没有创建 Provider Task、ExecutionAttempt、预算预占或付费任务。R2 的后续 R3/R4 服务层已完成，但 Production 对用户开放仍等待 R5/R6/R7。
+
+### 2026-09-15：R1 统一规则与独立预检报告已完成（仅本地分支）
+
+R1 已将新版 Preview 从 Task 域中拆出：`POST /api/v1/tasks/preflight` 通过统一工作流合同形成唯一 `effectiveRequest`、逐字段检查、当时的 Production blockers 和独立 `PreflightRecord`；`GET /api/v1/tasks/preflight/:id/check` 从记录复验合同/意图/报价摘要，并重新计算当前准入。Preview 无论 Production 白名单、暂停或额度状态如何都能返回请求检查结果，但接口本身仍要求有效身份。源码：`packages/backend/src/tasks/workflow-contract.ts`、`workflow-catalog.service.ts`、`preflight.service.ts`、`src/v1/tasks/v1-tasks.controller.ts`。
+
+工作流目录已从同一 v2 合同返回 8 类工作流的角色、参数和 `capability / implementation / admission / validation` 四维状态；源合同通过 `scripts/sync_workflow_contracts.mjs` 同步到 Backend/Worker 构建资源。Prisma migration `20260915090000_add_preflight_records` 只新增 `preflight_records` 与索引，不改写 Task、Attempt、Asset 或预算数据。旧 `mode=preview` Task 创建已返回 `PREVIEW_TASK_CREATION_RETIRED`；已有 Task 的授权查询保持独立。
+
+R1 完成时尚未接入实际参数报价和正式快照消费，这两项缺口现已分别由顶部 R3/R4 结果取代。8 类工作流仍因 v2 全链未完成而保持 `incomplete / admission=false`。旧 `workflow-registry.ts`、`workflow-preflight.ts` 只剩历史兼容/旧测试引用，计划在 R7 移除，当前 v2 API 不调用它们。
+
+本次实际验证：
+
+- Backend：`cd packages/backend && npm run build && npx jest --runInBand`，26 suites / 225 passed；
+- Worker：`cd packages/worker && venv/bin/python -m pytest -q`，202 passed / 26 skipped / 12 deselected；26 项因仓库外 ComfyUI workflow 资产缺失而预期跳过；
+- 客户端：`cd packages/comfyui-video-flow-client && .venv/bin/python -m pytest -q`，80 passed；
+- 合同与同步：`node --test scripts/tests/workflow_contract_v2.test.mjs scripts/tests/workflow_contract_sync.test.mjs && node scripts/sync_workflow_contracts.mjs --check`，6 passed，Backend/Worker 资源字节一致且 Nest 构建资源位置通过；
+- 全新数据库：隔离 PostgreSQL 应用全部 11 个 migration；`test/preflight-v2.contract-spec.ts` 真实 Nest/Guard/Prisma 合同 1 passed，验证未鉴权 401、Preview 只新增 PreflightRecord、Task/Attempt/Reservation 数量不变、8 类目录和旧 Preview 拒绝；
+- 历史数据库：`VIDEO_FLOW_MIGRATION_ONLY=1 ... bash scripts/run_mvp_contract.sh` 通过，模拟已有 Task 前向升级后历史 Task 保留且新表存在；回滚策略为暂停新提交并回滚应用，保留新表与历史记录，不执行破坏性降级。
+
+上述验证只使用隔离本地数据库和 loopback 地址；测试容器、网络和临时卷已清理。未验证 R2 实际媒体识别、R3 报价、R4 正式提交、真实 ComfyUI 导入或 Ark 成片。
+
+### 2026-09-15：R0 合同与替换边界已冻结
+
+R0 已完成，不代表 R1–R8 业务重构、部署或真实付费验收已经完成。新增 [Seedance v2 可执行合同](../contracts/seedance-workflows.v2.json)，冻结正式接口、模型 ID、8 类工作流、普通 4–30 秒、编辑特殊 `-1`、媒体限制、公开计费公式/单价及输入视频最低 Token 阻断策略；新增 [v2 强制规范](./requirements/2026-09-15/workflow-preview-production-spec-v2.md)、[官方合同证据](./2026-09-15/Seedance-2.5工作流与计费合同证据.md)和[旧设计替换清单](./2026-09-15/Preview-Production旧设计替换清单.md)。v1.1 完整原文已归档，原路径保留兼容入口。
+
+R0 明确：八类 Provider 能力均为 `confirmed`，但新 v2 实现均为 `incomplete`、`admission.enabled=false`、真实验收 `not_run`；不能因官方支持直接开放 Production。含输入视频的最低 Token 明细尚未取得可执行数据，因此这类新 Production 报价必须保持 `unavailable`，不得用固定金额兜底。未调用 Ark/OSS、未创建 Task/Attempt/预算预占、未部署、未推送。
+
+本次验证：
+
+- `node --test scripts/tests/workflow_contract_v2.test.mjs`：4 passed；
+- `cd packages/worker && venv/bin/python -m pytest -q tests/test_seedance_2_5_contract_evidence.py`：2 passed；
+- 测试先在合同/fixture 缺失时分别观察到 ENOENT 和 `KeyError: 'textToVideo'`，补齐后转绿；
+- 完整三包回归尚未在 R0 重跑，业务代码现状仍按下一节 2026-09-15 评审判断。
+
+### 2026-09-15：R1 实施前的代码核验基线（历史）
+
+**这是 R1 修改前的基线，不是当前结论。** 当时判断为部分满足，参考图路径最接近完成，其余七类工作流尚未形成完整正式执行链；其中 Preview 独立记录和统一报告缺口已由本节顶部 R1 结果取代，其余缺口仍按 R2–R8 推进。评审针对包含未提交修改的本地工作区，不代表线上版本。逐项发现及本地复现保存在[当日评审快照](./2026-09-15/Preview与Production代码符合性评审.md)，修正阶段只见[ROADMAP R0–R8](./ROADMAP.md)。
+
+| 当前缺口 | 源码依据 |
+| --- | --- |
+| 新预检链无上传，但仍注册的旧 Preview 上传素材；首帧文件刷新和视频/音频客户端输入未完整实现 | `packages/comfyui-video-flow-client/nodes.py:81`、`:304`；`preflight_nodes.py:142`、`:177` |
+| Preview 仍被生产白名单/暂停直接阻断；报告缺完整准入原因，素材角色与媒体类型未关联校验，规则版本绑定不完整 | `packages/backend/src/v1/tasks/v1-tasks.controller.ts:65`；`workflow-preflight.ts:23`、`:37` |
+| adaptive/-1估算失败回退固定金额；输入视频固定按30秒；checkPreflight仍用固定金额；适用价格与最低用量规则未完整实现 | `packages/backend/src/tasks/task-cost.ts:18`、`:33`；`packages/backend/src/v1/tasks/v1-tasks.controller.ts:105` |
+| 状态混合开发/启用/验收；实际正式编译器缺文本与音频参考策略，也未完整复验普通时长 | `packages/backend/src/tasks/workflow-registry.ts:3`；`packages/worker/providers/seedance_execution_policy.py:14`、`:93`；`executor.py:956` |
+| 服务端图片类型判断仍受预期MIME影响；新画布找回已有任务前仍要求预检有效与新任务准入 | `packages/backend/src/assets/media-inspector.service.ts:31`；`packages/comfyui-video-flow-client/preflight_nodes.py:255`、`:290` |
+| 文本预检模板发现两处输入link引用错误；其余四份新预检模板静态连线一致 | `packages/comfyui-video-flow-client/workflows/seedance-text-to-video-preflight-v1.comfy.json`；`tests/test_preflight_nodes.py:169`仅覆盖产品模板连线 |
+
+保留依据：身份与所有权校验、实际对象SHA-256、Task/预占同事务、Provider ID恢复、不确定提交留痕和生成/交付分离已有实现，见 `packages/backend/src/assets/asset-presign.service.ts:107`、`tasks/task-budget.service.ts:67`、`packages/worker/executor.py:831`、`:1054`。Worker固定70元辅助计算属于旧任务兼容分支，不是新任务正式结算路径。
+
+本次实际验证：
+
+- Backend：`cd packages/backend && npm run build && npx jest --runInBand`，24 suites / 223 passed。
+- Worker：`cd packages/worker && venv/bin/python -m pytest -q`，202 passed / 26 skipped / 12 deselected。
+- 客户端：`cd packages/comfyui-video-flow-client && .venv/bin/python -m pytest -q`，80 passed。
+- HTTP：`cd packages/backend && node test/preflight-http.smoke.cjs`通过；真实Nest/Guard，数据库、额度与OSS为测试替身。
+- 定向内联诊断确认金额不一致、角色错配、编译器覆盖与媒体误识别；输入输出见当日评审§5.1，不冒充真实素材上传或付费接口验收。
+- `git diff --check`通过。实际ComfyUI全模板运行、完整数据库跨包及正式Provider出片不在本次验证范围内。
+
+该评审时点已完成职责文档、评审归档和路线图替换，但尚未开始 R0–R8 业务修改；此后 R0、R1 已按顶部记录完成。以下旧日期记录保留其当时上下文；与顶部当前结论冲突的判断不得作为当前状态引用。
+
+### 2026-09-14：统一预检规范的开发分支增量（历史记录）
 
 此条记录仅描述 `feat/workflow-preflight-confirmation` 本地开发，未提交、未推送、未部署、未安装到实际 ComfyUI、未创建付费任务。
 
@@ -20,10 +142,18 @@
 - 原 48 项 Backend 契约用例已适配新准入，新增后合计 49 passed；Fake Provider 5 passed；Worker 跨包 10 passed / 2 skipped。验证命令：`VIDEO_FLOW_CONTRACT_DB_PORT=55433 VIDEO_FLOW_CONTRACT_PROVIDER_PORT=19092 bash scripts/run_mvp_contract.sh`。`packages/backend/test/contract-backend.cjs` 仅在测试启动时替换对象存储读取传输，保留真实流式字节哈希校验；不修改正式启动入口。测试图片元信息由夹具写入，不代表真实图片解码与 OSS 验收。跨包沿用明确跳过的独立账号额度竞态 E04、外部告警/容器重建 E12，不能写成全覆盖。
 - 未验证：实际 ComfyUI 导入/报告显示、真实 OSS 上的整链验收；CLI 和旧直接提交模板尚未适配新增预检字段。旧入口不能因已有测试通过视为满足新规范。本分支不得直接发布，收尾计划见 ROADMAP W5。
 - Preview 额度体验调整：每日/月度金额不足仅在 Preview 报告中返回 warning，不再阻断无付费预检；Production 仍严格执行额度准入。当前改动待重新完成三包回归和线上部署后生效。
+- 新增独立 `VideoFlowPolicyPreview` 节点：接收下载节点返回的本地视频路径，在 ComfyUI 结果区输出 `ui.videos` 播放项；路径为空时仅显示 Preview 未生成视频的提示，并拒绝 output 目录之外的路径。模板已串接“下载保存 → 成片预览”，客户端回归为 72 passed，已安装到 `/Volumes/lvmac/ai/ComfyUI/ComfyUI/custom_nodes/video_flow_client`；需重启 ComfyUI 后实际加载。
+- `VideoFlowPolicyPreview` 已针对实际 ComfyUI 0.35.x 前端修正为 `ui.images + animated` 的 MP4 兼容输出；原先的 `ui.videos` 在该前端不会渲染播放器。定向客户端测试 9 passed，插件已重新安装；需重启 ComfyUI 后重新执行一次下载/预览链路验收。
+- Seedance 2.5 参考图正式入口已允许 Registry 的 `duration=4–30s`、标准 `ratio` 和 `resolution=480p/720p/1080p`；仅指定 `seedance-2-5-official-v1` 时动态估算并按 `usage.completion_tokens` 解释费用，其他版本仍回退固定金额。2026-09-15核验发现估算/检查不一致及特殊模式缺口，不能称完整参数计费已经完成，详见本节最新核验。
+- 工作流目录已按“文生视频 → 首帧 → 首尾帧 → 多参考图”新增独立 ComfyUI 节点和 Preview 模板。新增工作流仍为 `preview_only` 或 `disabled`；原有参考图工作流可以通过正式接口提交 4–30 秒任务。完整回归记录为 Backend build 通过、Jest 24 suites / 221 tests、客户端 80 passed、Worker 202 passed / 26 skipped；本轮未调用 Provider、未创建付费任务。插件安装和 ComfyUI 重启后的实际导入仍待验收。
 - 原有现状记录保持原验证时间与上下文；本增量不回填历史交付结果。
 
 
-**尚不能宣告可交付创意人员独立使用；也不是重新从零开发。** 已有任务、鉴权、上传、Provider 调用和下载接口，但“有这些组件”不等于“同事从 ComfyUI 一次执行能拿到成片”。此前将 R4 / R7 关闭的口径过宽，本轮重新打开其未完成部分。
+### 2026-09-11：创意交付链路评审快照（历史记录）
+
+以下内容保留当日问题发现过程，不能作为 2026-09-15 当前风险清单；其中预算事务、Asset 归属、Provider ID 恢复和交付分离已有后续实现。当前结论只看本节顶部的 2026-09-15 核验及第 4 节当前风险登记册。
+
+**当时尚不能宣告可交付创意人员独立使用；也不是重新从零开发。** 当时已有任务、鉴权、上传、Provider 调用和下载接口，但“有这些组件”不等于“同事从 ComfyUI 一次执行能拿到成片”。
 
 | 问题 | 本轮源码证据（仓库根相对路径） | 判断 |
 | --- | --- | --- |
@@ -83,7 +213,7 @@
 
 ## 3. 已经具备的能力（附证据）
 
-### 3.0 当前开发分支进度（尚未部署）
+### 3.0 开发分支实施历史（不作为最新状态）
 
 - 2026-09-14：Seedance 2.5 工作流目录的后端请求策略继续收敛。`workflow-registry.ts` 已为八个键声明媒体角色/数量/顺序、generation 约束，以及已取证的 `omniReferenceTaskType` / `outputFormat`；`disabled` 工作流无法再创建 Preview；Production 在预算预占前复验已检查 Asset 的 role 与 MIME/媒体类型匹配。冻结字段已由 `packages/worker/models.py` 保留，但 Ark payload 编译器尚未消费。验证：Backend `npx jest --runInBand && npm run build`（22 suites / 205 tests）、Worker `venv/bin/python -m pytest -q`（189 passed / 26 skipped / 12 deselected）、ComfyUI 客户端 `.venv/bin/python -m pytest -q`（58 passed）。该变更未调用 Ark、未部署、未改变任何 workflow 的 `production_verified` 状态；详见 [ROADMAP W3–W4](./ROADMAP.md#W3registry-与-generation-policy)。
 - 2026-09-14：Worker 新增 `seedance_execution_policy.py`，将已冻结的 reference-image、首尾帧、全模态参考、视频编辑和视频延长意图编译为 Ark `content` payload，并在提交前复验角色、顺序、数量、`adaptive` / `duration=-1` 与 `reference/edit/extend` 字段。`executor.py` 已在素材 URL 解析后调用编译器，并通过 `SeedanceAdapter.create_task_payload()` 原样运输；编译失败进入 `requires_review` 且不调用 Provider，已有 `providerTaskId` 的恢复分支不重新提交。验证：`cd packages/worker && venv/bin/python -m pytest -q`（199 passed / 26 skipped / 12 deselected）。未调用 Ark、未部署、未改变任何 workflow 的 `production_verified` 状态。
@@ -199,59 +329,32 @@ bash scripts/run_docker_provider_addressing.sh       # Docker 服务名寻址
 
 ---
 
-## 4. 风险登记册
+## 4. 当前风险登记册
 
-严重度：**P0 = 资金或数据边界缺口，开放前必须解决；P1 = 阻断业务目标或异常处理；P2 = 按需改进。** 所有阶段与处置顺序见 [ROADMAP.md](./ROADMAP.md)，下表不代表已实施。
+本节只记录 2026-09-15 按 v2 职责重新核验后仍成立的风险。严重度：**P0 = 可能破坏素材、资金或付费执行边界，开放前必须解决；P1 = 阻断完整产品流程或造成错误反馈；P2 = 不阻断当前重构的工程债。** 具体实施顺序只看 [ROADMAP R1–R8](./ROADMAP.md#4-逐阶段实施清单)，完整发现和复现只看[当日评审快照](./2026-09-15/Preview与Production代码符合性评审.md)。
 
-### P0
+### P0：开放前必须解决
 
-| ID | 风险 | 证据 | 影响 | 处置 |
+| ID | 当前风险 | 发现依据 | 影响 | 处置阶段 |
 | --- | --- | --- | --- | --- |
-| R3 | 额度字段未参与生产准入；无预占、结算与并发原子校验 | `packages/backend/prisma/schema.prisma:161`、`packages/backend/src/v1/tasks/v1-tasks.controller.ts` | 连续提交消耗不可控；仅白名单不足以控制已授权用户费用 | ROADMAP M1 |
-| R14 | 生产参数与输入权限校验不足：未限定 duration / ratio / model，也未校验输入 Asset 归属 | `packages/backend/src/v1/tasks/preview-plan.ts`、`packages/backend/src/v1/internal/v1-worker.controller.ts` | 可绕过客户端限制，提交非预期成本参数或使用他人已知素材 ID | ROADMAP M1 |
+| C01 | 仍注册的旧 Preview 节点会上传素材，新旧入口行为不同 | F01 | 用户选择 Preview 仍可能产生素材出站，违反无上传边界 | R5、R7 |
+| C02 | Preview 请求检查、Production 准入和角色/媒体类型检查未闭合 | F02–F04 | 无权限用户拿不到诊断报告，错误类型素材又可能被报告为参数通过 | R1、R2 |
+| C03 | Preview、check、正式预占和结算价格依据不一致，未知报价会回退固定金额 | F05–F08 | 费用展示失真，可能错误放行、错误预占或错误解释 usage | R3、R4 |
+| C04 | 服务端实际媒体类型判断仍受声明 MIME 影响 | F13 | 视频可能被当成图片，上传后内容复验不能形成可靠安全边界 | R2 |
+| C05 | 工作流状态混合能力、实现、启用和验收，实际 Worker 编译入口又未覆盖全部工作流和边界 | F11、F12 | 仅修改状态可能开放尚未完成的付费执行路径 | R1、R4、R6 |
 
-### P1
+### P1：完整流程阻断
 
-| ID | 风险 | 证据 | 影响 | 处置 |
+| ID | 当前风险 | 发现依据 | 影响 | 处置阶段 |
 | --- | --- | --- | --- | --- |
-| R4 | 输出归属/下载接口已补，但无 URL 仍可完成、Asset/状态回写失败未阻断；输出秒级命名、登记非幂等 | `packages/worker/executor.py:525`、`packages/backend/src/assets/assets.service.ts:65` | completed 可能无可交付视频，修复归档可能新增重复记录 | ROADMAP M2 |
-| R6 | 无可持久化自动重试；提交不确定类型覆盖不全 | `packages/worker/executor.py:585`、`packages/worker/providers/seedance_adapter.py:135` | 错误若被当作可重新生成，可能额外付费；人工也缺安全恢复入口 | ROADMAP M2；自动重提不作为 MVP 要求 |
-| R7 | Wait 只查一次、输出不衔接、目录硬编码；相同参数无明确“再生成一版”标识 | `packages/comfyui-video-flow-client/nodes.py:83`、`:105`、`:119` | 客户端节点齐全不等于可自助出片；重取与新生成意图不清 | ROADMAP M3 |
-| R8 | 已有数据库记录与滚动日志，缺持久结构化事件、有效心跳、告警处置；日志输出签名 URL | `docker-compose.yml:48`、`:77`；`packages/worker/main.py:50`、`executor.py:525`、`:543` | 日志最多按每服务 3 × 10 MB 轮换，不能保证保留天数；healthy 不证明执行循环工作 | ROADMAP M4 |
-| R9 | 有请求快照、Prompt 与素材记录，但没有内容审核结论/处置记录；uploaded 只表示上传完成 | `packages/backend/prisma/schema.prisma`、`packages/backend/src/v1/assets/v1-assets.controller.ts` | 素材来源与审核通过不能由上传状态推断 | ROADMAP 试点素材边界与人工审核 |
-| R11 | 已有 usage 推算及费用状态，但归档失败前 usage 尚未保存；单价硬编码；无本轮账单核对证据 | `packages/worker/executor.py:554`、`packages/worker/providers/seedance_adapter.py` | 消耗可能漏记，推算不能称最终账单 | ROADMAP M1 / M2 / M4 |
-| R13 | PostgreSQL 已持久化任务，但恢复响应未展平 `providerTaskId`，且租约过期未参与领取判断 | `packages/backend/src/tasks/task-claim.service.ts:86`、`:110`；`packages/worker/executor.py:107` | 已存在的 Provider 任务不能可靠接续；不能据此扩容多 Worker | ROADMAP M2；MVP 单 Worker |
+| C06 | 客户端恢复原任务前先检查新预检、权限和额度 | F14 | 预检过期、暂停或额度变化后，用户可能无法继续等待或重新下载已有产物 | R5 |
+| C07 | 视频/音频输入节点和模板不完整，文本模板存在连线错误 | F10、F15 | 多类工作流不能在实际 ComfyUI 中形成可靠 Preview/Production 操作链 | R5、R6 |
+| C08 | 预检记录没有完整绑定工作流规则和价格内容摘要 | F09 | 规则或价格变化后，旧确认可能无法可靠失效 | R1、R3、R4 |
+| C09 | 八类工作流尚未完成跨包合同、实际 ComfyUI 和受控真实 Provider 的逐项验收 | 当日评审 §6、§8 | 单测或模板存在不能证明完整链路和实际出片可用 | R6–R8 |
 
-### 2026-09-11 已关闭
+### 待重新核验的早期风险
 
-| 原 ID | 已完成处置 | 验证 |
-| --- | --- | --- |
-| R1 | 旧任务接口按用途加 `AdminTokenGuard` / `WorkerServiceGuard` | decorator metadata 测试；公网 GET / POST 无凭证均为 401 |
-| R2 | Backend 改为 `127.0.0.1:3100`；Worker / PostgreSQL 删除宿主端口 | Compose 配置核对；生产 `ss` 与容器端口核对 |
-| R5 | 新增三包 GitHub Actions；客户端增加稳定的包根测试入口 | Backend、Worker、Client 本地全绿；远端 CI 以最新 run 为准 |
-| R10 | 删除唯一 `.env.backup-token-*`，生产 `.env` 改为 `600` | 文件名计数为 0；权限检查为 `600` |
-| R12 | profile / duration / ratio 纳入稳定幂等键，mode 保持独立作用域 | 客户端幂等测试 |
-
-### 2026-09-13 仍未完成（阻塞在开发环境之外）
-
-- **T08 三项**：节点展示扩展未经真实 ComfyUI 验证；两份模板是 API 格式而非真实导出的 UI 格式；自定义 output 路径与重启后主实例的导入/执行/重新取片未验证。需要一台可运行、可安装节点、可重启的 ComfyUI。
-- **T10 两项**：宿主计划任务检查巡检/备份回执超时、外部可用性渠道验证"整机失联可告警"；以及"上线时触发一条无付费测试告警并由责任人确认收到"。需要实际宿主与通知渠道。
-- **T11 两项**：E04 仍缺独立白名单 Actor/输入 Asset/精确额度 fixture；E12 仍缺真实容器重建和外部告警通道。E03/E05/E08/E10/E11 已做成跨包合同并实跑通过。
-- **T12 全部**：部署与真实创意验收，需生产操作授权。
-
-其中 T08 的三项是本轮唯一"有环境就能立刻做"的：本机 Comfy Desktop 的数据根为 `~/mylab/ComfyUI`，但没有 `.venv`（`install.sh` 要求 ComfyUI 自带 Python），且安装会改动正在使用的环境，需先确认目标环境与授权。
-
-### P2（工程债，按需清理）
-
-- 双状态源 `status` / `taskStatus` 可能漂移（completed 后仍留 `in_progress`）。
-- `leaseExpiresAt` 只写不读，多 Worker 可能重复轮询同一 Provider 任务。
-- `src/main.ts` 无全局 `ValidationPipe`，v1 DTO 形同未启用。
-- `GET /api/tasks` 无分页。
-- `v1/admin/credentials` 创建失败 `throw new Error` → 500 而非 400。
-- `PrismaService` 被多模块重复 provide。
-- Worker 26 项测试跳过，因为 `packages/worker/workflows/` 不存在（仓库外资产）。
-- 部分 spec 用 `jest.mock('@nestjs/common')` 替换装饰器，不覆盖真实 Guard 装配。
-- `backfill_video_urls.py` 硬编码生产 task id。
+2026-09-15 本轮评审没有重新核验完整可观察性、内容审核、分页、多 Worker 租约和管理接口错误语义。这些早期问题不再混入当前 F01–F15 风险清单，也不能视为已经关闭；进入相关开发或发布阶段前，应重新检查当前源码和运行环境。历史状态保存在[重整前 ROADMAP 快照](./archive/2026-09-15-roadmap-before-responsibility-reset.md)和 Git 历史中。
 
 ---
 

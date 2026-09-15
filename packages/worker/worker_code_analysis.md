@@ -1,4 +1,6 @@
-# Worker 服务代码分析（可阅读版）
+# Worker 服务代码分析（历史快照）
+
+> 本文是早期代码阅读记录，可能与当前 `executor.py`、v2 合同和职责边界不一致，不作为现状或实施计划。当前事实见 [PROJECT_STATUS](../../docs/PROJECT_STATUS.md)，模块入口见 [README](./README.md)。
 
 这份分析按“服务做什么、怎么做、哪里会失败”三步写。文件对应仓库 `packages/worker`。
 

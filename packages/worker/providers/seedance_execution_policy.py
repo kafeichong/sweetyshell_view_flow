@@ -1,41 +1,40 @@
-"""Compile an approved Video Flow execution plan into an Ark Seedance payload.
+"""Compile only Backend-frozen Seedance plans matching the shared v2 contract."""
 
-This module deliberately accepts only the Backend-frozen workflow intent.  It
-does not infer task type from a prompt or a media combination, and it performs
-no network I/O so every supported shape is testable against sanitized fixtures.
-"""
-
-from typing import Any, Dict, List, Tuple
+import hashlib
+import json
+from pathlib import Path
+from typing import Any, Dict, List
 
 
-WorkflowPolicy = Dict[str, Any]
+_CONTRACT_PATH = Path(__file__).resolve().parents[1] / "resources" / "seedance-workflows.v2.json"
+_CONTRACT: Dict[str, Any] = json.loads(_CONTRACT_PATH.read_text(encoding="utf-8"))
 
 
-WORKFLOW_POLICIES: Dict[str, WorkflowPolicy] = {
-    "seedance.reference-image-to-video.v1": {
-        "roles": ("reference_image",), "role_limits": {"reference_image": (1, 1)}, "min_media": 1, "max_media": 1,
-    },
-    "seedance.first-frame-to-video.v1": {
-        "roles": ("first_frame",), "role_limits": {"first_frame": (1, 1)}, "min_media": 1, "max_media": 1, "ratio": "adaptive",
-    },
-    "seedance.first-last-frame-to-video.v1": {
-        "roles": ("first_frame", "last_frame"), "role_limits": {"first_frame": (1, 1), "last_frame": (1, 1)}, "min_media": 2, "max_media": 2, "ratio": "adaptive",
-    },
-    "seedance.omni-reference.v1": {
-        "roles": ("reference_image", "reference_video", "reference_audio"), "role_limits": {"reference_image": (0, 30), "reference_video": (0, 10), "reference_audio": (0, 10)}, "min_media": 1, "max_media": 50,
-        "omni_reference_task_type": "reference", "output_format": "mov",
-    },
-    "seedance.video-edit.v1": {
-        "roles": ("reference_video",), "role_limits": {"reference_video": (1, 10)}, "min_media": 1, "max_media": 10, "ratio": "adaptive", "duration": -1,
-        "omni_reference_task_type": "edit", "output_format": "mov",
-    },
-    "seedance.video-extend.v1": {
-        "roles": ("reference_video",), "role_limits": {"reference_video": (1, 10)}, "min_media": 1, "max_media": 10, "ratio": "adaptive",
-        "omni_reference_task_type": "extend", "output_format": "mov",
-    },
-}
+def workflow_execution_digest(contract: Dict[str, Any]) -> str:
+    execution_contract = {
+        "schemaVersion": contract["schemaVersion"],
+        "provider": contract["provider"],
+        "model": {"id": contract["model"]["id"]},
+        "workflows": [
+            {
+                "key": workflow["key"],
+                "capability": workflow["state"]["capability"],
+                "media": workflow["media"],
+                "generation": workflow["generation"],
+                "providerFields": workflow.get("providerFields", {}),
+            }
+            for workflow in contract["workflows"]
+        ],
+    }
+    return hashlib.sha256(
+        json.dumps(execution_contract, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
 
-ROLE_TYPES: Dict[str, Tuple[str, str]] = {
+
+_CONTRACT_DIGEST = workflow_execution_digest(_CONTRACT)
+_WORKFLOWS = {item["key"]: item for item in _CONTRACT["workflows"]}
+
+_ROLE_URL_FIELDS = {
     "reference_image": ("image_url", "image_url"),
     "first_frame": ("image_url", "image_url"),
     "last_frame": ("image_url", "image_url"),
@@ -51,68 +50,102 @@ def _required_string(params: Dict[str, Any], name: str) -> str:
     return value.strip()
 
 
-def _validate_special_fields(params: Dict[str, Any], policy: WorkflowPolicy) -> None:
-    for field in ("ratio", "duration", "omni_reference_task_type", "output_format"):
-        expected = policy.get(field)
-        actual = params.get(field)
-        if expected is not None and actual != expected:
-            raise ValueError(f"Seedance workflow requires {field} {expected}")
-        if expected is None and actual is not None and field in ("omni_reference_task_type", "output_format"):
+def _validate_frozen_contract(params: Dict[str, Any]) -> Dict[str, Any]:
+    if _required_string(params, "contract_digest") != _CONTRACT_DIGEST:
+        raise ValueError("Seedance execution plan contract digest does not match Worker contract")
+    _required_string(params, "workflow_version")
+    if _required_string(params, "model") != _CONTRACT["model"]["id"]:
+        raise ValueError("Seedance execution plan model does not match Worker contract")
+    workflow_key = _required_string(params, "workflow_key")
+    workflow = _WORKFLOWS.get(workflow_key)
+    if not workflow:
+        raise ValueError(f"Seedance unsupported workflow {workflow_key}")
+    if workflow["state"]["capability"] != "confirmed":
+        raise ValueError(f"Seedance workflow capability is not confirmed: {workflow_key}")
+    return workflow
+
+
+def _validate_generation(params: Dict[str, Any], workflow: Dict[str, Any]) -> None:
+    generation = workflow["generation"]
+    duration = params.get("duration")
+    policy = generation["productDuration"]
+    if not isinstance(duration, int) or isinstance(duration, bool):
+        raise ValueError("Seedance workflow duration must be an integer")
+    if policy["kind"] == "fixed":
+        if duration != policy["value"]:
+            raise ValueError(f"Seedance workflow requires duration {policy['value']}")
+    elif duration < policy["minimum"] or duration > policy["maximum"]:
+        raise ValueError(
+            f"Seedance workflow duration must be between {policy['minimum']} and {policy['maximum']} seconds"
+        )
+    if params.get("ratio") not in generation["ratios"]:
+        raise ValueError("Seedance workflow ratio is not allowed")
+    if params.get("resolution") not in generation["resolutions"]:
+        raise ValueError("Seedance workflow resolution is not allowed")
+    if params.get("output_format") not in generation["outputFormats"]:
+        raise ValueError("Seedance workflow output format is not allowed")
+    for field in ("generate_audio", "watermark"):
+        if not isinstance(params.get(field), bool):
+            raise ValueError(f"Seedance execution plan requires boolean {field}")
+
+
+def _validate_provider_fields(params: Dict[str, Any], workflow: Dict[str, Any]) -> Dict[str, Any]:
+    expected = workflow.get("providerFields", {})
+    for field, value in expected.items():
+        if params.get(field) != value:
+            raise ValueError(f"Seedance workflow requires {field} {value}")
+    known_fields = {field for item in _WORKFLOWS.values() for field in item.get("providerFields", {})}
+    for field in known_fields - set(expected):
+        if params.get(field) is not None:
             raise ValueError(f"Seedance workflow does not allow {field}")
+    return dict(expected)
 
 
-def _compile_content(prompt: str, media_urls: List[Dict[str, Any]], policy: WorkflowPolicy) -> List[Dict[str, Any]]:
-    if not policy["min_media"] <= len(media_urls) <= policy["max_media"]:
+def _compile_content(prompt: str, media_urls: List[Dict[str, Any]], workflow: Dict[str, Any]) -> List[Dict[str, Any]]:
+    media_policy = workflow["media"]
+    if not media_policy["minimumTotal"] <= len(media_urls) <= media_policy["maximumTotal"]:
         raise ValueError("Seedance workflow has invalid media count")
+    limits = {item["role"]: (item["minimum"], item["maximum"]) for item in media_policy["roles"]}
+    counts = {role: 0 for role in limits}
+    ordered_roles = media_policy.get("orderedRoles")
     content: List[Dict[str, Any]] = [{"type": "text", "text": prompt}]
-    allowed_roles = policy["roles"]
-    role_counts = {role: 0 for role in allowed_roles}
-    previous_role_index = -1
-    for item in media_urls:
+    for index, item in enumerate(media_urls):
         if not isinstance(item, dict):
             raise ValueError("Seedance media item must be an object")
         role = item.get("role")
         url = item.get("url")
-        if role not in allowed_roles:
+        if role not in limits:
             raise ValueError(f"Seedance workflow does not allow role {role}")
+        if ordered_roles is not None and (index >= len(ordered_roles) or ordered_roles[index] != role):
+            raise ValueError("Seedance workflow media order is invalid")
         if not isinstance(url, str) or not url.strip():
             raise ValueError("Seedance media item requires a URL")
-        role_index = allowed_roles.index(role)
-        if role_index < previous_role_index:
-            raise ValueError("Seedance workflow media order is invalid")
-        previous_role_index = role_index
-        role_counts[role] += 1
-        content_type, url_field = ROLE_TYPES[role]
-        content.append({"type": content_type, url_field: {"url": url}, "role": role})
-    for role, (minimum, maximum) in policy["role_limits"].items():
-        if not minimum <= role_counts[role] <= maximum:
+        counts[role] += 1
+        content_type, url_field = _ROLE_URL_FIELDS[role]
+        content.append({"type": content_type, url_field: {"url": url.strip()}, "role": role})
+    for role, (minimum, maximum) in limits.items():
+        if not minimum <= counts[role] <= maximum:
             raise ValueError(f"Seedance workflow has invalid count for role {role}")
     return content
 
 
 def compile_seedance_payload(params: Dict[str, Any]) -> Dict[str, Any]:
-    """Turn a Backend-approved, URL-resolved execution plan into Ark JSON."""
-    workflow_key = _required_string(params, "workflow_key")
-    policy = WORKFLOW_POLICIES.get(workflow_key)
-    if not policy:
-        raise ValueError(f"Seedance unsupported workflow {workflow_key}")
-    _validate_special_fields(params, policy)
+    """Turn a URL-resolved Backend execution snapshot into the sole Ark payload."""
+    workflow = _validate_frozen_contract(params)
+    _validate_generation(params, workflow)
+    provider_fields = _validate_provider_fields(params, workflow)
     prompt = _required_string(params, "prompt")
     media_urls = params.get("media_urls")
     if not isinstance(media_urls, list):
         raise ValueError("Seedance execution plan requires media_urls")
-    payload: Dict[str, Any] = {
-        "model": _required_string(params, "model"),
-        "content": _compile_content(prompt, media_urls, policy),
-        "generate_audio": params.get("generate_audio", False),
-        "ratio": params.get("ratio"),
-        "duration": params.get("duration"),
-        "watermark": params.get("watermark", False),
+    return {
+        "model": _CONTRACT["model"]["id"],
+        "content": _compile_content(prompt, media_urls, workflow),
+        "generate_audio": params["generate_audio"],
+        "ratio": params["ratio"],
+        "duration": params["duration"],
+        "watermark": params["watermark"],
+        "resolution": params["resolution"],
+        "output_format": params["output_format"],
+        **provider_fields,
     }
-    resolution = params.get("resolution")
-    if isinstance(resolution, str) and resolution:
-        payload["resolution"] = resolution
-    for field in ("omni_reference_task_type", "output_format"):
-        if field in policy:
-            payload[field] = policy[field]
-    return payload

@@ -90,8 +90,8 @@ export class ExecutionsService {
   /**
    * 记录 Provider 终态：这是唯一会写 Provider 终态与结算金额的入口。
    *
-   * 金额由 Backend 用任务固化 executionPlan 里的 pricingVersion 解释原始
-   * usage 得出，请求体里的任何单价/结算金额都不参与计算。Attempt、Task
+   * 新任务金额由 Backend 用 executionPlan 里的完整 pricingSnapshot 解释原始
+   * usage；旧 pricingVersion 只用于历史任务。请求体里的任何单价/结算金额都不参与计算。Attempt、Task
    * 阶段与预占在同一个事务里落库，Worker 只有收到成功响应才允许进入归档。
    */
   async recordProviderOutcome(
@@ -115,7 +115,7 @@ export class ExecutionsService {
       await this.assertProviderTaskOwnership(tx, attemptId, attempt, input.providerTaskId);
 
       const plan = (task.executionPlan ?? null) as
-        | { pricingVersion?: unknown; model?: unknown }
+        | { pricingVersion?: unknown; model?: unknown; pricingSnapshot?: unknown }
         | null;
       const interpretation = interpretUsage(incomingUsage, plan);
       const amountCny =

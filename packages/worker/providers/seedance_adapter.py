@@ -388,10 +388,13 @@ class SeedanceAdapter:
         定价（根据实际账单反推）:
         - Seedance 视频生成: ¥70 / 百万 tokens
         """
-        if not usage or "total_tokens" not in usage:
+        if not usage or ("completion_tokens" not in usage and "total_tokens" not in usage):
             return None
 
-        total_tokens = usage["total_tokens"]
+        usage_key = "completion_tokens" if self.pricing_version == "seedance-2-5-official-v1" else "total_tokens"
+        total_tokens = usage.get(usage_key)
+        if total_tokens is None:
+            return None
         if isinstance(total_tokens, bool) or not isinstance(total_tokens, (int, float)):
             return None
         if total_tokens < 0:

@@ -440,6 +440,110 @@ describe('TaskBudgetService', () => {
   });
 
   describe('createTaskWithReservation', () => {
+    it('returns the same task under the actor lock and skips validation/reservation for an identical request', async () => {
+      const existing = { id: 'task-existing', requestSnapshot: { submissionDigest: 'digest-1' } };
+      const validate = jest.fn();
+      const tx = {
+        $executeRaw: jest.fn().mockResolvedValue(undefined),
+        task: { findFirst: jest.fn().mockResolvedValue(existing) },
+      };
+      (prisma.$transaction as jest.Mock).mockImplementation(async (callback: any) => callback(tx));
+
+      const result = await service.createTaskWithReservation({
+        actorId: 'actor-1', clientRequestId: 'request-1', requestDigest: 'digest-1',
+        estimatedCny: '5.000000',
+        executionPlan: {
+          model: 'test-model', duration: 5, ratio: '16:9', resolution: '720p', watermark: true,
+          pricingVersion: 'test-price', reserveCny: '5.000000',
+        },
+        task: { createdBy: 'actor-1', prompt: 'hello', status: 'pending', requestSnapshot: { submissionDigest: 'digest-1' } },
+      }, validate);
+
+      expect(result).toEqual({ task: existing, created: false });
+      expect(validate).not.toHaveBeenCalled();
+    });
+
+    it('runs the final snapshot validator inside the locked transaction before creating the task', async () => {
+      const order: string[] = [];
+      const tx = {
+        $executeRaw: jest.fn().mockResolvedValue(undefined),
+        task: {
+          findFirst: jest.fn().mockResolvedValue(null),
+          count: jest.fn().mockResolvedValue(0),
+          create: jest.fn().mockImplementation(async () => { order.push('create'); return { id: 'task-1' }; }),
+        },
+        actorCredential: { findUnique: jest.fn().mockResolvedValue({ actorId: 'actor-1', status: 'active', dailyLimitCny: new Prisma.Decimal(100), monthlyLimitCny: new Prisma.Decimal(1000) }) },
+        taskBudgetReservation: {
+          findMany: jest.fn().mockResolvedValue([]), aggregate: jest.fn().mockResolvedValue({ _sum: { settledCny: null } }),
+          count: jest.fn().mockResolvedValue(0), create: jest.fn().mockResolvedValue({}),
+        },
+        productionGate: { findUnique: jest.fn().mockResolvedValue({ paused: false }) },
+      };
+      (prisma.$transaction as jest.Mock).mockImplementation(async (callback: any) => callback(tx));
+      const validate = jest.fn().mockImplementation(async () => { order.push('validate'); });
+
+      const result = await service.createTaskWithReservation({
+        actorId: 'actor-1', clientRequestId: 'request-1', requestDigest: 'digest-1', estimatedCny: '5.000000',
+        executionPlan: { model: 'test', duration: 5, ratio: '16:9', resolution: '720p', watermark: false, pricingVersion: 'p1', reserveCny: '5.000000' },
+        task: { createdBy: 'actor-1', prompt: 'hello', status: 'pending', requestSnapshot: { submissionDigest: 'digest-1' } },
+      }, validate);
+
+      expect(result).toMatchObject({ task: { id: 'task-1' }, created: true });
+      expect(validate).toHaveBeenCalledWith(tx);
+      expect(order).toEqual(['validate', 'create']);
+    });
+
+    it('returns the current locked Task for the same execution slot without creating or reserving again', async () => {
+      const current = {
+        id: 'task-current', slotSequence: 1, clientDeliveryStatus: 'pending',
+        deliveryStatus: 'not_started', executionAttempts: [],
+      };
+      const tx = {
+        $executeRaw: jest.fn().mockResolvedValue(undefined),
+        task: { findFirst: jest.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(current) },
+      };
+      (prisma.$transaction as jest.Mock).mockImplementation(async (callback: any) => callback(tx));
+      const validate = jest.fn();
+
+      const result = await service.createTaskWithReservation({
+        actorId: 'actor-1', clientRequestId: 'request-2', requestDigest: 'digest-2', executionSlotId: 'slot-1',
+        estimatedCny: '5.000000',
+        executionPlan: { model: 'test', duration: 4, ratio: '16:9', resolution: '720p', watermark: false, pricingVersion: 'p1', reserveCny: '5.000000' },
+        task: { createdBy: 'actor-1', prompt: 'new content', status: 'pending' },
+      }, validate);
+
+      expect(result).toEqual({ task: current, created: false, recovered: true });
+      expect(validate).not.toHaveBeenCalled();
+    });
+
+    it('creates the next sequence after client delivery has released the slot', async () => {
+      const delivered = {
+        id: 'task-old', slotSequence: 1, clientDeliveryStatus: 'delivered',
+        deliveryStatus: 'ready', executionAttempts: [{ status: 'completed', providerTaskId: 'provider-1' }],
+      };
+      const tx = {
+        $executeRaw: jest.fn().mockResolvedValue(undefined),
+        actorCredential: { findUnique: jest.fn().mockResolvedValue({ actorId: 'actor-1', status: 'active', dailyLimitCny: new Prisma.Decimal(100), monthlyLimitCny: new Prisma.Decimal(1000) }) },
+        taskBudgetReservation: { findMany: jest.fn().mockResolvedValue([]), aggregate: jest.fn().mockResolvedValue({ _sum: { settledCny: null } }), count: jest.fn().mockResolvedValue(0), create: jest.fn().mockResolvedValue({}) },
+        productionGate: { findUnique: jest.fn().mockResolvedValue({ paused: false }) },
+        task: {
+          findFirst: jest.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(delivered),
+          count: jest.fn().mockResolvedValue(0),
+          create: jest.fn(async ({ data }) => ({ id: 'task-next', ...data })),
+        },
+      };
+      (prisma.$transaction as jest.Mock).mockImplementation(async (callback: any) => callback(tx));
+
+      const result = await service.createTaskWithReservation({
+        actorId: 'actor-1', clientRequestId: 'request-2', requestDigest: 'digest-2', executionSlotId: 'slot-1',
+        estimatedCny: '5.000000',
+        executionPlan: { model: 'test', duration: 4, ratio: '16:9', resolution: '720p', watermark: false, pricingVersion: 'p1', reserveCny: '5.000000' },
+        task: { createdBy: 'actor-1', prompt: 'new content', status: 'pending' },
+      });
+
+      expect(result).toMatchObject({ task: { id: 'task-next', executionSlotId: 'slot-1', slotSequence: 2, clientDeliveryStatus: 'pending' }, created: true });
+    });
+
     it('acquires the global lock before the actor lock', async () => {
       const executedSql: string[] = [];
       const tx = {
@@ -538,7 +642,7 @@ describe('TaskBudgetService', () => {
         task: { createdBy: 'actor-1', prompt: 'hello', status: 'pending' },
       });
 
-      expect(result).toMatchObject({ id: 'task-1', status: 'pending' });
+      expect(result).toMatchObject({ task: { id: 'task-1', status: 'pending' }, created: true });
       expect(tx.task.create).toHaveBeenCalledTimes(1);
       expect(tx.taskBudgetReservation.create).toHaveBeenCalledTimes(1);
     });

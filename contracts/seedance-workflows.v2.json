@@ -1,0 +1,558 @@
+{
+  "schemaVersion": 2,
+  "contractId": "seedance-workflows.v2",
+  "contractRevision": "2026-09-15.3",
+  "provider": "volcengine-ark",
+  "model": {
+    "key": "seedance-2.5",
+    "id": "doubao-seedance-2-5-260628",
+    "createTaskPath": "/api/v3/contents/generations/tasks",
+    "queryTaskPathTemplate": "/api/v3/contents/generations/tasks/{id}",
+    "outputFrameRate": 24,
+    "resolutions": ["480p", "720p", "1080p"],
+    "ratios": ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16", "adaptive"],
+    "outputFormats": ["mp4", "mov"],
+    "supportsGenerateAudio": true,
+    "supportsWatermark": true,
+    "dimensions": {
+      "480p": {
+        "21:9": [992, 432],
+        "16:9": [854, 480],
+        "4:3": [752, 560],
+        "1:1": [640, 640],
+        "3:4": [560, 752],
+        "9:16": [480, 854]
+      },
+      "720p": {
+        "21:9": [1470, 630],
+        "16:9": [1280, 720],
+        "4:3": [1112, 834],
+        "1:1": [960, 960],
+        "3:4": [834, 1112],
+        "9:16": [720, 1280]
+      },
+      "1080p": {
+        "21:9": [2206, 946],
+        "16:9": [1920, 1080],
+        "4:3": [1664, 1248],
+        "1:1": [1440, 1440],
+        "3:4": [1248, 1664],
+        "9:16": [1080, 1920]
+      }
+    }
+  },
+  "media": {
+    "maximumReferenceCount": 50,
+    "maximumInlineRequestBytes": 67108864,
+    "image": {
+      "roles": ["reference_image", "first_frame", "last_frame"],
+      "formats": ["jpeg", "png", "webp", "bmp", "tiff", "gif", "heic", "heif"],
+      "minimumWidth": 300,
+      "maximumWidth": 6000,
+      "minimumHeight": 300,
+      "maximumHeight": 6000,
+      "minimumAspectRatio": 0.4,
+      "maximumAspectRatio": 2.5,
+      "maximumSizeBytesExclusive": 31457280,
+      "maximumCount": 30
+    },
+    "video": {
+      "roles": ["reference_video"],
+      "containers": ["mp4", "mov"],
+      "videoCodecs": ["h264", "h265"],
+      "audioCodecs": ["aac", "mp3", "pcm"],
+      "minimumWidth": 300,
+      "maximumWidth": 6000,
+      "minimumHeight": 300,
+      "maximumHeight": 6000,
+      "minimumPixels": 407696,
+      "maximumPixels": 8295044,
+      "minimumAspectRatio": 0.4,
+      "maximumAspectRatio": 2.5,
+      "minimumFrameRate": 24,
+      "maximumFrameRate": 60,
+      "minimumDurationSeconds": 2,
+      "minimumEditDurationSeconds": 4,
+      "maximumDurationSeconds": 30,
+      "maximumSizeBytesInclusive": 209715200,
+      "maximumCount": 10,
+      "maximumTotalDurationSeconds": 30
+    },
+    "audio": {
+      "roles": ["reference_audio"],
+      "formats": ["wav", "mp3"],
+      "minimumDurationSeconds": 2,
+      "maximumDurationSeconds": 30,
+      "maximumSizeBytesInclusive": 15728640,
+      "maximumCount": 10,
+      "maximumTotalDurationSeconds": 30
+    },
+    "humanFacePolicy": {
+      "directReferenceUploadSupported": false,
+      "note": "Use an officially permitted model output, virtual-person asset, or separately verified authorized-person asset. A Video Flow assetId is not an Ark authorization asset."
+    }
+  },
+  "pricing": {
+    "currency": "CNY",
+    "billingUnit": "million_completion_tokens",
+    "catalogSource": "https://docs.volcengine.com/docs/82379/1544106?lang=zh#02affcb8",
+    "catalogRates": [
+      {
+        "resolutionGroup": "480p_or_720p",
+        "hasInputVideo": false,
+        "cnyPerMillionTokens": "70.00"
+      },
+      {
+        "resolutionGroup": "480p_or_720p",
+        "hasInputVideo": true,
+        "cnyPerMillionTokens": "42.00"
+      },
+      {
+        "resolutionGroup": "1080p",
+        "hasInputVideo": false,
+        "cnyPerMillionTokens": "77.00"
+      },
+      {
+        "resolutionGroup": "1080p",
+        "hasInputVideo": true,
+        "cnyPerMillionTokens": "46.00"
+      }
+    ],
+    "promotions": [
+      {
+        "id": "seedance-2.5-1080p-2026-08-14-2026-09-17",
+        "resolution": "1080p",
+        "multiplier": "0.72",
+        "startsAt": "2026-08-14T14:00:00+08:00",
+        "endsAt": "2026-09-17T14:00:00+08:00",
+        "accountApplicability": "must_be_confirmed_from_actual_account_or_order"
+      }
+    ],
+    "estimate": {
+      "formula": "(inputVideoSeconds + outputVideoSeconds) * width * height * outputFrameRate / 1024",
+      "outputFrameRate": 24,
+      "inputVideoSecondsPolicy": "sum_all_reference_video_durations",
+      "adaptiveRatioPolicy": "derive_from_locked_input_when_officially_locked_otherwise_use_a_documented_bound",
+      "automaticDurationPolicy": "use_a_documented_bound_or_mark_unavailable"
+    },
+    "inputVideoMinimumTokens": {
+      "applies": true,
+      "status": "external_reference_required",
+      "dependsOn": ["resolution", "ratio", "outputDuration"],
+      "reference": "Official Seedance 2.5 minimum-token table or account price calculator linked from the catalog page",
+      "productionQuotePolicy": "unavailable_until_rule_resolved"
+    },
+    "accountPrice": {
+      "publicCatalogIsFinalBill": false,
+      "sourcePolicy": "actual_account_or_order_result_controls",
+      "productionQuotePolicy": "freeze_the_confirmed_applicable_rate_and_conditions"
+    },
+    "finalUsage": {
+      "field": "usage.completion_tokens",
+      "totalTokensRelation": "video_input_tokens_are_zero_so_total_tokens_equals_completion_tokens",
+      "failedGenerationPolicy": "official_catalog_states_only_successfully_generated_video_is_charged",
+      "billingConfirmationPolicy": "usage_calculation_is_not_the_same_as_provider_invoice_confirmation"
+    }
+  },
+  "workflows": [
+    {
+      "key": "seedance.text-to-video.v1",
+      "label": "Seedance Text to Video",
+      "state": {
+        "capability": "confirmed",
+        "implementation": "incomplete",
+        "admission": {
+          "enabled": false,
+          "reason": "V2_FULL_CHAIN_NOT_COMPLETE"
+        },
+        "validation": {
+          "status": "not_run",
+          "records": []
+        }
+      },
+      "media": {
+        "roles": [],
+        "minimumTotal": 0,
+        "maximumTotal": 0
+      },
+      "generation": {
+        "providerDuration": {
+          "integerMinimum": 4,
+          "integerMaximum": 30,
+          "allowsAutomatic": true,
+          "automaticValue": -1
+        },
+        "productDuration": {
+          "kind": "integer_range",
+          "minimum": 4,
+          "maximum": 30
+        },
+        "ratios": ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16", "adaptive"],
+        "resolutions": ["480p", "720p", "1080p"],
+        "outputFormats": ["mp4", "mov"]
+      },
+      "providerFields": {},
+      "evidence": ["official-video-generation-capability-table", "official-seedance-2.5-output-spec"]
+    },
+    {
+      "key": "seedance.reference-image-to-video.v1",
+      "label": "Seedance Reference Image to Video",
+      "state": {
+        "capability": "confirmed",
+        "implementation": "incomplete",
+        "admission": {
+          "enabled": false,
+          "reason": "V2_FULL_CHAIN_NOT_COMPLETE"
+        },
+        "validation": {
+          "status": "not_run",
+          "records": []
+        }
+      },
+      "media": {
+        "roles": [
+          {"role": "reference_image", "minimum": 1, "maximum": 30}
+        ],
+        "minimumTotal": 1,
+        "maximumTotal": 30
+      },
+      "generation": {
+        "providerDuration": {
+          "integerMinimum": 4,
+          "integerMaximum": 30,
+          "allowsAutomatic": true,
+          "automaticValue": -1
+        },
+        "productDuration": {
+          "kind": "integer_range",
+          "minimum": 4,
+          "maximum": 30
+        },
+        "ratios": ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16", "adaptive"],
+        "resolutions": ["480p", "720p", "1080p"],
+        "outputFormats": ["mp4", "mov"]
+      },
+      "providerFields": {},
+      "evidence": ["official-seedance-2.5-30-second-reference-image-example", "official-seedance-2.5-media-limits"]
+    },
+    {
+      "key": "seedance.first-frame-to-video.v1",
+      "label": "Seedance First Frame to Video",
+      "state": {
+        "capability": "confirmed",
+        "implementation": "incomplete",
+        "admission": {
+          "enabled": false,
+          "reason": "V2_FULL_CHAIN_NOT_COMPLETE"
+        },
+        "validation": {
+          "status": "not_run",
+          "records": []
+        }
+      },
+      "media": {
+        "roles": [
+          {"role": "first_frame", "minimum": 1, "maximum": 1}
+        ],
+        "minimumTotal": 1,
+        "maximumTotal": 1
+      },
+      "generation": {
+        "providerDuration": {
+          "integerMinimum": 4,
+          "integerMaximum": 30,
+          "allowsAutomatic": true,
+          "automaticValue": -1
+        },
+        "productDuration": {
+          "kind": "integer_range",
+          "minimum": 4,
+          "maximum": 30
+        },
+        "ratios": ["adaptive"],
+        "resolutions": ["480p", "720p", "1080p"],
+        "outputFormats": ["mp4", "mov"]
+      },
+      "providerFields": {},
+      "evidence": ["official-seedance-2.5-first-frame-contract"]
+    },
+    {
+      "key": "seedance.first-last-frame-to-video.v1",
+      "label": "Seedance First and Last Frame to Video",
+      "state": {
+        "capability": "confirmed",
+        "implementation": "incomplete",
+        "admission": {
+          "enabled": false,
+          "reason": "V2_FULL_CHAIN_NOT_COMPLETE"
+        },
+        "validation": {
+          "status": "not_run",
+          "records": []
+        }
+      },
+      "media": {
+        "roles": [
+          {"role": "first_frame", "minimum": 1, "maximum": 1},
+          {"role": "last_frame", "minimum": 1, "maximum": 1}
+        ],
+        "minimumTotal": 2,
+        "maximumTotal": 2,
+        "orderedRoles": ["first_frame", "last_frame"]
+      },
+      "generation": {
+        "providerDuration": {
+          "integerMinimum": 4,
+          "integerMaximum": 30,
+          "allowsAutomatic": true,
+          "automaticValue": -1
+        },
+        "productDuration": {
+          "kind": "integer_range",
+          "minimum": 4,
+          "maximum": 30
+        },
+        "ratios": ["adaptive"],
+        "resolutions": ["480p", "720p", "1080p"],
+        "outputFormats": ["mp4", "mov"]
+      },
+      "providerFields": {},
+      "evidence": ["official-seedance-2.5-first-last-frame-example"]
+    },
+    {
+      "key": "seedance.omni-reference.v1",
+      "label": "Seedance Omni Reference",
+      "state": {
+        "capability": "confirmed",
+        "implementation": "incomplete",
+        "admission": {
+          "enabled": false,
+          "reason": "V2_FULL_CHAIN_NOT_COMPLETE"
+        },
+        "validation": {
+          "status": "not_run",
+          "records": []
+        }
+      },
+      "media": {
+        "roles": [
+          {"role": "reference_audio", "minimum": 0, "maximum": 10},
+          {"role": "reference_image", "minimum": 0, "maximum": 30},
+          {"role": "reference_video", "minimum": 0, "maximum": 10}
+        ],
+        "minimumTotal": 1,
+        "maximumTotal": 50
+      },
+      "generation": {
+        "providerDuration": {
+          "integerMinimum": 4,
+          "integerMaximum": 30,
+          "allowsAutomatic": true,
+          "automaticValue": -1
+        },
+        "productDuration": {
+          "kind": "integer_range",
+          "minimum": 4,
+          "maximum": 30
+        },
+        "ratios": ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16", "adaptive"],
+        "resolutions": ["480p", "720p", "1080p"],
+        "outputFormats": ["mp4", "mov"]
+      },
+      "providerFields": {
+        "omni_reference_task_type": "reference"
+      },
+      "evidence": ["official-seedance-2.5-omni-reference-example", "official-seedance-2.5-media-limits"]
+    },
+    {
+      "key": "seedance.video-edit.v1",
+      "label": "Seedance Video Edit",
+      "state": {
+        "capability": "confirmed",
+        "implementation": "incomplete",
+        "admission": {
+          "enabled": false,
+          "reason": "V2_FULL_CHAIN_NOT_COMPLETE"
+        },
+        "validation": {
+          "status": "not_run",
+          "records": []
+        }
+      },
+      "media": {
+        "roles": [
+          {"role": "reference_audio", "minimum": 0, "maximum": 10},
+          {"role": "reference_image", "minimum": 0, "maximum": 30},
+          {"role": "reference_video", "minimum": 1, "maximum": 10, "minimumDurationSeconds": 4}
+        ],
+        "minimumTotal": 1,
+        "maximumTotal": 50
+      },
+      "generation": {
+        "providerDuration": {
+          "allowsAutomatic": true,
+          "automaticValue": -1,
+          "onlyAutomatic": true
+        },
+        "productDuration": {
+          "kind": "fixed",
+          "value": -1
+        },
+        "ratios": ["adaptive"],
+        "resolutions": ["480p", "720p", "1080p"],
+        "outputFormats": ["mp4", "mov"],
+        "recommendedOutputFormat": "mov"
+      },
+      "providerFields": {
+        "omni_reference_task_type": "edit"
+      },
+      "evidence": ["official-seedance-2.5-video-edit-example", "official-seedance-2.5-task-type-constraints"]
+    },
+    {
+      "key": "seedance.video-extend.v1",
+      "label": "Seedance Video Extend",
+      "state": {
+        "capability": "confirmed",
+        "implementation": "incomplete",
+        "admission": {
+          "enabled": false,
+          "reason": "V2_FULL_CHAIN_NOT_COMPLETE"
+        },
+        "validation": {
+          "status": "not_run",
+          "records": []
+        }
+      },
+      "media": {
+        "roles": [
+          {"role": "reference_audio", "minimum": 0, "maximum": 10},
+          {"role": "reference_image", "minimum": 0, "maximum": 30},
+          {"role": "reference_video", "minimum": 1, "maximum": 10}
+        ],
+        "minimumTotal": 1,
+        "maximumTotal": 50
+      },
+      "generation": {
+        "providerDuration": {
+          "integerMinimum": 4,
+          "integerMaximum": 30,
+          "allowsAutomatic": true,
+          "automaticValue": -1
+        },
+        "productDuration": {
+          "kind": "integer_range",
+          "minimum": 4,
+          "maximum": 30
+        },
+        "ratios": ["adaptive"],
+        "resolutions": ["480p", "720p", "1080p"],
+        "outputFormats": ["mp4", "mov"],
+        "recommendedOutputFormat": "mov"
+      },
+      "providerFields": {
+        "omni_reference_task_type": "extend"
+      },
+      "evidence": ["official-seedance-2.5-video-extend-example", "official-seedance-2.5-task-type-constraints"]
+    },
+    {
+      "key": "seedance.audio-reference-to-video.v1",
+      "label": "Seedance Audio Reference to Video",
+      "state": {
+        "capability": "confirmed",
+        "implementation": "incomplete",
+        "admission": {
+          "enabled": false,
+          "reason": "V2_FULL_CHAIN_NOT_COMPLETE"
+        },
+        "validation": {
+          "status": "not_run",
+          "records": []
+        }
+      },
+      "media": {
+        "roles": [
+          {"role": "reference_audio", "minimum": 1, "maximum": 10}
+        ],
+        "minimumTotal": 1,
+        "maximumTotal": 10
+      },
+      "generation": {
+        "providerDuration": {
+          "integerMinimum": 4,
+          "integerMaximum": 30,
+          "allowsAutomatic": true,
+          "automaticValue": -1
+        },
+        "productDuration": {
+          "kind": "integer_range",
+          "minimum": 4,
+          "maximum": 30
+        },
+        "ratios": ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16", "adaptive"],
+        "resolutions": ["480p", "720p", "1080p"],
+        "outputFormats": ["mp4", "mov"]
+      },
+      "providerFields": {
+        "omni_reference_task_type": "reference"
+      },
+      "evidence": ["official-seedance-2.5-audio-only-capability", "official-seedance-2.5-media-limits"]
+    }
+  ],
+  "evidence": {
+    "official-video-generation-capability-table": {
+      "url": "https://docs.volcengine.com/docs/82379/2298881?lang=zh",
+      "localSnapshot": "docs/arkdocs/视频生成教程.md",
+      "locator": "模型能力"
+    },
+    "official-seedance-2.5-output-spec": {
+      "url": "https://docs.volcengine.com/docs/82379/2607688?lang=zh#2.5_video_output_specs",
+      "localSnapshot": "docs/arkdocs/Doubao Seedance 2.5 教程.md",
+      "locator": "自定义视频输出规格"
+    },
+    "official-seedance-2.5-30-second-reference-image-example": {
+      "url": "https://docs.volcengine.com/docs/82379/2607688?lang=zh",
+      "localSnapshot": "docs/arkdocs/Doubao Seedance 2.5 教程.md",
+      "locator": "30 秒长视频示例"
+    },
+    "official-seedance-2.5-first-frame-contract": {
+      "url": "https://docs.volcengine.com/docs/82379/2607688?lang=zh#2.5_param_constraints",
+      "localSnapshot": "docs/arkdocs/Doubao Seedance 2.5 教程.md",
+      "locator": "首帧/首尾帧生视频"
+    },
+    "official-seedance-2.5-first-last-frame-example": {
+      "url": "https://docs.volcengine.com/docs/82379/2607688?lang=zh",
+      "localSnapshot": "docs/arkdocs/Doubao Seedance 2.5 教程.md",
+      "locator": "使用示例-首帧/首尾帧生视频"
+    },
+    "official-seedance-2.5-omni-reference-example": {
+      "url": "https://docs.volcengine.com/docs/82379/2607688?lang=zh",
+      "localSnapshot": "docs/arkdocs/Doubao Seedance 2.5 教程.md",
+      "locator": "50 个全模态参考素材输入"
+    },
+    "official-seedance-2.5-video-edit-example": {
+      "url": "https://docs.volcengine.com/docs/82379/2607688?lang=zh",
+      "localSnapshot": "docs/arkdocs/Doubao Seedance 2.5 教程.md",
+      "locator": "使用示例-视频编辑"
+    },
+    "official-seedance-2.5-video-extend-example": {
+      "url": "https://docs.volcengine.com/docs/82379/2607688?lang=zh",
+      "localSnapshot": "docs/arkdocs/Doubao Seedance 2.5 教程.md",
+      "locator": "使用示例-视频延长"
+    },
+    "official-seedance-2.5-task-type-constraints": {
+      "url": "https://docs.volcengine.com/docs/82379/2607688?lang=zh#2.5_task_type_intro",
+      "localSnapshot": "docs/arkdocs/Doubao Seedance 2.5 教程.md",
+      "locator": "任务类型与限制"
+    },
+    "official-seedance-2.5-audio-only-capability": {
+      "url": "https://docs.volcengine.com/docs/82379/2607688?lang=zh",
+      "localSnapshot": "docs/arkdocs/Doubao Seedance 2.5 教程.md",
+      "locator": "50 个全模态参考素材输入"
+    },
+    "official-seedance-2.5-media-limits": {
+      "url": "https://docs.volcengine.com/docs/82379/2607688?lang=zh",
+      "localSnapshot": "docs/arkdocs/Doubao Seedance 2.5 教程.md",
+      "locator": "输入素材要求"
+    }
+  }
+}

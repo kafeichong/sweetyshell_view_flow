@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
-import { TaskBudgetService } from './task-budget.service';
+import { isExecutionSlotLocked, TaskBudgetService } from './task-budget.service';
 import { Prisma } from '@prisma/client';
 
 type AttemptUpdatePayload = {
@@ -88,46 +88,44 @@ export class TasksService {
     });
   }
 
-  /**
-   * Preview 任务：只记录请求意图，不创建 ExecutionAttempt。
-   *
-   * 关键点是 status='preview'。Worker 的 claim 条件要求 status='pending'，
-   * 恢复条件要求 taskStatus='in_progress'，因此该记录在结构上不可被执行，
-   * 也不会产生任何付费调用。
-   *
-   * taskStatus 不写值：它是 Prisma 枚举，没有 preview 成员，新增枚举值需要迁移；
-   * 而安全闸门只依赖 status 字段，所以这里保持 null，避免为了预览引入 schema 变更。
-   */
-  async createPreview(data: {
-    actorId: string;
-    clientRequestId: string;
-    capability: string;
-    workflowName: string;
-    workflowVersion?: string;
-    workflowHash?: string;
-    requestSnapshot: object;
-    prompt: string;
-    imageUrl?: string;
-  }) {
-    return this.prisma.task.create({
-      data: {
-        createdBy: data.actorId,
-        actorId: data.actorId,
-        clientRequestId: data.clientRequestId,
-        capability: data.capability,
-        workflowName: data.workflowName,
-        workflowVersion: data.workflowVersion,
-        workflowHash: data.workflowHash,
-        requestSnapshot: data.requestSnapshot,
-        prompt: data.prompt,
-        imageUrl: data.imageUrl,
-        status: 'preview',
-      },
-    });
-  }
-
   async findOneForActor(id: string, actorId: string) {
     return this.prisma.task.findFirst({ where: { id, actorId } });
+  }
+
+  async findCurrentForSlot(actorId: string, executionSlotId: string) {
+    const [latest] = await this.prisma.task.findMany({
+      where: { actorId, executionSlotId },
+      orderBy: { slotSequence: 'desc' },
+      take: 1,
+      include: { executionAttempts: { orderBy: { attemptNo: 'desc' }, take: 1 } },
+    });
+    return latest && isExecutionSlotLocked(latest) ? latest : null;
+  }
+
+  async confirmClientDelivery(taskId: string, actorId: string) {
+    const clientDeliveredAt = new Date();
+    const applied = await this.prisma.task.updateMany({
+      where: {
+        id: taskId,
+        actorId,
+        deliveryStatus: 'ready',
+        clientDeliveryStatus: { not: 'delivered' },
+      },
+      data: { clientDeliveryStatus: 'delivered', clientDeliveredAt },
+    });
+    if (applied.count) {
+      return { taskId, clientDeliveryStatus: 'delivered', clientDeliveredAt, applied: true };
+    }
+    const current = await this.prisma.task.findUnique({ where: { id: taskId } });
+    if (!current || current.actorId !== actorId) throw new NotFoundException('Task not found');
+    if (current.deliveryStatus !== 'ready') throw new ConflictException('RESULT_NOT_READY');
+    if (current.clientDeliveryStatus !== 'delivered') throw new ConflictException('CLIENT_DELIVERY_NOT_APPLICABLE');
+    return {
+      taskId,
+      clientDeliveryStatus: 'delivered',
+      clientDeliveredAt: current.clientDeliveredAt,
+      applied: false,
+    };
   }
 
   /**
@@ -353,7 +351,7 @@ export class TasksService {
     return this.prisma.$transaction(async (tx: any) => {
       const attempt = await tx.executionAttempt.findUnique({
         where: { id: attemptId },
-        select: { taskId: true, status: true },
+        select: { taskId: true, status: true, providerTaskId: true },
       });
 
       if (!attempt || attempt.taskId !== id) {
@@ -381,6 +379,10 @@ export class TasksService {
         where: { id: attemptId },
         data: attemptPayload,
       });
+
+      if (failureCode === 'EXECUTION_PLAN_COMPILE_FAILED' && !attempt.providerTaskId) {
+        await this.budget.releaseInTransaction(tx, id, failureCode);
+      }
 
       return taskResult;
     });

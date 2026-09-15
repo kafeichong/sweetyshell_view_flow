@@ -37,6 +37,8 @@ def test_steven_provided_official_modes_have_only_documented_contract_fields():
 
     assert fixture["source"] == "steven-provided-official-ark-examples"
     assert fixture["model"] == "doubao-seedance-2-5-260628"
+    assert modes["textToVideo"]["content"] == [{"type": "text", "text": "生成一段四秒视频"}]
+    assert modes["textToVideo"]["duration"] == 4
     assert modes["referenceImage"]["content"][1]["role"] == "reference_image"
     assert modes["referenceImage"]["ratio"] == "16:9"
     assert modes["referenceImage"]["duration"] == 30
@@ -51,3 +53,6 @@ def test_steven_provided_official_modes_have_only_documented_contract_fields():
         ["image_url", "first_frame"],
         ["image_url", "last_frame"],
     ]
+    assert modes["firstFrame"]["contentRoles"] == [["image_url", "first_frame"]]
+    assert modes["audioReference"]["contentRoles"] == [["audio_url", "reference_audio"]]
+    assert modes["audioReference"]["omni_reference_task_type"] == "reference"

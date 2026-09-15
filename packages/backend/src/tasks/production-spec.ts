@@ -8,6 +8,9 @@ export type ProductionSpec = {
   watermark: boolean;
   pricingVersion: string;
   reserveCny: string;
+  estimatedTokens?: number;
+  pricingRatePerMillion?: string;
+  pricingBasis?: string;
 };
 
 export type ProductionExecutionPlan = {

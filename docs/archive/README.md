@@ -81,6 +81,21 @@
 | `2026-09-14-priority-exec-plan.md` | 当日优先级与执行顺序快照；完成状态不再回写 | `PROJECT_STATUS.md` + `ROADMAP.md` |
 | `2026-09-14-t11-cross-package-gap-list.md` | T11 缺口拆分的实施前快照；实际覆盖以权威状态和路线图为准 | `PROJECT_STATUS.md` + `ROADMAP.md` |
 
+### 2026-09-15 —— Preview / Production 职责重整
+
+| 文件 | 归档原因 | 当前依据 |
+| --- | --- | --- |
+| [2026-09-15-roadmap-before-responsibility-reset.md](./2026-09-15-roadmap-before-responsibility-reset.md) | 原ROADMAP的固定参考图规格、旧状态门控和Preview扩展边界已被新职责取代；完整保留原任务及验证过程供追溯 | [ROADMAP R0–R8](../ROADMAP.md) |
+| [2026-09-15-seedance-workflow-expansion-superseded.md](./2026-09-15-seedance-workflow-expansion-superseded.md) | 从docs/superpowers/plans迁入；原计划只扩Preview，不能作为八工作流完整开发的当前计划 | [ROADMAP R0–R8](../ROADMAP.md) |
+| [2026-09-14-workflow-preview-production-spec-v1.1.md](./2026-09-14-workflow-preview-production-spec-v1.1.md) | 原规范未定稿独立 PreflightRecord、四维工作流状态、统一报价快照和恢复边界；完整原文归档 | [统一规范 v2](../requirements/2026-09-15/workflow-preview-production-spec-v2.md) |
+| [2026-09-14-seedance-workflow-development-acceleration-superseded.md](./2026-09-14-seedance-workflow-development-acceleration-superseded.md) | 原协作策略依赖 `preview_only / production_verified / disabled` 单状态及旧 W2–W6 顺序，与 v2 四维状态、Preview 双结果和当前 R0–R8 计划冲突 | [开发工作流](../DEVELOPMENT_WORKFLOW.md) + [统一规范 v2](../requirements/2026-09-15/workflow-preview-production-spec-v2.md) + [ROADMAP](../ROADMAP.md) |
+| [2026-09-15-product-preflight-v1-runbook.md](./2026-09-15-product-preflight-v1-runbook.md) | 原手册依赖 Preview Task 和固定 Production spec，已与 R1 独立预检接口冲突 | [工作流 Preview v2 接口手册](../runbooks/product-preflight.md) |
+| [2026-09-15-creative-user-guide-v1-superseded.md](./2026-09-15-creative-user-guide-v1-superseded.md) | 原创意手册演示旧 `mode=preview` Task、先上传后 Preview、旧节点和 `production_verified` 单状态，会误导用户在 v2 重构期间创建任务 | [v2 重构期间使用说明](../runbooks/creative-user-guide.md) |
+| [2026-09-15-creative-one-click-script-v1-superseded.md](./2026-09-15-creative-one-click-script-v1-superseded.md) | 原脚本手册指导使用旧 `capability/profile/params` 和 `MODE=production`，缺少 v2 预检、确认与冻结快照 | [当前脚本状态说明](../runbooks/creative-one-click-script.md) |
+| [2026-09-15-comfyui-client-readme-v1-superseded.md](./2026-09-15-comfyui-client-readme-v1-superseded.md) | 原包 README 推荐安装并使用旧 Preview、Production 和 OneClick 节点，其中旧 Preview 会上传素材，且 Production 流程不符合 v2 独立预检与冻结确认合同 | [当前客户端包说明](../../packages/comfyui-video-flow-client/README.md) + [创意同事使用说明](../runbooks/creative-user-guide.md) |
+
+当日评审快照按日期保存在[Preview与Production代码符合性评审](../2026-09-15/Preview与Production代码符合性评审.md)，当前实现与修复证据仍只看[PROJECT_STATUS](../PROJECT_STATUS.md)。
+
 ### plans —— 历史实施计划
 
 | 文件 | 归档原因 | 遗留事项去向 |

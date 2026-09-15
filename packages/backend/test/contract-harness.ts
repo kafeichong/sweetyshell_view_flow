@@ -155,6 +155,7 @@ export async function createContractHarness(
     workerToken,
     adminToken,
     async close() {
+      await prisma.preflightRecord.deleteMany({ where: { actorId } });
       await prisma.task.deleteMany({ where: { actorId } });
       await prisma.asset.deleteMany({
         where: { objectKey: { startsWith: `contract/${actorId}/` } },

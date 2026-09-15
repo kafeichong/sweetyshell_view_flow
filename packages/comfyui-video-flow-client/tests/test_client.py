@@ -412,7 +412,7 @@ def test_upload_media_sends_content_hash_for_deduplication():
     assert requests[2].url.path.endswith("/api/v1/assets/asset-1/complete")
 
 
-def test_upload_media_does_not_overwrite_an_already_uploaded_asset():
+def test_upload_media_does_not_overwrite_an_already_verified_asset():
     requests = []
 
     def handler(request):
@@ -423,7 +423,7 @@ def test_upload_media_does_not_overwrite_an_already_uploaded_asset():
                 "assetId": "asset-existing",
                 "objectKey": "inputs/actor-a/original.png",
                 "alreadyUploaded": True,
-                "inspectionStatus": "uploaded",
+                "inspectionStatus": "verified",
             },
         )
 
@@ -437,6 +437,34 @@ def test_upload_media_does_not_overwrite_an_already_uploaded_asset():
     assert result["assetId"] == "asset-existing"
     assert len(requests) == 1
     assert requests[0].url.path.endswith("/upload-ticket")
+
+
+def test_upload_media_completes_inspection_before_reusing_a_legacy_uploaded_asset():
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        if request.url.path.endswith("/upload-ticket"):
+            return httpx.Response(200, json={
+                "assetId": "asset-existing", "alreadyUploaded": True,
+                "requiresInspection": True, "inspectionStatus": "uploaded",
+            })
+        if request.url.path.endswith("/assets/asset-existing/complete"):
+            return httpx.Response(200, json={"assetId": "asset-existing", "inspectionStatus": "verified"})
+        raise AssertionError(str(request.url))
+
+    client = VideoFlowClient(
+        VideoFlowConfig("https://backend.test", "secret-token"),
+        httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    result = client.upload_media(b"same-image", filename="same.png", mime_type="image/png")
+
+    assert result["inspectionStatus"] == "verified"
+    assert [(request.method, request.url.path) for request in requests] == [
+        ("POST", "/api/v1/assets/upload-ticket"),
+        ("POST", "/api/v1/assets/asset-existing/complete"),
+    ]
 
 
 def test_token_falls_back_to_file_when_env_is_absent(monkeypatch, tmp_path):

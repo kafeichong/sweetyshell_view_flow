@@ -74,7 +74,18 @@ do
 done
 docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" exec -T postgres \
   psql -v ON_ERROR_STOP=1 -U video_contract -d video_flow_upgrade_contract \
-  -c "INSERT INTO tasks (id, created_by, prompt) VALUES ('00000000-0000-0000-0000-000000000001', 'legacy-actor', 'legacy task');"
+  -c "
+    INSERT INTO tasks (id, created_by, prompt, cost)
+    VALUES ('00000000-0000-0000-0000-000000000001', 'legacy-actor', 'legacy task', 1.23456789);
+    INSERT INTO execution_attempts (
+      id, task_id, attempt_no, mode, provider,
+      estimated_cost_cny, usage_calculated_cost_cny, billed_cost_cny
+    ) VALUES (
+      '00000000-0000-0000-0000-000000000002',
+      '00000000-0000-0000-0000-000000000001',
+      1, 'production', 'seedance', 2.34567891, 3.45678912, 4.56789123
+    );
+  "
 DATABASE_URL="$UPGRADE_DATABASE_URL" npx prisma migrate deploy
 legacy_columns="$({ docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" exec -T postgres \
   psql -At -U video_contract -d video_flow_upgrade_contract \
@@ -82,6 +93,38 @@ legacy_columns="$({ docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" exec -T
 if test "$legacy_columns" != "true:true"; then
   echo "Legacy task columns were unexpectedly inferred during migration" >&2
   exit 1
+fi
+preflight_table="$({ docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" exec -T postgres \
+  psql -At -U video_contract -d video_flow_upgrade_contract \
+  -c "SELECT to_regclass('public.preflight_records')::text;"; } | tr -d '\r')"
+if test "$preflight_table" != "preflight_records"; then
+  echo "PreflightRecord migration was not applied to the historical database" >&2
+  exit 1
+fi
+legacy_task_count="$({ docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" exec -T postgres \
+  psql -At -U video_contract -d video_flow_upgrade_contract \
+  -c "SELECT count(*) FROM tasks WHERE id = '00000000-0000-0000-0000-000000000001';"; } | tr -d '\r')"
+if test "$legacy_task_count" != "1"; then
+  echo "Historical task was lost during PreflightRecord migration" >&2
+  exit 1
+fi
+decimal_costs="$({ docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" exec -T postgres \
+  psql -At -U video_contract -d video_flow_upgrade_contract \
+  -c "
+    SELECT cost::text || ':' || estimated_cost_cny::text || ':' ||
+      usage_calculated_cost_cny::text || ':' || billed_cost_cny::text
+    FROM tasks
+    JOIN execution_attempts ON execution_attempts.task_id = tasks.id
+    WHERE tasks.id = '00000000-0000-0000-0000-000000000001';
+  "; } | tr -d '\r')"
+if test "$decimal_costs" != "1.234570:2.345679:3.456789:4.567891"; then
+  echo "Historical execution costs were not preserved as Decimal(18,6): $decimal_costs" >&2
+  exit 1
+fi
+
+if test "${VIDEO_FLOW_MIGRATION_ONLY:-0}" = "1"; then
+  echo 'Migration checks passed for fresh and historical databases'
+  exit 0
 fi
 
 npm run build

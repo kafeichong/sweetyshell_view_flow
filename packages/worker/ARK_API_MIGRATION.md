@@ -1,4 +1,6 @@
-# 火山方舟 Ark API 迁移完成
+# 火山方舟 Ark API 迁移完成（历史记录）
+
+> 本文记录早期 Ark API 迁移时点，包含当时的推测接口、旧配置名和已废弃请求示例，不是当前运行手册，不得按文中命令创建任务。当前实现状态见 [PROJECT_STATUS](../../docs/PROJECT_STATUS.md)，Provider 合同证据见 [Seedance 2.5 工作流与计费合同证据](../../docs/2026-09-15/Seedance-2.5工作流与计费合同证据.md)。
 
 ## 变更摘要
 

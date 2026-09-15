@@ -14,7 +14,6 @@ from contracts import (  # noqa: E402
     PromptSpec,
     UnifiedResult,
 )
-from providers.seedance_compiler import compile_seedance_request  # noqa: E402
 from providers.minimax_compiler import compile_minimax_request  # noqa: E402
 from providers.capabilities import get_capability_profile  # noqa: E402
 from providers.seedance_adapter import SeedanceAdapter  # noqa: E402
@@ -310,38 +309,6 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertNotIn("content", payload)
         self.assertEqual(payload["provider"]["name"], "seedance")
         self.assertTrue(payload["execution"]["dry_run"])
-
-    def test_seedance_compiler_maps_prompt_spec_to_ark_content(self):
-        request = GenerationRequest(
-            capability="TEXT_TO_VIDEO",
-            prompt=PromptSpec(
-                positive="产品缓慢旋转",
-                negative="不要改变产品结构",
-                constraints=["保持包装文字不变"],
-            ),
-            generation=GenerationSpec(duration=5, ratio="16:9", resolution="720p"),
-            provider={"name": "seedance", "model": "doubao-seedance-2-0-260128"},
-        )
-
-        compiled = compile_seedance_request(request)
-
-        self.assertEqual(compiled["model"], "doubao-seedance-2-0-260128")
-        self.assertEqual(compiled["content"][0]["type"], "text")
-        self.assertIn("产品缓慢旋转", compiled["content"][0]["text"])
-        self.assertIn("不要改变产品结构", compiled["content"][0]["text"])
-        self.assertEqual(compiled["duration"], 5)
-        self.assertEqual(compiled["ratio"], "16:9")
-
-    def test_seedance_compiler_rejects_unsupported_duration_for_seedance_2(self):
-        request = GenerationRequest(
-            capability="TEXT_TO_VIDEO",
-            prompt=PromptSpec(positive="产品旋转"),
-            generation=GenerationSpec(duration=30),
-            provider={"name": "seedance", "model": "doubao-seedance-2-0-260128"},
-        )
-
-        with self.assertRaisesRegex(ValueError, "duration"):
-            compile_seedance_request(request)
 
     def test_minimax_compiler_maps_first_frame_to_minimax_field(self):
         request = GenerationRequest(

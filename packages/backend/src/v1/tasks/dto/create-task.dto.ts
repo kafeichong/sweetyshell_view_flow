@@ -1,9 +1,6 @@
 export class CreateTaskDto {
   preflightId?: string;
-  confirmLiveSubmission?: boolean;
-  workflowKey?: string;
-  prompt?: { positive?: string };
-  generation?: { duration?: number; ratio?: string; resolution?: string };
-  media?: { assetId?: string; role?: string }[];
+  executionSlotId?: string;
+  media?: { slotId?: string; assetId?: string }[];
   mode?: 'preview' | 'production';
 }

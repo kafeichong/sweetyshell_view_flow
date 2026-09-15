@@ -1,8 +1,17 @@
-import { PREFLIGHT_TTL_MS, preflightSnapshot, verifyPreflightRecord } from './workflow-preflight';
+import { PREFLIGHT_TTL_MS, preflightIntent, preflightSnapshot, verifyPreflightRecord } from './workflow-preflight';
 const spec = { version: 'v1', model: 'test', duration: 5, ratio: '16:9', resolution: '720p', generateAudio: false, watermark: false, pricingVersion: 'p1', reserveCny: '1' };
 const body = { workflowKey: 'seedance.reference-image-to-video.v1', prompt: { positive: 'product' }, generation: { duration: 5, ratio: '16:9', resolution: '720p' }, media: [{ sha256: 'a'.repeat(64), role: 'reference_image', mimeType: 'image/png', sizeBytes: 100, metadata: { kind: 'image', width: 500, height: 500 } }] };
 const now = Date.now();
 const record = () => ({ actorId: 'a', status: 'preview', createdAt: new Date(now), requestSnapshot: preflightSnapshot(body, spec) });
+it('accepts prompt-only preview workflows without media', () => {
+  expect(preflightIntent({ workflowKey: 'seedance.text-to-video.v1', prompt: { positive: 'cat runs' }, generation: { duration: 30, ratio: '9:16', resolution: '1080p' }, media: [] }, spec)).toMatchObject({
+    workflowKey: 'seedance.text-to-video.v1', media: [], generation: { duration: 30, ratio: '9:16', resolution: '1080p' },
+  });
+});
+it('accepts first and last frame preview metadata in declared order', () => {
+  const image = (role: string, hash: string) => ({ sha256: hash, role, mimeType: 'image/png', sizeBytes: 100, metadata: { kind: 'image', width: 500, height: 500 } });
+  expect(preflightIntent({ workflowKey: 'seedance.first-last-frame-to-video.v1', prompt: { positive: 'transition' }, generation: { duration: 30, ratio: 'adaptive', resolution: '1080p' }, media: [image('first_frame', 'a'.repeat(64)), image('last_frame', 'b'.repeat(64))] }, spec).media.map((item: any) => item.role)).toEqual(['first_frame', 'last_frame']);
+});
 it('accepts metadata without an asset ID and binds the production spec', () => {
   expect(preflightSnapshot(body, spec).intent.media[0]).not.toHaveProperty('assetId');
   expect(() => verifyPreflightRecord(record(), 'a', body, spec, now)).not.toThrow();

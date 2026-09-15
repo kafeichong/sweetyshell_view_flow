@@ -16,22 +16,22 @@ function keys(value: any, allowed: string[], path: string) {
 }
 export function preflightIntent(body: any, spec: ProductionSpec) {
   keys(body, ['workflowKey', 'prompt', 'generation', 'media'], 'request');
-  if (body.workflowKey !== 'seedance.reference-image-to-video.v1') throw new Error('PREFLIGHT_WORKFLOW_NOT_SUPPORTED');
+  if (typeof body.workflowKey !== 'string' || !body.workflowKey.startsWith('seedance.')) throw new Error('PREFLIGHT_WORKFLOW_NOT_SUPPORTED');
   keys(body.prompt, ['positive'], 'prompt');
   keys(body.generation, ['duration', 'ratio', 'resolution'], 'generation');
-  if (!Array.isArray(body.media) || body.media.length !== 1) throw new Error('WORKFLOW_MEDIA_COUNT_INVALID');
+  if (!Array.isArray(body.media)) throw new Error('WORKFLOW_MEDIA_REQUIRED');
   const media = body.media.map((item: any) => {
     keys(item, ['sha256', 'role', 'mimeType', 'sizeBytes', 'metadata'], 'media');
-    keys(item.metadata, ['kind', 'width', 'height'], 'metadata');
+    if (!item.metadata || typeof item.metadata !== 'object' || Array.isArray(item.metadata)) throw new Error('MEDIA_METADATA_INVALID');
+    keys(item.metadata, ['kind', 'width', 'height', 'durationSeconds', 'frameRate', 'videoCodec', 'audioCodec'], 'metadata');
     if (!/^[a-f0-9]{64}$/.test(item.sha256 ?? '')) throw new Error('PREFLIGHT_HASH_INVALID');
-    if (!['image/png', 'image/jpeg', 'image/webp'].includes(item.mimeType)) throw new Error('PREFLIGHT_MIME_INVALID');
+    if (typeof item.mimeType !== 'string' || !['image/', 'video/', 'audio/'].some((prefix) => item.mimeType.startsWith(prefix))) throw new Error('PREFLIGHT_MIME_INVALID');
     if (!Number.isSafeInteger(item.sizeBytes) || item.sizeBytes <= 0 || item.sizeBytes >= 30 * 1024 * 1024) throw new Error('PREFLIGHT_SIZE_INVALID');
-    if (!Number.isInteger(item.metadata.width) || !Number.isInteger(item.metadata.height)) throw new Error('IMAGE_DIMENSIONS_INVALID');
+    if (item.mimeType.startsWith('image/') && !['image/png', 'image/jpeg', 'image/webp'].includes(item.mimeType)) throw new Error('PREFLIGHT_MIME_INVALID');
     validateSeedanceMediaMetadata(item.mimeType, item.metadata);
     return item;
   });
   const normalized = normalizeWorkflowTaskRequest({ ...body, media: media.map((m: any) => ({ assetId: m.sha256, role: m.role })) }, spec);
-  if (normalized.status !== 'production_verified') throw new Error('WORKFLOW_NOT_PRODUCTION_VERIFIED');
   return { workflowKey: normalized.workflowKey, prompt: { positive: normalized.prompt }, generation: normalized.generation, media };
 }
 export function preflightSnapshot(body: unknown, spec: ProductionSpec) {

@@ -10,6 +10,11 @@ from unittest.mock import AsyncMock, patch
 
 from models import Job, ProviderTaskStatus
 from artifact_delivery import artifact_object_key
+from providers.seedance_execution_policy import workflow_execution_digest
+
+
+_WORKFLOW_CONTRACT = json.loads((Path(__file__).resolve().parents[1] / "resources" / "seedance-workflows.v2.json").read_text())
+_WORKFLOW_CONTRACT_DIGEST = workflow_execution_digest(_WORKFLOW_CONTRACT)
 
 
 def approved_execution_plan():
@@ -705,8 +710,9 @@ class ProviderSubmissionRecoveryTests(unittest.TestCase):
         import executor as executor_module
 
         plan = approved_execution_plan() | {
+            "contractDigest": _WORKFLOW_CONTRACT_DIGEST,
             "workflowKey": "seedance.video-edit.v1",
-            "workflowVersion": "v1",
+            "workflowVersion": _WORKFLOW_CONTRACT["contractRevision"],
             "media": [{"assetId": "asset-video-1", "role": "reference_video"}],
             "ratio": "16:9",  # 官方编辑模式必须是 adaptive。
             "duration": -1,
@@ -733,14 +739,17 @@ class ProviderSubmissionRecoveryTests(unittest.TestCase):
         failure = job_executor.update_job_status.await_args_list[-1].kwargs
         self.assertEqual(failure["attempt_status"], "requires_review")
         self.assertEqual(failure["failure_code"], "EXECUTION_PLAN_COMPILE_FAILED")
+        self.assertFalse(any(call.kwargs.get("attempt_status") == "submitted" for call in job_executor.update_job_status.await_args_list))
 
     def test_workflow_plan_is_compiled_before_the_adapter_is_called(self):
         import executor as executor_module
 
         plan = approved_execution_plan() | {
+            "contractDigest": _WORKFLOW_CONTRACT_DIGEST,
             "workflowKey": "seedance.reference-image-to-video.v1",
-            "workflowVersion": "v1",
+            "workflowVersion": _WORKFLOW_CONTRACT["contractRevision"],
             "media": [{"assetId": "asset-image-1", "role": "reference_image"}],
+            "outputFormat": "mp4",
         }
         job = Job(
             id="job-compiled", status="pending", created_by="alice",

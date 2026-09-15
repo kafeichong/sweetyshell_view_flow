@@ -33,6 +33,7 @@ export type UploadedAssetMetadata = {
   sizeBytes: number;
   mimeType: string;
   mediaMetadata?: MediaMetadata;
+  inspectionStatus?: 'uploaded' | 'verified';
 };
 
 export type RegisterOutputOnceInput = {
@@ -304,7 +305,7 @@ export class AssetsService {
         sizeBytes: metadata.sizeBytes,
         mimeType: metadata.mimeType,
         mediaMetadata: metadata.mediaMetadata,
-        inspectionStatus: 'uploaded',
+        inspectionStatus: metadata.inspectionStatus ?? 'uploaded',
       },
     });
     if (!updated.count) {

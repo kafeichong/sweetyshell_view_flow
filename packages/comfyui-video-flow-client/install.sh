@@ -5,6 +5,9 @@ COMFYUI_ROOT="${1:?用法: ./install.sh /path/to/ComfyUI [actor-token-file]}"
 TOKEN_SOURCE="${2:-}"
 SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PYTHON_BIN="$COMFYUI_ROOT/.venv/bin/python"
+if test ! -x "$PYTHON_BIN" && test -x "$COMFYUI_ROOT/.venv/bin/python3"; then
+  PYTHON_BIN="$COMFYUI_ROOT/.venv/bin/python3"
+fi
 CUSTOM_NODES_DIR="$COMFYUI_ROOT/custom_nodes"
 TARGET_DIR="$CUSTOM_NODES_DIR/video_flow_client"
 TEMP_DIR="$CUSTOM_NODES_DIR/.video_flow_client.new.$$"
@@ -23,7 +26,7 @@ trap cleanup EXIT
 mkdir "$TEMP_DIR"
 # 逐个文件列出而不是目录整体拷贝：多带一个本地调试文件进同事环境，
 # 比漏更新一个模块更难排查。新增模块时必须同步这份清单。
-for file in __init__.py client.py config.py nodes.py preflight_nodes.py receipts.py requirements.txt README.md; do
+for file in __init__.py client.py config.py media_inspection.py nodes.py preflight_nodes.py receipts.py requirements.txt README.md; do
   cp "$SOURCE_DIR/$file" "$TEMP_DIR/$file"
 done
 # 资源目录：工作流模板、可直接导入的示例、前端展示脚本。

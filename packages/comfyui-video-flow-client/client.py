@@ -154,6 +154,8 @@ class VideoFlowClient:
             sha256=digest,
         )
         if ticket.get("alreadyUploaded") is True:
+            if ticket.get("requiresInspection") is True:
+                return self.complete_upload(ticket["assetId"])
             return ticket
         response = self.client.put(ticket["uploadUrl"], headers=ticket.get("uploadHeaders", {}), content=data)
         response.raise_for_status()

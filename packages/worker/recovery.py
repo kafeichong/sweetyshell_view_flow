@@ -12,8 +12,8 @@ def format_cost(cost: float | None) -> str:
 
 def cost_status(usage: Mapping[str, Any] | None) -> str:
     """Classify whether a Provider response contains billable usage data."""
-    # 约定：只要返回 total_tokens 即认为可确认计费来源。
-    return "confirmed" if usage and "total_tokens" in usage else "unavailable"
+    # Seedance 2.5 官方以 completion_tokens 作为准确用量；兼容旧 Provider 的 total_tokens。
+    return "confirmed" if usage and ("completion_tokens" in usage or "total_tokens" in usage) else "unavailable"
 
 
 def build_cost_audit(

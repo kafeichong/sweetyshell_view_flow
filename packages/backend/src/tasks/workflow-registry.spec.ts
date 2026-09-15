@@ -19,6 +19,15 @@ describe('workflow registry request normalization', () => {
     });
   });
 
+  it('accepts the creative generation range for the verified reference-image workflow', () => {
+    expect(normalizeWorkflowTaskRequest({
+      workflowKey: 'seedance.reference-image-to-video.v1',
+      prompt: { positive: 'product orbit' },
+      generation: { duration: 30, ratio: '9:16', resolution: '1080p' },
+      media: [{ assetId: 'asset-1', role: 'reference_image' }],
+    }, spec).generation).toEqual({ duration: 30, ratio: '9:16', resolution: '1080p' });
+  });
+
   it('requires workflowKey instead of accepting the retired capability/profile contract', () => {
     expect(() => normalizeWorkflowTaskRequest({
       capability: 'IMAGE_TO_VIDEO', profile: 'seedance',

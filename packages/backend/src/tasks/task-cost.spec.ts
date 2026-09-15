@@ -8,6 +8,7 @@ import {
   interpretUsage,
   tokenCostCny,
 } from './task-cost';
+import { PricingCatalog } from './pricing-catalog';
 
 const verifiedPlan = {
   pricingVersion: 'seedance-token-v1',
@@ -47,6 +48,56 @@ describe('findTokenPricingRule', () => {
     expect(findTokenPricingRule('seedance-token-v1', 'other-model')).toBeNull();
     expect(findTokenPricingRule('unknown-version', 'doubao-seedance-2-5-260628')).toBeNull();
     expect(findTokenPricingRule(undefined, 'doubao-seedance-2-5-260628')).toBeNull();
+  });
+});
+
+describe('official completion token settlement', () => {
+  it('uses completion_tokens and resolution-specific Seedance 2.5 pricing', () => {
+    expect(interpretUsage(
+      { completion_tokens: 100000 },
+      { pricingVersion: 'seedance-2-5-official-v1', model: 'doubao-seedance-2-5-260628', resolution: '1080p' },
+    )).toMatchObject({ status: 'usage_calculated', amountCny: '7.700000' });
+  });
+
+  it('uses the frozen pricing snapshot rate after the promotion window changes', () => {
+    const snapshot = new PricingCatalog({
+      confirmedPromotionIds: ['seedance-2.5-1080p-2026-08-14-2026-09-17'],
+    }).select('doubao-seedance-2-5-260628', '1080p', false, new Date('2026-09-17T05:45:00.000Z'))!;
+
+    expect(interpretUsage(
+      { completion_tokens: 100000 },
+      {
+        pricingVersion: snapshot.pricingVersion,
+        model: 'doubao-seedance-2-5-260628',
+        resolution: '1080p',
+        pricingSnapshot: snapshot,
+      },
+    )).toEqual({
+      status: 'usage_calculated',
+      amountCny: '5.544000',
+      pricingVersion: 'seedance-2.5-public-catalog-2026-09-15',
+      usage: { completion_tokens: 100000 },
+    });
+  });
+
+  it('rejects a damaged frozen pricing snapshot instead of falling back to a current rate', () => {
+    const snapshot = new PricingCatalog().select('doubao-seedance-2-5-260628', '720p', false, new Date('2026-09-15T00:00:00.000Z'))!;
+
+    const result = interpretUsage(
+      { completion_tokens: 100000 },
+      {
+        pricingVersion: snapshot.pricingVersion,
+        model: 'doubao-seedance-2-5-260628',
+        resolution: '720p',
+        pricingSnapshot: { ...snapshot, ratePerMillion: '1.00' },
+      },
+    );
+
+    expect(result).toEqual({
+      status: 'unavailable',
+      reason: 'PRICING_SNAPSHOT_INVALID',
+      usage: { completion_tokens: 100000 },
+    });
   });
 });
 

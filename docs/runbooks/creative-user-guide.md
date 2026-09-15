@@ -1,250 +1,130 @@
-# 创意同事调用手册（Seedance）
+# 创意同事使用说明（v2 重构期间）
 
-> 最后更新：2026-09-11
-> 适用接口：`https://ai.sweetyshell.com/api/v1`
-> 事实依据：[PROJECT_STATUS.md](../PROJECT_STATUS.md)。接口若与本文不符，以代码为准并更新本文。
+> 更新日期：2026-09-15。
+> 当前状态：新的 v2 Preview 正在本地开发，v2 Production 尚未实现和部署。本手册当前只提供凭证安全及已有任务的查询/取片方法，不提供新生成操作。
+> 事实依据：[PROJECT_STATUS](../PROJECT_STATUS.md)。产品目标见 [PRODUCT](../PRODUCT.md)，后续实施见 [ROADMAP](../ROADMAP.md)。
 
----
+## 1. 当前能做什么
 
-## 0. 两条硬规则（先读）
+在持有有效个人凭证且对原任务具有访问权限时，可以：
 
-1. **默认是 Preview。** 不显式传 `"mode": "production"` 的请求不会生成视频，只会返回一份请求摘要（`willCallProvider: false`）。这是防止误触付费的安全默认值。
-2. **Production 需要白名单授权。** 即使传了 `mode=production`，如果该 actor 不在服务端 `VIDEO_FLOW_PRODUCTION_ACTORS` 里，也会返回 **403**。需要出片时请联系管理员开通。
+- 查询自己的已有 Task；
+- 查看任务当前状态；
+- 对已经交付完成的任务重新申请下载地址；
+- 凭 `taskId` 向管理员或开发人员报告问题。
 
-3. **地址按运行位置区分。** 创意人员电脑上的 ComfyUI 使用公司 Backend，例如 `https://ai.sweetyshell.com`；`http://localhost:3100` 只用于 Backend 也在本机运行的开发环境。`127.0.0.1:19091` 是测试脚本与 Fake Provider 同机时的地址，不是创意人员或生产 Worker 地址。
+这些操作只读取原任务，不创建新的 Provider 请求，也不要求原预检仍有效、新任务额度充足或当前工作流仍启用。
 
----
+## 2. 当前不要做什么
 
-## 1. 前置：拿到个人凭证
+v2 重构和完整验收完成前，不要：
 
-每位同事单独持有一枚可撤销的 actor token，不要共用、不要外泄。
+- 使用旧 `Seedance Preview` 节点。该节点仍可能在 Preview 阶段上传素材；
+- 使用旧 `Seedance Production`、OneClick 或旧工作流模板创建新任务；
+- 向 `POST /api/v1/tasks` 发送旧 `mode=preview` 请求；
+- 将旧 Preview Task 当成 v2 预检记录；
+- 因等待、下载或客户端重启失败而重新提交一次生成；
+- 把本地测试、Fake Provider 或历史样片理解为当前版本已经可用；
+- 自行开启 Production 白名单或修改 `generation_version` 试错。
 
-管理员签发：
+当前本地 R1 代码会拒绝旧 Preview Task 创建；v2 Production 在 R4 完成前保持关闭。不要部署 R1 中间态供创意同事创建新任务。
 
-```bash
-export VIDEO_FLOW_ADMIN_TOKEN='<管理员 token>'
-./scripts/video_flow_credential.sh issue creator-alice Alice /secure/path/alice-token
-```
+## 3. 个人凭证安全
 
-脚本只显示 actor ID 和 token 文件路径，不把明文 token 打到终端。服务端只存 token 哈希；token 丢失后需撤销旧 actor 并使用新 actor ID 重新签发。
+每位创意同事使用独立、可撤销的 actor token。
 
-后续所有请求都带：
+- 不共用凭证；
+- 不把 token 写入 Workflow JSON；
+- 不把 token 放进截图、文档、聊天或 Git；
+- 不使用管理员或临时测试 token；
+- token 丢失或怀疑泄漏时，停止使用并联系管理员撤销；
+- 创意电脑不保存 Ark、OSS、数据库或 Worker 服务密钥。
 
-```
-Authorization: Bearer <ACTOR_TOKEN>
-```
+客户端支持从安全配置或权限受限的 token 文件读取凭证。实际安装版本和目标 ComfyUI 实例必须由管理员确认，不能仅凭本仓库存在安装脚本就判断已经发布。
 
-脚本不会打印明文 token，输出文件权限为 `600`。通过安全渠道把该文件交给对应同事后，在同事电脑运行：
+## 4. 查询已有任务
 
-```bash
-./install.sh /path/to/ComfyUI /path/to/alice-token
-```
-
-需要立即停用时由管理员运行：
-
-```bash
-export VIDEO_FLOW_ADMIN_TOKEN='<管理员 token>'
-./scripts/video_flow_credential.sh revoke creator-alice
-```
-
-ComfyUI 客户端读取环境变量 `VIDEO_FLOW_TOKEN`，或 `~/.video-flow/token` 文件（权限 `600`）；不要把 token 写进 Workflow JSON。
-
----
-
-## 2. 上传参考图（图生视频才需要）
-
-支持 `image/png`、`image/jpeg`、`image/webp`，单文件 ≤ 20 MB。
-
-### 2.1 申请上传票据
+以下操作是只读查询。先由管理员提供实际 Backend 地址、个人 token 和原 `taskId`：
 
 ```bash
-curl -sS -X POST 'https://ai.sweetyshell.com/api/v1/assets/upload-ticket' \
-  -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer <ACTOR_TOKEN>' \
-  -d '{
-    "filename": "product.png",
-    "mimeType": "image/png",
-    "sizeBytes": 524288,
-    "sha256": "<可选：文件的 sha256 十六进制>"
-  }'
+export VIDEO_FLOW_BASE_URL='https://ai.sweetyshell.com'
+export VIDEO_FLOW_TOKEN='<个人 Token>'
+export VIDEO_FLOW_TASK_ID='<原 taskId>'
+
+curl -sS \
+  "$VIDEO_FLOW_BASE_URL/api/v1/tasks/$VIDEO_FLOW_TASK_ID" \
+  -H "Authorization: Bearer $VIDEO_FLOW_TOKEN"
 ```
 
-返回字段：
+结果只代表该 Task 当前记录，不会创建新任务。常见情况：
 
-| 字段 | 用途 |
-| --- | --- |
-| `assetId` | 后续创建任务时作为 `media[].assetId` |
-| `objectKey` | 对象身份（数据库永久保存的就是它） |
-| `uploadUrl` | 直传地址，有效期 900 秒 |
-| `uploadHeaders` | PUT 时必须原样带上的请求头 |
-| `expiresIn` | 有效期秒数 |
-| `alreadyUploaded` | 为 `true` 时表示同内容已存在，**无需再上传**，直接用 `assetId` |
-
-> 带上 `sha256` 可以让相同内容的图片复用同一条 Asset，使 `assetId` 稳定 —— 这是"同 prompt + 同图"重复提交能真正幂等的前提。
-
-### 2.2 直传到 OSS
-
-```bash
-curl -sS -X PUT '<uploadUrl>' \
-  -H 'Content-Type: image/png' \
-  -H 'Content-Length: 524288' \
-  --data-binary '@product.png'
-```
-
-### 2.3 确认上传完成
-
-```bash
-curl -sS -X POST 'https://ai.sweetyshell.com/api/v1/assets/<assetId>/complete' \
-  -H 'Authorization: Bearer <ACTOR_TOKEN>'
-```
-
-服务端会用 OSS HEAD 校验实际大小、MIME 与 sha256，不一致会返回 400。
-
----
-
-## 3. 创建任务
-
-必须带 `Idempotency-Key`（缺失返回 409）。相同 actor + 相同 key + 相同请求体只会创建一条任务；相同 key 但请求体不同返回 409。
-
-### 3.1 统一工作流请求
-
-新客户端以 `workflowKey` 选择工作流。当前可见目录可通过受鉴权的 `GET /api/v1/tasks/workflows` 查询；不得从客户端传模型、价格或未登记的素材角色。
-
-**文本生视频目前只支持 Preview：**
-
-```bash
-curl -sS -X POST 'https://ai.sweetyshell.com/api/v1/tasks' \
-  -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer <ACTOR_TOKEN>' \
-  -H 'Idempotency-Key: alice-20260914-text-001' \
-  -d '{
-    "workflowKey": "seedance.text-to-video.v1",
-    "mode": "preview",
-    "prompt": {"positive": "A premium product hero shot, smooth camera move, clean studio"},
-    "generation": {"duration": 5, "ratio": "16:9", "resolution": "720p"},
-    "media": []
-  }'
-```
-
-**参考图片生视频是当前唯一已验收的 Production 工作流：**
-
-```json
-{
-  "workflowKey": "seedance.reference-image-to-video.v1",
-  "mode": "production",
-  "prompt": {"positive": "Use this product image, slow push-in, clean studio lighting"},
-  "generation": {"duration": 5, "ratio": "16:9", "resolution": "720p"},
-  "media": [{"assetId": "<assetId>", "role": "reference_image"}]
-}
-```
-
-Production 只接受本人已上传、完成校验的 `assetId`。`reference_video`、`reference_audio` 是 Seedance 2.5 官方 `content` 协议中的角色，但当前平台尚未开放对应素材上传与 Production 工作流。
-
-### 3.3 请求校验规则
-
-| 字段 | 规则 |
-| --- | --- |
-| `workflowKey` | 必须是服务端注册的工作流键 |
-| `prompt.positive` | 必填，≤ 4000 字符 |
-| `generation` | 必须精确匹配该工作流已批准的规格 |
-| `media` | 数量、角色及 Asset 归属必须匹配工作流；参考图片工作流只接受一张 `reference_image` |
-| `mode` | 缺省 `preview`；`production` 还需白名单、额度与工作流状态为 `production_verified` |
-| 旧字段 | `capability/profile/params` 已废弃；请求会返回 `WORKFLOW_KEY_REQUIRED` |
-
-### 3.4 Preview 响应长这样
-
-```json
-{
-  "id": "...",
-  "status": "preview",
-  "taskStatus": null,
-  "preview": {
-    "mode": "preview",
-    "provider": "seedance",
-    "model": null,
-    "duration": 5,
-    "estimatedCostCny": null,
-    "costStatus": "unavailable",
-    "willCallProvider": false
-  }
-}
-```
-
-看到 `willCallProvider: false` 就说明**没有产生任何费用**。
-
----
-
-## 4. 查询任务
-
-```bash
-curl -sS 'https://ai.sweetyshell.com/api/v1/tasks/<TASK_ID>' \
-  -H 'Authorization: Bearer <ACTOR_TOKEN>'
-```
-
-- 只能查自己创建的任务；别人的任务返回 404。
-- 状态流转：`pending` → `running`（或 `submitted`）→ `completed` / `failed`。
-- 失败时看 `errorMsg`，以及执行账本里的 `failureType` / `failureCode`。
-
-> 想用脚本一次跑完"建凭证 → 建任务 → 轮询"，见 [creative-one-click-script.md](./creative-one-click-script.md)。
-
----
-
-## 5. 取得成片
-
-```bash
-curl -sS 'https://ai.sweetyshell.com/api/v1/assets/tasks/<TASK_ID>/result' \
-  -H 'Authorization: Bearer <ACTOR_TOKEN>'
-```
-
-返回 Task 对应输出 Asset 的 `objectKey`、`downloadUrl` 等信息；**每次调用都生成新的短期签名地址**。ComfyUI 中可直接使用 `Load Video Flow Result`，它会把文件流式写入 `<ComfyUI>/output/video-flow/`。
-
-### 当前限制（务必知悉）
-
-- Task 的 `videoUrl` 字段现在保存永久 `objectKey`，不是可直接访问的 URL；不要把它粘贴到浏览器下载。
-- 只能获取自己 Task 的输出；其他 actor 的 Task 仍会返回 404。
-- `downloadUrl` 是短期地址；过期后重新调用结果接口即可，OSS 文件不会因此删除。
-
----
-
-## 6. 常见返回码
-
-| 返回码 | 含义 | 处理 |
+| 返回 | 含义 | 处理 |
 | --- | --- | --- |
-| 400 | 请求校验失败（workflowKey / generation / media / 上传元数据不符） | 按报错文案修参数 |
-| 401 | 没带 `Authorization` | 补 Bearer token |
-| 403 | 凭证无效或已撤销；或 Production 未授权 | 找管理员确认凭证状态 / 白名单 |
-| 404 | 任务或 Asset 不属于当前 actor，或不存在 | 检查 ID 与归属 |
-| 409 | 缺 `Idempotency-Key`；或同 key 请求体不同 | 固定 key 与参数，或换新 key |
-| 429 | 超出额度（Phase 1 上线后） | 找管理员提额 |
-| 503 | 服务端 OSS 未配置 | 联系管理员，不要重试 |
+| `200` | 找到本人任务 | 查看任务状态和错误信息 |
+| `401` | 没有有效身份 | 重新取得个人凭证，不要匿名重试 |
+| `404` | 任务不存在或不属于当前账号 | 核对 `taskId` 和账号；服务端不会泄露他人任务 |
 
----
+不要为了“看看任务是否还在”重新执行原生成画布。已有 `taskId` 时直接查询原任务。
 
-## 8. 在 ComfyUI 里出片（推荐路径）
+## 5. 重新取得已有产物
 
-用 `Seedance Reference Image to Video` 节点提交，`Wait` 等它可交付，`LoadResult` 取片。`Seedance Text to Video (Preview)` 只校验并记录意图，不能接到 `Wait` / `LoadResult`：
+对已经完成交付的原任务申请新的短期下载地址：
 
-- **`generation_version` 是付费开关**：默认 `1`。同参数同版本重跑沿用**同一个任务**，
-  不会重复扣费；把它改成 `2` 才是"再生成一版"，会产生**新的付费任务**。
-  不确定时不要改这个数字。
-- `Wait` 节点只输出 `taskId`，把它接到 `LoadResult` 的 `task_id` 输入即可，
-  不要手工粘贴任务 JSON。
-- 产物落在 ComfyUI 自己的输出目录下 `video-flow/`；`LoadResult` 的第二个输出
-  会显示费用是否已确认。
+```bash
+curl -sS \
+  "$VIDEO_FLOW_BASE_URL/api/v1/assets/tasks/$VIDEO_FLOW_TASK_ID/result" \
+  -H "Authorization: Bearer $VIDEO_FLOW_TOKEN"
+```
 
-**超时**：`Wait` 等超时会报 `WAIT_TIMEOUT` 并带上 taskId。**不要重新提交**——
-用 `examples/seedance-resume.json` 把 taskId 填进去重新等待与取片即可，
-原任务仍在服务端被跟踪。
+常见结果：
 
-**费用待核实**：如果 Provider 没返回可核对的 usage，片照样能给，但费用会显示
-"费用待核实"，管理员核实后才会结算。这不影响你下载，但会让新的提交排队。
+| 返回 | 含义 | 处理 |
+| --- | --- | --- |
+| `200` | 产物已登记并可下载 | 使用返回的短期 `downloadUrl`；过期后重新调用本查询 |
+| `401` | 凭证无效 | 联系管理员处理凭证 |
+| `404` | 任务不存在或不属于当前账号 | 核对账号和 `taskId` |
+| `409 RESULT_NOT_READY` | 原任务尚未形成可交付产物 | 继续查询原任务，不重新生成 |
+| `409 RESULT_REQUIRES_REVIEW` | 原任务需要人工核查 | 向管理员提供 `taskId` |
+| `409 DELIVERY_FAILED` | Provider 结果与交付状态不一致或归档失败 | 恢复原产物，不重新调用 Provider |
 
-**报障**：带上 taskId。凭 taskId 能查到阶段、费用状态和失败原因；
-没有 taskId 时，任何一方都只能猜。
+`objectKey` 是永久对象身份，不是可以直接粘贴到浏览器的公开 URL。下载地址过期不代表产物被删除。
 
-## 7. 安全约束
+## 6. 新 v2 Preview 的开发边界
 
-- 不要把 token 写进 Workflow JSON、截图、文档或聊天记录。
-- 不要使用管理员临时测试 token（如 `local-admin-test-token`）。
-- **不要调用旧的 `/api/tasks` 接口**：它只为受 Guard 保护的历史管理 / Worker 操作保留；创意客户端统一使用 `/api/v1`。
-- 需要出片时先确认 Worker 在线，否则任务会停留在 `pending`。
+v2 目标入口为：
+
+```http
+POST /api/v1/tasks/preflight
+```
+
+它只发送 Prompt、生成参数、素材元信息和内容哈希，不发送素材本体。报告应分别展示请求检查与 Production 准入，并返回 `willUploadMedia=false`、`willCallProvider=false`。
+
+当前接口结构和本地验证方法见 [工作流 Preview v2 接口手册](./product-preflight.md)。该手册描述本地 R1 中间态，不代表线上已经部署，也不授权创建付费任务。
+
+## 7. 什么时候可以恢复新生成操作
+
+只有同时满足以下条件，才更新本手册并重新给出创意人员的新生成步骤：
+
+- R1–R7 的目标实现和故障矩阵完成；
+- 旧上传式 Preview、旧 Production 和重复模板已退出交付包；
+- 三包回归和隔离跨包合同通过；
+- 目标 ComfyUI 完成安装、重启、模板导入、Preview 和原任务恢复验收；
+- 对应 Backend、Worker 和客户端版本已经配套部署；
+- 管理员明确给出试用账号、工作流、素材、预算和 Production 授权范围；
+- 需要真实 Provider 验收时，已单独批准预计费用。
+
+满足条件前，“代码存在”“测试通过”“历史上出过片”都不能作为创意同事开始新生成的依据。
+
+## 8. 报障信息
+
+出现问题时至少提供：
+
+- `taskId`；
+- 使用的个人账号标识，不提供明文 token；
+- 操作时间；
+- 使用的 Backend 和客户端版本；
+- ComfyUI 节点或接口返回的错误码；
+- 是新生成、等待、查询还是下载阶段；
+- 是否已经看到过 Provider Task ID 或产物。
+
+没有明确确认“创建一个新生成意图”时，排障和恢复不得产生第二次 Provider create。

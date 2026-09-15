@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { isValidPricingSelection } from './pricing-catalog';
 
 /**
  * 已核实的按 tokens 计费规则。
@@ -10,6 +11,8 @@ import { Prisma } from '@prisma/client';
 export type TokenPricingRule = {
   pricingVersion: string;
   ratePerMillion: string; // 元 / 百万 tokens
+  ratesByResolution?: Record<string, string>;
+  ratesByResolutionWithVideo?: Record<string, string>;
   models: string[];
 };
 
@@ -17,6 +20,13 @@ const TOKEN_PRICING_RULES: TokenPricingRule[] = [
   {
     pricingVersion: 'seedance-token-v1',
     ratePerMillion: '70',
+    models: ['doubao-seedance-2-5-260628'],
+  },
+  {
+    pricingVersion: 'seedance-2-5-official-v1',
+    ratePerMillion: '70',
+    ratesByResolution: { '480p': '70', '720p': '70', '1080p': '77' },
+    ratesByResolutionWithVideo: { '480p': '42', '720p': '42', '1080p': '46' },
     models: ['doubao-seedance-2-5-260628'],
   },
 ];
@@ -75,13 +85,19 @@ export type UsageInterpretation =
 /**
  * 用固化在执行快照里的 pricingVersion 解释 Provider 返回的 usage。
  *
- * 只认 total_tokens 一个字段（与已核实规则一致）；缺字段、类型不对、
+ * Seedance 2.5 只认官方 completion_tokens；历史 pricingVersion 兼容 total_tokens；缺字段、类型不对、
  * 负数、NaN、非整数、价格版本未知或模型不匹配都返回 unavailable，
  * 由调用方保留预占并转入人工核查。
  */
 export function interpretUsage(
   usage: unknown,
-  plan: { pricingVersion?: unknown; model?: unknown } | null | undefined,
+  plan: {
+    pricingVersion?: unknown;
+    model?: unknown;
+    resolution?: unknown;
+    media?: { role?: unknown }[];
+    pricingSnapshot?: unknown;
+  } | null | undefined,
 ): UsageInterpretation {
   if (!usage || typeof usage !== 'object' || Array.isArray(usage)) {
     return { status: 'unavailable', reason: 'MISSING_USAGE', usage: null };
@@ -89,15 +105,41 @@ export function interpretUsage(
 
   const providerUsage = usage as Record<string, unknown>;
 
-  if (!('total_tokens' in providerUsage)) {
+  if (plan?.pricingSnapshot !== undefined) {
+    const snapshot = plan.pricingSnapshot;
+    if (
+      !isValidPricingSelection(snapshot)
+      || snapshot.model !== plan.model
+      || snapshot.pricingVersion !== plan.pricingVersion
+    ) {
+      return { status: 'unavailable', reason: 'PRICING_SNAPSHOT_INVALID', usage: providerUsage };
+    }
+    const completionTokens = providerUsage.completion_tokens;
+    if (completionTokens === undefined) {
+      return { status: 'unavailable', reason: 'MISSING_COMPLETION_TOKENS', usage: providerUsage };
+    }
+    if (typeof completionTokens !== 'number' || !Number.isSafeInteger(completionTokens) || completionTokens < 0) {
+      return { status: 'unavailable', reason: 'INVALID_TOTAL_TOKENS', usage: providerUsage };
+    }
     return {
-      status: 'unavailable',
-      reason: 'MISSING_TOTAL_TOKENS',
+      status: 'usage_calculated',
+      amountCny: tokenCostCny(completionTokens, snapshot.ratePerMillion),
+      pricingVersion: snapshot.pricingVersion,
       usage: providerUsage,
     };
   }
 
-  const totalTokens = providerUsage.total_tokens;
+  const officialCompletionPricing = plan?.pricingVersion === 'seedance-2-5-official-v1';
+  const usageKey = officialCompletionPricing ? 'completion_tokens' : 'total_tokens';
+  if (!(usageKey in providerUsage)) {
+    return {
+      status: 'unavailable',
+      reason: officialCompletionPricing ? 'MISSING_COMPLETION_TOKENS' : 'MISSING_TOTAL_TOKENS',
+      usage: providerUsage,
+    };
+  }
+
+  const totalTokens = providerUsage[usageKey];
   if (
     typeof totalTokens !== 'number' ||
     !Number.isSafeInteger(totalTokens) ||
@@ -138,9 +180,11 @@ export function interpretUsage(
     };
   }
 
+  const includesInputVideo = plan?.media?.some((item) => item.role === 'reference_video') ?? false;
+  const ratePerMillion = (includesInputVideo ? rule.ratesByResolutionWithVideo : rule.ratesByResolution)?.[String(plan?.resolution)] ?? rule.ratePerMillion;
   return {
     status: 'usage_calculated',
-    amountCny: tokenCostCny(totalTokens, rule.ratePerMillion),
+    amountCny: tokenCostCny(totalTokens, ratePerMillion),
     pricingVersion: rule.pricingVersion,
     usage: providerUsage,
   };

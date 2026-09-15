@@ -2,6 +2,7 @@ jest.mock('@nestjs/common', () => ({
   Injectable: () => (target: unknown) => target,
   BadRequestException: class BadRequestException extends Error { status = 400; },
   ConflictException: class ConflictException extends Error { status = 409; },
+  NotFoundException: class NotFoundException extends Error { status = 404; },
 }));
 
 import { TasksService } from './tasks.service';
@@ -23,10 +24,10 @@ describe('TasksService contract', () => {
   };
 
   let service: TasksService;
+  const budget = { releaseInTransaction: jest.fn() };
 
   beforeEach(() => {
-    const mockBudgetService = {} as any;
-    service = new TasksService(prisma as never, mockBudgetService);
+    service = new TasksService(prisma as never, budget as never);
     prisma.task.create.mockReset();
     prisma.task.findMany.mockReset();
     prisma.task.findUnique.mockReset();
@@ -34,6 +35,7 @@ describe('TasksService contract', () => {
     prisma.executionAttempt.findUnique.mockReset();
     prisma.executionAttempt.update.mockReset();
     prisma.$transaction.mockReset();
+    budget.releaseInTransaction.mockReset();
     prisma.$transaction.mockImplementation(async (callback: any) => callback(prisma));
   });
 
@@ -76,34 +78,6 @@ describe('TasksService contract', () => {
     expect(prisma.task.findUnique).toHaveBeenCalledWith({
       where: { id: 'task-1' },
     });
-  });
-
-  // 安全回归：Preview 任务必须落成 status='preview'，而 Worker 的 claim 只领
-  // status='pending'，因此这条记录在结构上不可能被执行或计费。
-  it('createPreview 落库为 preview 状态，不可被 Worker 领取', async () => {
-    prisma.task.create.mockResolvedValue({ id: 'task-preview', status: 'preview' });
-
-    await service.createPreview({
-      actorId: 'actor-1',
-      clientRequestId: 'request-1',
-      capability: 'TEXT_TO_VIDEO',
-      workflowName: 'seedance',
-      requestSnapshot: { capability: 'TEXT_TO_VIDEO' },
-      prompt: 'hello',
-    });
-
-    expect(prisma.task.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        actorId: 'actor-1',
-        clientRequestId: 'request-1',
-        status: 'preview',
-      }),
-    });
-
-    const payload = prisma.task.create.mock.calls[0][0].data;
-    expect(payload.status).not.toBe('pending');
-    // taskStatus 保持 null：安全闸门只依赖 status，不依赖枚举新值。
-    expect(payload.taskStatus).toBeUndefined();
   });
 
   it('Attempt 更新会持久化实际模型和生命周期时间', async () => {
@@ -215,6 +189,63 @@ describe('TasksService contract', () => {
       where: { id: 'attempt-1' },
       data: expect.objectContaining({ status: 'failed', failureCode: 'ABANDONED_BEFORE_SUBMIT' }),
     });
+  });
+
+  it('编译失败且 Provider 未被调用时释放预占', async () => {
+    prisma.executionAttempt.findUnique.mockResolvedValue({
+      taskId: 'task-1', status: 'pending', providerTaskId: null,
+    });
+    prisma.task.update.mockResolvedValue({ id: 'task-1', status: 'failed' });
+    prisma.executionAttempt.update.mockResolvedValue({ id: 'attempt-1', status: 'failed' });
+
+    await service.update('task-1', {
+      status: 'failed', taskStatus: 'failed', attemptId: 'attempt-1', attemptStatus: 'failed',
+      failureType: 'invalid_input', failureCode: 'EXECUTION_PLAN_COMPILE_FAILED',
+    });
+
+    expect(budget.releaseInTransaction).toHaveBeenCalledWith(
+      prisma, 'task-1', 'EXECUTION_PLAN_COMPILE_FAILED',
+    );
+  });
+
+  it('按 actor 与执行槽返回仍锁定的最新 Task，已交付槽返回空', async () => {
+    prisma.task.findMany.mockResolvedValueOnce([
+      { id: 'task-2', clientDeliveryStatus: 'pending', deliveryStatus: 'ready', executionAttempts: [{ status: 'completed' }] },
+    ]);
+    await expect(service.findCurrentForSlot('actor-1', 'slot-1')).resolves.toMatchObject({ id: 'task-2' });
+    expect(prisma.task.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { actorId: 'actor-1', executionSlotId: 'slot-1' },
+      orderBy: { slotSequence: 'desc' }, take: 1,
+    }));
+
+    prisma.task.findMany.mockResolvedValueOnce([
+      { id: 'task-2', clientDeliveryStatus: 'delivered', deliveryStatus: 'ready', executionAttempts: [{ status: 'completed' }] },
+    ]);
+    await expect(service.findCurrentForSlot('actor-1', 'slot-1')).resolves.toBeNull();
+  });
+
+  it('仅允许本人对已归档就绪 Task 幂等确认客户端交付', async () => {
+    prisma.task.updateMany.mockResolvedValueOnce({ count: 1 });
+    await expect(service.confirmClientDelivery('task-1', 'actor-1')).resolves.toMatchObject({
+      taskId: 'task-1', clientDeliveryStatus: 'delivered', applied: true,
+    });
+    expect(prisma.task.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: 'task-1', actorId: 'actor-1', deliveryStatus: 'ready' }),
+      data: expect.objectContaining({ clientDeliveryStatus: 'delivered', clientDeliveredAt: expect.any(Date) }),
+    }));
+
+    prisma.task.updateMany.mockResolvedValueOnce({ count: 0 });
+    prisma.task.findUnique.mockResolvedValueOnce({ id: 'task-1', actorId: 'actor-1', deliveryStatus: 'ready', clientDeliveryStatus: 'delivered' });
+    await expect(service.confirmClientDelivery('task-1', 'actor-1')).resolves.toMatchObject({ applied: false });
+  });
+
+  it('拒绝越权或尚未归档就绪的客户端交付确认', async () => {
+    prisma.task.updateMany.mockResolvedValue({ count: 0 });
+    prisma.task.findUnique.mockResolvedValueOnce(null);
+    await expect(service.confirmClientDelivery('task-1', 'other')).rejects.toMatchObject({ status: 404 });
+
+    prisma.task.findUnique.mockResolvedValueOnce({ id: 'task-1', actorId: 'actor-1', deliveryStatus: 'archiving', clientDeliveryStatus: 'pending' });
+    await expect(service.confirmClientDelivery('task-1', 'actor-1')).rejects.toMatchObject({ status: 409 });
   });
 
   describe('delivery transitions', () => {

@@ -197,7 +197,7 @@ describe('V1AssetsController ownership', () => {
       findByOwnerHash: jest.fn().mockResolvedValue({
         id: 'asset-uploaded',
         objectKey: 'inputs/actor-a/original.png',
-        inspectionStatus: 'uploaded',
+        inspectionStatus: 'verified',
         mimeType: 'image/png',
         sizeBytes: BigInt(10),
       }),
@@ -218,7 +218,28 @@ describe('V1AssetsController ownership', () => {
       assetId: 'asset-uploaded',
       objectKey: 'inputs/actor-a/original.png',
       alreadyUploaded: true,
-      inspectionStatus: 'uploaded',
+      inspectionStatus: 'verified',
+    });
+    expect(presign.createUploadTicket).not.toHaveBeenCalled();
+  });
+
+  it('requires actual-content inspection before reusing a legacy uploaded asset', async () => {
+    const hash = '9'.repeat(64);
+    const assets = {
+      findByOwnerHash: jest.fn().mockResolvedValue({
+        id: 'asset-legacy', objectKey: 'inputs/actor-a/legacy.png', inspectionStatus: 'uploaded',
+      }),
+      registerInput: jest.fn(),
+    };
+    const presign = { isConfigured: jest.fn().mockReturnValue(true), createUploadTicket: jest.fn() };
+    const controller = new V1AssetsController(assets as never, presign as never);
+
+    await expect(controller.createUploadTicket(
+      { actorId: 'actor-a' },
+      { filename: 'same.png', mimeType: 'image/png', sizeBytes: 10, sha256: hash },
+    )).resolves.toEqual({
+      assetId: 'asset-legacy', objectKey: 'inputs/actor-a/legacy.png', alreadyUploaded: true,
+      requiresInspection: true, inspectionStatus: 'uploaded',
     });
     expect(presign.createUploadTicket).not.toHaveBeenCalled();
   });
@@ -268,7 +289,7 @@ describe('V1AssetsController ownership', () => {
         bucket: 'sweetyshell-ai-assets',
         mimeType: 'image/png',
         sizeBytes: BigInt(10),
-        inspectionStatus: 'uploaded',
+        inspectionStatus: 'verified',
       }),
     };
     const presign = {
@@ -278,21 +299,25 @@ describe('V1AssetsController ownership', () => {
         fileHash: hash,
       }),
       getBucketName: jest.fn().mockReturnValue('sweetyshell-ai-assets'),
+      createDownloadUrl: jest.fn().mockReturnValue({ downloadUrl: 'https://oss/signed-image' }),
     };
-    const controller = new V1AssetsController(assets as never, presign as never);
+    const inspector = { inspect: jest.fn().mockResolvedValue({ kind: 'image', width: 500, height: 500 }) };
+    const controller = new V1AssetsController(assets as never, presign as never, undefined, inspector as never);
 
     const result = await controller.completeUpload({ actorId: 'actor-a' }, 'asset-1');
 
     expect(result).toMatchObject({
       assetId: 'asset-1',
       sizeBytes: 10,
-      inspectionStatus: 'uploaded',
+      inspectionStatus: 'verified',
     });
     expect(() => JSON.stringify(result)).not.toThrow();
     expect(assets.markUploaded).toHaveBeenCalledWith('asset-1', 'actor-a', {
       bucket: 'sweetyshell-ai-assets',
       sizeBytes: 10,
       mimeType: 'image/png',
+      mediaMetadata: { kind: 'image', width: 500, height: 500 },
+      inspectionStatus: 'verified',
     });
   });
 
@@ -451,19 +476,31 @@ describe('V1AssetsController official Seedance media ticket policy', () => {
       { filename: 'oversized.mp4', mimeType: 'video/mp4', sizeBytes: 200 * 1024 * 1024 + 1 },
     )).rejects.toMatchObject({ status: 400, message: 'sizeBytes must be between 1 and 209715200 for video' });
   });
+
+  it('rejects an image ticket at the exclusive 30MB boundary', async () => {
+    const { controller } = buildTicketController();
+
+    await expect(controller.createUploadTicket(
+      { actorId: 'actor-a' },
+      { filename: 'boundary.png', mimeType: 'image/png', sizeBytes: 30 * 1024 * 1024 },
+    )).rejects.toMatchObject({ status: 400 });
+  });
 });
 
 describe('V1AssetsController media inspection', () => {
   const asset = { id: 'asset-1', ownerId: 'actor-a', objectKey: 'inputs/a.mp4', sizeBytes: BigInt(10), mimeType: 'video/mp4', fileHash: null };
   const actual = { sizeBytes: 10, mimeType: 'video/mp4', fileHash: undefined };
   it('persists inspected metadata before marking an upload complete', async () => {
-    const assets = { findOwned: jest.fn().mockResolvedValue(asset), markUploaded: jest.fn().mockResolvedValue({ ...asset, bucket: 'bucket', inspectionStatus: 'uploaded' }) };
+    const assets = { findOwned: jest.fn().mockResolvedValue(asset), markUploaded: jest.fn().mockResolvedValue({ ...asset, bucket: 'bucket', inspectionStatus: 'verified' }) };
     const presign = { inspectObject: jest.fn().mockResolvedValue(actual), getBucketName: jest.fn().mockReturnValue('bucket'), createDownloadUrl: jest.fn().mockReturnValue({ downloadUrl: 'https://oss/signed' }) };
     const inspector = { inspect: jest.fn().mockResolvedValue({ kind: 'video', width: 1280, height: 720, durationSeconds: 5, frameRate: 24, videoCodec: 'h264' }) };
     const controller = new V1AssetsController(assets as never, presign as never, undefined, inspector as never);
     await controller.completeUpload({ actorId: 'actor-a' }, 'asset-1');
     expect(inspector.inspect).toHaveBeenCalledWith('https://oss/signed', 'video/mp4');
-    expect(assets.markUploaded).toHaveBeenCalledWith('asset-1', 'actor-a', expect.objectContaining({ mediaMetadata: expect.objectContaining({ kind: 'video', width: 1280 }) }));
+    expect(assets.markUploaded).toHaveBeenCalledWith('asset-1', 'actor-a', expect.objectContaining({
+      mediaMetadata: expect.objectContaining({ kind: 'video', width: 1280 }),
+      inspectionStatus: 'verified',
+    }));
   });
   it('does not mark an upload complete when media inspection fails', async () => {
     const assets = { findOwned: jest.fn().mockResolvedValue(asset), markUploaded: jest.fn() };
@@ -471,6 +508,34 @@ describe('V1AssetsController media inspection', () => {
     const inspector = { inspect: jest.fn().mockRejectedValue(new Error('MEDIA_INSPECTION_FAILED')) };
     const controller = new V1AssetsController(assets as never, presign as never, undefined, inspector as never);
     await expect(controller.completeUpload({ actorId: 'actor-a' }, 'asset-1')).rejects.toMatchObject({ status: 400 });
+    expect(assets.markUploaded).not.toHaveBeenCalled();
+  });
+
+  it('does not verify an image whose actual size reaches the exclusive 30MB boundary', async () => {
+    const boundaryAsset = { ...asset, objectKey: 'inputs/a.png', sizeBytes: BigInt(30 * 1024 * 1024), mimeType: 'image/png' };
+    const assets = { findOwned: jest.fn().mockResolvedValue(boundaryAsset), markUploaded: jest.fn() };
+    const presign = {
+      inspectObject: jest.fn().mockResolvedValue({ sizeBytes: 30 * 1024 * 1024, mimeType: 'image/png', fileHash: undefined }),
+      getBucketName: jest.fn().mockReturnValue('bucket'),
+      createDownloadUrl: jest.fn().mockReturnValue({ downloadUrl: 'https://oss/signed' }),
+    };
+    const inspector = { inspect: jest.fn().mockResolvedValue({ kind: 'image', width: 640, height: 480 }) };
+    const controller = new V1AssetsController(assets as never, presign as never, undefined, inspector as never);
+
+    await expect(controller.completeUpload({ actorId: 'actor-a' }, 'asset-1')).rejects.toMatchObject({ status: 400 });
+    expect(assets.markUploaded).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when the actual-content inspector is unavailable', async () => {
+    const assets = { findOwned: jest.fn().mockResolvedValue(asset), markUploaded: jest.fn() };
+    const presign = {
+      inspectObject: jest.fn().mockResolvedValue(actual),
+      getBucketName: jest.fn().mockReturnValue('bucket'),
+      createDownloadUrl: jest.fn(),
+    };
+    const controller = new V1AssetsController(assets as never, presign as never);
+
+    await expect(controller.completeUpload({ actorId: 'actor-a' }, 'asset-1')).rejects.toMatchObject({ status: 503 });
     expect(assets.markUploaded).not.toHaveBeenCalled();
   });
 });

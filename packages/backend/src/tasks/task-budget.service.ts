@@ -1,10 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { Prisma } from '@prisma/client';
+import type { PricingSelection } from './pricing-catalog';
 
 export interface ExecutionPlan {
   specVersion?: string;
   version?: string;
+  contractVersion?: number;
+  contractDigest?: string;
+  intentDigest?: string;
   model: string;
   duration: number;
   ratio: string;
@@ -14,17 +18,34 @@ export interface ExecutionPlan {
   watermark: boolean;
   pricingVersion: string;
   reserveCny: string;
+  estimatedTokens?: number;
+  pricingRatePerMillion?: string;
+  pricingBasis?: string;
+  pricingSnapshot?: PricingSelection;
+  quoteDigest?: string;
   prompt?: string;
   imageAssetId?: string;
   inputFileHash?: string | null;
   workflowKey?: string;
   workflowVersion?: string;
-  media?: { assetId: string; role: string; fileHash?: string | null }[];
+  outputFormat?: string;
+  omni_reference_task_type?: string;
+  media?: {
+    slotId?: string;
+    assetId: string;
+    role: string;
+    fileHash?: string | null;
+    mimeType?: string;
+    sizeBytes?: number;
+    metadata?: Record<string, unknown>;
+  }[];
 }
 
 export interface ProductionTaskData {
   actorId: string;
   clientRequestId: string;
+  requestDigest?: string;
+  executionSlotId?: string;
   estimatedCny: string;
   executionPlan: ExecutionPlan;
   task: {
@@ -37,7 +58,26 @@ export interface ProductionTaskData {
     workflowHash?: string;
     requestSnapshot?: object;
     imageUrl?: string;
+    preflightId?: string;
+    contractDigest?: string;
+    intentDigest?: string;
+    quoteDigest?: string;
   };
+}
+
+type SlotTask = {
+  slotSequence?: number | null;
+  clientDeliveryStatus?: string | null;
+  deliveryStatus?: string | null;
+  executionAttempts?: { status?: string | null; providerTaskId?: string | null }[];
+};
+
+export function isExecutionSlotLocked(task: SlotTask): boolean {
+  if (task.clientDeliveryStatus === 'delivered') return false;
+  const attempt = task.executionAttempts?.[0];
+  const definitelyNoResult = task.deliveryStatus === 'not_started'
+    && (attempt?.status === 'failed' || attempt?.status === 'cancelled');
+  return !definitelyNoResult;
 }
 
 export function fitsBudget(limit: string, used: string, reserve: string): boolean {
@@ -61,7 +101,10 @@ export class TaskBudgetService {
     return this.checkBudgetAvailability(this.prisma as unknown as Prisma.TransactionClient, actorId, reserveCny);
   }
 
-  async createTaskWithReservation(data: ProductionTaskData) {
+  async createTaskWithReservation(
+    data: ProductionTaskData,
+    validateBeforeCreate?: (tx: Prisma.TransactionClient) => Promise<void>,
+  ) {
     return this.prisma.$transaction(async (tx) => {
       if (typeof (tx as any).$executeRaw === 'function') {
         // 固定顺序：先拿全局准入锁（用于全局 pending 数校验），再拿 actor 锁；
@@ -69,6 +112,35 @@ export class TaskBudgetService {
         await (tx as any).$executeRaw`SELECT pg_advisory_xact_lock(0, 0)`;
         await (tx as any).$executeRaw`SELECT pg_advisory_xact_lock(1, hashtext(${data.actorId}))`;
       }
+
+      if (data.requestDigest) {
+        const existing = await tx.task.findFirst({
+          where: { actorId: data.actorId, clientRequestId: data.clientRequestId },
+        });
+        if (existing) {
+          const snapshot = existing.requestSnapshot as { submissionDigest?: unknown } | null;
+          if (snapshot?.submissionDigest !== data.requestDigest) throw new Error('IDEMPOTENCY_KEY_REUSED');
+          return { task: existing, created: false };
+        }
+      }
+
+      let slotSequence: number | undefined;
+      if (data.executionSlotId) {
+        if (typeof (tx as any).$executeRaw === 'function') {
+          await (tx as any).$executeRaw`SELECT pg_advisory_xact_lock(4, hashtext(${`${data.actorId}:${data.executionSlotId}`}))`;
+        }
+        const current = await tx.task.findFirst({
+          where: { actorId: data.actorId, executionSlotId: data.executionSlotId },
+          orderBy: { slotSequence: 'desc' },
+          include: { executionAttempts: { orderBy: { attemptNo: 'desc' }, take: 1 } },
+        });
+        if (current && isExecutionSlotLocked(current)) {
+          return { task: current, created: false, recovered: true };
+        }
+        slotSequence = (current?.slotSequence ?? 0) + 1;
+      }
+
+      if (validateBeforeCreate) await validateBeforeCreate(tx);
       const gate = await tx.productionGate.findUnique({ where: { id: 'production' } });
       if (gate?.paused !== false) {
         throw new Error('PRODUCTION_PAUSED');
@@ -86,11 +158,14 @@ export class TaskBudgetService {
           clientRequestId: data.clientRequestId,
           executionPlan: data.executionPlan as unknown as Prisma.InputJsonValue,
           deliveryStatus: 'not_started',
+          executionSlotId: data.executionSlotId,
+          slotSequence,
+          clientDeliveryStatus: data.executionSlotId ? 'pending' : undefined,
         },
       });
 
       await this.reserveInTransaction(tx, task.id, data.actorId, data.executionPlan);
-      return task;
+      return { task, created: true, recovered: false };
     });
     // 注意：不要用 Serializable 隔离级别。advisory lock 已经串行化了整个
     // 检查+写入的关键区；Serializable 事务的 snapshot 在第一条语句（拿锁）
