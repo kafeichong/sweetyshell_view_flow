@@ -12,10 +12,14 @@ const rawContract = require('./resources/seedance-workflows.v2.json') as Workflo
 
 // **允许**处于开启状态的付费工作流。没列在这里却被打开 = 回归。
 // 唯一依据是 docs/runbooks/r8-production-acceptance-scope.md 的授权记录：
-// §8 把 text-to-video 作为正式产能长期开放，§9 同样开放 first-frame
-// （全部参数、长期有效）。再打开任何其他工作流都必须先有一条对应授权，并在这里
-// 显式声明——这是本测试存在的意义：任何未声明的开放都会被抓住。
-const DECLARED_OPEN_WORKFLOWS: string[] = ['seedance.text-to-video.v1', 'seedance.first-frame-to-video.v1'];
+// §8 text-to-video、§9 first-frame、§10 first-last-frame，都是同一口径的长期开放
+// （同一 Actor、100 元/日 上限、全部参数）。再打开任何其他工作流都必须先有一条
+// 对应授权，并在这里显式声明——这是本测试存在的意义：未声明的开放会被抓住。
+const DECLARED_OPEN_WORKFLOWS: string[] = [
+  'seedance.text-to-video.v1',
+  'seedance.first-frame-to-video.v1',
+  'seedance.first-last-frame-to-video.v1',
+];
 
 function textIntent(workflowKey = 'seedance.text-to-video.v1') {
   return {
@@ -95,9 +99,9 @@ describe('WorkflowCatalogService', () => {
     process.env.VIDEO_FLOW_TEST_MODE = '1';
     // 刻意挑一条合同里仍处于关闭的工作流：被授权开放的那些无法用于验证
     // "环境变量越不过合同"。
-    process.env.VIDEO_FLOW_TEST_READY_WORKFLOWS = 'seedance.first-last-frame-to-video.v1';
+    process.env.VIDEO_FLOW_TEST_READY_WORKFLOWS = 'seedance.video-edit.v1';
     try {
-      const evaluated = new WorkflowCatalogService().evaluate(textIntent('seedance.first-last-frame-to-video.v1'));
+      const evaluated = new WorkflowCatalogService().evaluate(textIntent('seedance.video-edit.v1'));
       expect(evaluated.workflow.state).toMatchObject({
         implementation: 'incomplete',
         admission: { enabled: false, reason: 'V2_FULL_CHAIN_NOT_COMPLETE' },
