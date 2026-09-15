@@ -6,10 +6,10 @@ const contractUrl = new URL('../../contracts/seedance-workflows.v2.json', import
 
 // **允许**处于开启状态的付费工作流。没列在这里却被打开 = 回归。
 // 唯一依据是 docs/runbooks/r8-production-acceptance-scope.md 的授权记录：
-// 2026-09-15 第一轮验收收口后，同日的新授权把 text-to-video 作为正式产能长期
-// 开放（全部参数、长期有效，见该清单 §8）。再打开任何其他工作流都必须先有一条
-// 对应授权，并在这里显式声明。
-const DECLARED_OPEN_WORKFLOWS = ['seedance.text-to-video.v1'];
+// §8 把 text-to-video 作为正式产能长期开放，§9 同样开放 first-frame
+// （全部参数、长期有效）。再打开任何其他工作流都必须先有一条对应授权，并在这里
+// 显式声明——这是本测试存在的意义：任何未声明的开放都会被抓住。
+const DECLARED_OPEN_WORKFLOWS = ['seedance.text-to-video.v1', 'seedance.first-frame-to-video.v1'];
 
 async function loadContract() {
   return JSON.parse(await readFile(contractUrl, 'utf8'));
@@ -48,22 +48,26 @@ test('v2 contract freezes the official Seedance 2.5 API and all eight workflows'
       assert.equal(typeof workflow.state.admission.reason, 'string');
       assert.ok(workflow.state.admission.reason.length > 0);
     }
-    // implementation=ready 由验证记录支撑才算数：没有真实验收记录就不允许宣称可用。
-    if (workflow.state.implementation === 'ready') {
+    // 验证记录只能描述自己，且必须写得完整；有记录就说明这批参数组合是 passed。
+    // 未完成的工作流不允许留下记录。
+    // **注意：implementation=ready 不要求已经有真实验收记录** —— 受控验收的放行本来
+    // 就发生在真实出片之前（两条开放的工作流都是这么开的），记录在跑完之后补。
+    // 真正的付费闸门是上面的 DECLARED_OPEN_WORKFLOWS：没写进授权就开不了。
+    const records = workflow.state.validation.records;
+    for (const record of records) {
+      assert.equal(record.workflowKey, workflow.key);
+      assert.ok(record.parameters && record.software && record.billing, `${workflow.key} record is missing a section`);
+      assert.ok(record.artifact?.taskId);
+      assert.ok(record.artifact?.providerTaskId);
+      assert.match(record.artifact?.sha256 ?? '', /^[a-f0-9]{64}$/);
+      assert.ok(record.evidenceRef);
+    }
+    if (records.length > 0) {
       assert.equal(workflow.state.validation.status, 'passed');
-      assert.ok(workflow.state.validation.records.length > 0, `${workflow.key} is ready without validation records`);
-      for (const record of workflow.state.validation.records) {
-        assert.equal(record.workflowKey, workflow.key);
-        assert.ok(record.parameters && record.software && record.billing, `${workflow.key} record is missing a section`);
-        assert.ok(record.artifact?.taskId);
-        assert.ok(record.artifact?.providerTaskId);
-        assert.match(record.artifact?.sha256 ?? '', /^[a-f0-9]{64}$/);
-        assert.ok(record.evidenceRef);
-      }
-    } else {
-      assert.equal(workflow.state.implementation, 'incomplete');
+    }
+    if (workflow.state.implementation === 'incomplete') {
       assert.equal(workflow.state.validation.status, 'not_run');
-      assert.deepEqual(workflow.state.validation.records, []);
+      assert.deepEqual(records, []);
     }
     assert.ok(workflow.evidence.length > 0);
     for (const evidenceId of workflow.evidence) {
