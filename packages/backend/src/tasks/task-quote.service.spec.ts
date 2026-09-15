@@ -101,6 +101,31 @@ describe('TaskQuoteService', () => {
     }));
   });
 
+  it('prices first-last-frame output from the first frame when the last frame aspect differs', () => {
+    const service = new TaskQuoteService(new PricingCatalog());
+    const firstFrame = {
+      slotId: 'first-frame', role: 'first_frame' as const, sha256: 'b'.repeat(64), mimeType: 'image/png', sizeBytes: 100,
+      metadata: { kind: 'image' as const, width: 900, height: 1600 },
+    };
+    const lastFrame = {
+      slotId: 'last-frame', role: 'last_frame' as const, sha256: 'c'.repeat(64), mimeType: 'image/png', sizeBytes: 100,
+      metadata: { kind: 'image' as const, width: 1600, height: 900 },
+    };
+
+    const quote = service.quote(intent({
+      workflowKey: 'seedance.first-last-frame-to-video.v1',
+      generation: { ...intent().generation, ratio: 'adaptive' },
+      media: [firstFrame, lastFrame],
+    }), MODEL, new Date('2026-09-15T00:00:00.000Z'));
+
+    expect(quote.status).toBe('estimated');
+    expect(quote.basis).toEqual(expect.objectContaining({
+      output: { durationSeconds: 5, width: 720, height: 1280, frameRate: 24 },
+      adaptiveBasis: 'first_frame',
+    }));
+    expect(quote.reserveCny).toBe('7.560000');
+  });
+
   it('uses a documented resolution pixel upper bound when adaptive output cannot be locked', () => {
     const service = new TaskQuoteService(new PricingCatalog());
 

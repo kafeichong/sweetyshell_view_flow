@@ -155,7 +155,7 @@ async def test_fake_provider_counts_for_multiple_create_modes_and_usage_modes():
             f"/api/v3/contents/generations/tasks/{normal_id}",
         )
         assert task.status_code == 200
-        assert task.json()["usage"] == {"total_tokens": 1000}
+        assert task.json()["usage"] == {"completion_tokens": 1000}
 
         stats = await client.get("/__test__/stats")
         body = stats.json()
@@ -212,7 +212,7 @@ async def test_fake_provider_usage_modes_return_expected_payload():
         task_id = created.json()["id"]
         task = await client.get(f"/api/v3/contents/generations/tasks/{task_id}")
         assert task.status_code == 200
-        assert isinstance(task.json().get("usage", {}).get("total_tokens"), str)
+        assert isinstance(task.json().get("usage", {}).get("completion_tokens"), str)
 
         await client.get("/__test__/usage-mode", params={"mode": "negative"})
         created2 = await client.post(
@@ -222,7 +222,7 @@ async def test_fake_provider_usage_modes_return_expected_payload():
         task2_id = created2.json()["id"]
         task2 = await client.get(f"/api/v3/contents/generations/tasks/{task2_id}")
         assert task2.status_code == 200
-        assert task2.json().get("usage", {}).get("total_tokens") == -10
+        assert task2.json().get("usage", {}).get("completion_tokens") == -10
 
         await client.get("/__test__/usage-mode", params={"mode": "missing"})
         created3 = await client.post(
@@ -240,7 +240,7 @@ async def test_fake_provider_usage_modes_return_expected_payload():
         )
         task4_id = created4.json()["id"]
         task4 = await client.get(f"/api/v3/contents/generations/tasks/{task4_id}")
-        assert task4.json().get("usage", {}).get("total_tokens") == 1000
+        assert task4.json().get("usage", {}).get("completion_tokens") == 1000
 
 
 def test_fake_provider_serves_a_decodable_contract_clip():

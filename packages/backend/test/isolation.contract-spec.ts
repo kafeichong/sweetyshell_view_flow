@@ -29,27 +29,31 @@ describe('contract test isolation', () => {
 });
 
 describe('real Nest and PostgreSQL contract harness', () => {
-  test('creates an authenticated Preview task without a Provider attempt', async () => {
+  test('creates an authenticated preflight record without Task, Attempt, reservation or Provider call', async () => {
     const harness = await createContractHarness();
     try {
-      const response = await fetch(`${harness.appUrl}/api/v1/tasks`, {
+      const before = {
+        preflights: await harness.prisma.preflightRecord.count({ where: { actorId: harness.actorId } }),
+        tasks: await harness.prisma.task.count({ where: { actorId: harness.actorId } }),
+        attempts: await harness.prisma.executionAttempt.count({ where: { task: { actorId: harness.actorId } } }),
+        reservations: await harness.prisma.taskBudgetReservation.count({ where: { actorId: harness.actorId } }),
+      };
+      const response = await fetch(`${harness.appUrl}/api/v1/tasks/preflight`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${harness.actorToken}`,
           'Content-Type': 'application/json',
-          'Idempotency-Key': 'contract-preview-1',
         },
         body: JSON.stringify(textPreviewWorkflowRequest('contract test only', '720p')),
       });
-      const task = await response.json();
+      const report = await response.json();
 
       expect(response.status).toBe(201);
-      expect(task.status).toBe('preview');
-      expect(
-        await harness.prisma.executionAttempt.count({
-          where: { taskId: task.id },
-        }),
-      ).toBe(0);
+      expect(report).toMatchObject({ willUploadMedia: false, willCallProvider: false });
+      expect(await harness.prisma.preflightRecord.count({ where: { actorId: harness.actorId } })).toBe(before.preflights + 1);
+      expect(await harness.prisma.task.count({ where: { actorId: harness.actorId } })).toBe(before.tasks);
+      expect(await harness.prisma.executionAttempt.count({ where: { task: { actorId: harness.actorId } } })).toBe(before.attempts);
+      expect(await harness.prisma.taskBudgetReservation.count({ where: { actorId: harness.actorId } })).toBe(before.reservations);
       const providerStats = await fetch(
         `${process.env.VIDEO_FLOW_PROVIDER_BASE_URL}/__test__/stats`,
       ).then((result) => result.json());

@@ -18,6 +18,11 @@ const intent = {
 test('authenticated v2 Preview creates only an independent preflight record and reports admission blockers', async () => {
   const h = await createContractHarness();
   try {
+    await h.prisma.productionGate.upsert({
+      where: { id: 'production' },
+      create: { id: 'production', paused: true, reason: 'contract fail-closed check' },
+      update: { paused: true, reason: 'contract fail-closed check' },
+    });
     const before = {
       tasks: await h.prisma.task.count({ where: { actorId: h.actorId } }),
       attempts: await h.prisma.executionAttempt.count({ where: { task: { actorId: h.actorId } } }),
@@ -48,7 +53,7 @@ test('authenticated v2 Preview creates only an independent preflight record and 
       model: 'doubao-seedance-2-5-260628',
     });
     expect(report.productionAdmission.blockers.map((item: { code: string }) => item.code)).toEqual(expect.arrayContaining([
-      'PRODUCTION_NOT_ALLOWED', 'PRODUCTION_PAUSED',
+      'PRODUCTION_NOT_ALLOWED', 'WORKFLOW_NOT_READY', 'WORKFLOW_NOT_ENABLED', 'PRODUCTION_PAUSED',
     ]));
     expect(await h.prisma.preflightRecord.count({ where: { actorId: h.actorId } })).toBe(1);
     expect(await h.prisma.task.count({ where: { actorId: h.actorId } })).toBe(before.tasks);
@@ -100,8 +105,8 @@ test('authenticated v2 Preview creates only an independent preflight record and 
 
 test('confirmed v2 text submission creates one frozen Task and one reservation without a Provider call', async () => {
   const h = await createContractHarness({
-    productionSpec: { legacyOnly: true },
-    env: { VIDEO_FLOW_CONTRACT_READY_WORKFLOWS: 'seedance.text-to-video.v1' },
+    allowProduction: true,
+    readyWorkflows: 'seedance.text-to-video.v1',
   });
   try {
     await h.prisma.actorCredential.update({

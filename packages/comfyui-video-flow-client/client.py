@@ -6,6 +6,7 @@ import re
 import secrets
 import time
 from pathlib import Path
+from urllib.parse import quote
 import httpx
 
 try:
@@ -221,6 +222,7 @@ class VideoFlowClient:
             receipt_store.save(
                 intent_key,
                 {
+                    **(existing or {}),
                     "idempotencyKey": scoped_key,
                     "mode": mode,
                     "body": request_body,
@@ -232,9 +234,11 @@ class VideoFlowClient:
         task_id = result.get("id")
 
         try:
+            latest = receipt_store.load(intent_key) or existing or {}
             receipt_store.save(
                 intent_key,
                 {
+                    **latest,
                     "idempotencyKey": scoped_key,
                     "mode": request_body.get("mode", mode),
                     "body": request_body,
@@ -369,6 +373,24 @@ class VideoFlowClient:
     def get_task(self, task_id: str) -> dict[str, Any]:
         response = self.client.get(
             f"{self.config.backend_url}/api/v1/tasks/{task_id}",
+            headers=self._headers(),
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def get_current_task_for_slot(self, execution_slot_id: str) -> dict[str, Any]:
+        encoded_slot_id = quote(execution_slot_id, safe="")
+        response = self.client.get(
+            f"{self.config.backend_url}/api/v1/tasks/slots/{encoded_slot_id}/current",
+            headers=self._headers(),
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def confirm_client_delivery(self, task_id: str) -> dict[str, Any]:
+        encoded_task_id = quote(task_id, safe="")
+        response = self.client.post(
+            f"{self.config.backend_url}/api/v1/tasks/{encoded_task_id}/client-delivery",
             headers=self._headers(),
         )
         response.raise_for_status()

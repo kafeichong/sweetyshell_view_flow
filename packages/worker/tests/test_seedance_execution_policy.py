@@ -66,19 +66,75 @@ def test_reference_image_payload_is_a_direct_official_shape():
     }
 
 
+def test_reference_image_official_fixture_keeps_the_thirty_second_boundary():
+    fixture = json.loads(
+        (Path(__file__).resolve().parent / "fixtures" / "seedance_2_5_official_modes.json").read_text()
+    )["modes"]["referenceImage"]
+    payload = compile_seedance_payload(_params(
+        prompt=fixture["content"][0]["text"],
+        media_urls=[{
+            "url": fixture["content"][1]["image_url"]["url"],
+            "role": fixture["content"][1]["role"],
+        }],
+        duration=fixture["duration"],
+        ratio=fixture["ratio"],
+        generate_audio=fixture["generate_audio"],
+    ))
+
+    assert payload["content"] == fixture["content"]
+    assert payload["duration"] == 30
+    assert payload["generate_audio"] is True
+
+
+def test_first_frame_official_fixture_keeps_adaptive_ratio_and_role():
+    fixture = json.loads(
+        (Path(__file__).resolve().parent / "fixtures" / "seedance_2_5_official_modes.json").read_text()
+    )["modes"]["firstFrame"]
+    payload = compile_seedance_payload(_params(
+        workflow_key="seedance.first-frame-to-video.v1",
+        media_urls=[{
+            "url": "https://example.invalid/first.png",
+            "role": "first_frame",
+        }],
+        duration=fixture["duration"],
+        ratio=fixture["ratio"],
+        generate_audio=fixture["generate_audio"],
+    ))
+
+    assert [[item["type"], item.get("role")] for item in payload["content"][1:]] == fixture["contentRoles"]
+    assert payload["ratio"] == "adaptive"
+    assert payload["duration"] == 4
+    assert payload["generate_audio"] is True
+
+
+@pytest.mark.parametrize("duration", [3, 31])
+def test_reference_image_rejects_durations_outside_the_official_boundary(duration):
+    with pytest.raises(ValueError, match="duration"):
+        compile_seedance_payload(_params(duration=duration))
+
+
 def test_first_and_last_frames_keep_their_explicit_roles_and_order():
+    fixture = json.loads(
+        (Path(__file__).resolve().parent / "fixtures" / "seedance_2_5_official_modes.json").read_text()
+    )["modes"]["firstLastFrame"]
     payload = compile_seedance_payload(_params(
         workflow_key="seedance.first-last-frame-to-video.v1",
-        ratio="adaptive",
+        ratio=fixture["ratio"],
+        duration=fixture["duration"],
+        generate_audio=fixture["generate_audio"],
         media_urls=[
             {"url": "https://example.invalid/first.png", "role": "first_frame"},
             {"url": "https://example.invalid/last.png", "role": "last_frame"},
         ],
     ))
+    assert [[item["type"], item.get("role")] for item in payload["content"][1:]] == fixture["contentRoles"]
     assert payload["content"][1:] == [
         {"type": "image_url", "image_url": {"url": "https://example.invalid/first.png"}, "role": "first_frame"},
         {"type": "image_url", "image_url": {"url": "https://example.invalid/last.png"}, "role": "last_frame"},
     ]
+    assert payload["ratio"] == "adaptive"
+    assert payload["duration"] == 5
+    assert payload["generate_audio"] is True
     with pytest.raises(ValueError, match="media order"):
         compile_seedance_payload(_params(
             workflow_key="seedance.first-last-frame-to-video.v1", ratio="adaptive",
@@ -89,21 +145,96 @@ def test_first_and_last_frames_keep_their_explicit_roles_and_order():
         ))
 
 
+def test_omni_reference_official_fixture_keeps_mixed_roles_and_reference_mode():
+    fixture = json.loads(
+        (Path(__file__).resolve().parent / "fixtures" / "seedance_2_5_official_modes.json").read_text()
+    )["modes"]["omniReference"]
+    payload = compile_seedance_payload(_params(
+        workflow_key="seedance.omni-reference.v1",
+        media_urls=[
+            {"url": "https://example.invalid/input.png", "role": "reference_image"},
+            {"url": "https://example.invalid/input-1.mp4", "role": "reference_video"},
+            {"url": "https://example.invalid/input-2.mp4", "role": "reference_video"},
+        ],
+        duration=fixture["duration"],
+        ratio=fixture["ratio"],
+        generate_audio=fixture["generate_audio"],
+        omni_reference_task_type=fixture["omni_reference_task_type"],
+        output_format=fixture["output_format"],
+    ))
+
+    assert [[item["type"], item.get("role")] for item in payload["content"][1:]] == fixture["contentRoles"]
+    assert payload["omni_reference_task_type"] == "reference"
+    assert payload["output_format"] == "mov"
+    assert payload["duration"] == 15
+
+
 def test_edit_payload_requires_frozen_special_fields():
+    fixture = json.loads(
+        (Path(__file__).resolve().parent / "fixtures" / "seedance_2_5_official_modes.json").read_text()
+    )["modes"]["videoEdit"]
     payload = compile_seedance_payload(_params(
         workflow_key="seedance.video-edit.v1",
         prompt="remove everyone except the hero from @video1",
         media_urls=[{"url": "https://example.invalid/input.mp4", "role": "reference_video"}],
-        ratio="adaptive",
-        duration=-1,
-        omni_reference_task_type="edit",
-        output_format="mov",
+        ratio=fixture["ratio"],
+        duration=fixture["duration"],
+        generate_audio=fixture["generate_audio"],
+        omni_reference_task_type=fixture["omni_reference_task_type"],
+        output_format=fixture["output_format"],
     ))
     assert payload["content"][1] == {
         "type": "video_url", "video_url": {"url": "https://example.invalid/input.mp4"}, "role": "reference_video",
     }
     assert payload["omni_reference_task_type"] == "edit"
     assert payload["output_format"] == "mov"
+    assert payload["duration"] == -1
+    assert payload["ratio"] == "adaptive"
+
+
+def test_video_extend_official_fixture_keeps_multiple_videos_and_output_duration():
+    fixture = json.loads(
+        (Path(__file__).resolve().parent / "fixtures" / "seedance_2_5_official_modes.json").read_text()
+    )["modes"]["videoExtend"]
+    payload = compile_seedance_payload(_params(
+        workflow_key="seedance.video-extend.v1",
+        prompt="extend @video1 into @video2 and @video3",
+        media_urls=[
+            {"url": f"https://example.invalid/input-{index}.mp4", "role": "reference_video"}
+            for index in range(1, 4)
+        ],
+        ratio=fixture["ratio"],
+        duration=fixture["duration"],
+        generate_audio=fixture["generate_audio"],
+        omni_reference_task_type=fixture["omni_reference_task_type"],
+        output_format=fixture["output_format"],
+    ))
+
+    assert [[item["type"], item.get("role")] for item in payload["content"][1:]] == fixture["contentRoles"]
+    assert payload["omni_reference_task_type"] == "extend"
+    assert payload["output_format"] == "mov"
+    assert payload["duration"] == 11
+    assert payload["ratio"] == "adaptive"
+
+
+def test_audio_reference_official_fixture_compiles_as_reference_with_audio_only():
+    fixture = json.loads(
+        (Path(__file__).resolve().parent / "fixtures" / "seedance_2_5_official_modes.json").read_text()
+    )["modes"]["audioReference"]
+    payload = compile_seedance_payload(_params(
+        workflow_key="seedance.audio-reference-to-video.v1",
+        prompt="create visuals for @audio1",
+        media_urls=[{"url": "https://example.invalid/input.wav", "role": "reference_audio"}],
+        ratio=fixture["ratio"],
+        duration=fixture["duration"],
+        generate_audio=fixture["generate_audio"],
+        omni_reference_task_type=fixture["omni_reference_task_type"],
+    ))
+
+    assert [[item["type"], item.get("role")] for item in payload["content"][1:]] == fixture["contentRoles"]
+    assert payload["omni_reference_task_type"] == "reference"
+    assert payload["duration"] == 4
+    assert payload["ratio"] == "16:9"
 
 
 def test_text_to_video_accepts_exact_four_and_thirty_second_boundaries():

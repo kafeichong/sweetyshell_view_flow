@@ -34,7 +34,6 @@ export type ContractHarness = {
   appUrl: string;
   prisma: PrismaClient;
   actorId: string;
-  productionSpec?: Record<string, unknown>;
   actorToken: string;
   workerToken: string;
   adminToken: string;
@@ -42,7 +41,8 @@ export type ContractHarness = {
 };
 
 export type ContractHarnessOptions = {
-  productionSpec?: Record<string, unknown>;
+  allowProduction?: boolean;
+  readyWorkflows?: string;
   env?: Record<string, string>;
 };
 
@@ -125,10 +125,11 @@ export async function createContractHarness(
       PORT: String(port),
       VIDEO_FLOW_ADMIN_TOKEN: adminToken,
       VIDEO_FLOW_WORKER_TOKEN: workerToken,
-      VIDEO_FLOW_PRODUCTION_ACTORS: options.productionSpec ? actorId : '',
-      VIDEO_FLOW_PRODUCTION_SPEC_JSON: options.productionSpec
-        ? JSON.stringify(options.productionSpec)
-        : '',
+      VIDEO_FLOW_PRODUCTION_ACTORS: options.allowProduction ? actorId : '',
+      VIDEO_FLOW_CONTRACT_READY_WORKFLOWS:
+        options.readyWorkflows
+        ?? options.env?.VIDEO_FLOW_CONTRACT_READY_WORKFLOWS
+        ?? (options.allowProduction ? 'seedance.reference-image-to-video.v1' : ''),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -148,7 +149,6 @@ export async function createContractHarness(
 
   return {
     appUrl,
-    productionSpec: options.productionSpec,
     prisma,
     actorId,
     actorToken,

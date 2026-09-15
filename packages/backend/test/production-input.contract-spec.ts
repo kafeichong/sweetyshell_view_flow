@@ -1,24 +1,22 @@
 import { createContractHarness, ContractHarness } from './contract-harness';
 import { inspectedImageFixture, referenceImageWorkflowRequest } from './workflow-fixtures';
 
-const testSpec = {
-  version: 'test-v1',
-  model: 'test-model',
-  duration: 5,
-  ratio: '16:9',
-  resolution: 'test-resolution',
-  generateAudio: false,
-  watermark: true,
-  pricingVersion: 'test-price-v1',
-  reserveCny: '2.000000',
-};
-
 async function createProduction(
   harness: ContractHarness,
   token: string,
   key: string,
   assetId: string,
   paramsOverride: Record<string, unknown> = {},
+) {
+  const body = { ...await referenceImageWorkflowRequest(harness, 'contract product', assetId), ...paramsOverride };
+  return submitProduction(harness, token, key, body);
+}
+
+async function submitProduction(
+  harness: ContractHarness,
+  token: string,
+  key: string,
+  body: Record<string, unknown>,
 ) {
   return fetch(`${harness.appUrl}/api/v1/tasks`, {
     method: 'POST',
@@ -27,13 +25,13 @@ async function createProduction(
       'Content-Type': 'application/json',
       'Idempotency-Key': key,
     },
-    body: JSON.stringify({ ...await referenceImageWorkflowRequest(harness, 'contract product', assetId, 'test-resolution'), ...paramsOverride }),
+    body: JSON.stringify(body),
   });
 }
 
 describe('production input contract', () => {
   test('freezes approved parameters for an owned uploaded input', async () => {
-    const harness = await createContractHarness({ productionSpec: testSpec });
+    const harness = await createContractHarness({ allowProduction: true });
     try {
       await harness.prisma.productionGate.upsert({
         where: { id: 'production' },
@@ -60,30 +58,25 @@ describe('production input contract', () => {
           ...inspectedImageFixture,
         },
       });
-      const response = await createProduction(
-        harness,
-        harness.actorToken,
-        'contract-production-owned',
-        input.id,
-      );
+      const body = await referenceImageWorkflowRequest(harness, 'contract product', input.id);
+      const response = await submitProduction(harness, harness.actorToken, 'contract-production-owned', body);
       const task = await response.json();
 
       expect({ status: response.status, message: task.message }).toEqual({ status: 201, message: undefined });
       expect(task.executionPlan).toMatchObject({
-        specVersion: 'test-v1',
-        model: 'test-model',
-        imageAssetId: input.id,
-        inputFileHash: (await harness.prisma.asset.findUnique({ where: { id: input.id } }))!.fileHash,
-        resolution: 'test-resolution',
+        specVersion: 'workflow-production-v2',
+        model: 'doubao-seedance-2-5-260628',
+        workflowKey: 'seedance.reference-image-to-video.v1',
+        resolution: '720p',
+        media: [expect.objectContaining({
+          assetId: input.id,
+          role: 'reference_image',
+          fileHash: (await harness.prisma.asset.findUnique({ where: { id: input.id } }))!.fileHash,
+        })],
       });
       expect(task.deliveryStatus).toBe('not_started');
 
-      const repeated = await createProduction(
-        harness,
-        harness.actorToken,
-        'contract-production-owned',
-        input.id,
-      );
+      const repeated = await submitProduction(harness, harness.actorToken, 'contract-production-owned', body);
       expect(repeated.status).toBe(201);
       expect((await repeated.json()).id).toBe(task.id);
       expect(
@@ -97,7 +90,7 @@ describe('production input contract', () => {
   });
 
   test('rejects an uploaded input owned by another actor', async () => {
-    const harness = await createContractHarness({ productionSpec: testSpec });
+    const harness = await createContractHarness({ allowProduction: true });
     try {
       const input = await harness.prisma.asset.create({
         data: {
@@ -114,7 +107,7 @@ describe('production input contract', () => {
         input.id,
       );
 
-      expect(response.status).toBe(403);
+      expect(response.status).toBe(400);
       expect(
         await harness.prisma.task.count({
           where: { actorId: harness.actorId },
@@ -129,7 +122,7 @@ describe('production input contract', () => {
     ['output', 'uploaded'],
     ['input', 'pending_upload'],
   ])('rejects a %s asset in %s state', async (role, inspectionStatus) => {
-    const harness = await createContractHarness({ productionSpec: testSpec });
+    const harness = await createContractHarness({ allowProduction: true });
     try {
       const input = await harness.prisma.asset.create({
         data: {
@@ -145,7 +138,7 @@ describe('production input contract', () => {
         `contract-production-${role}-${inspectionStatus}`,
         input.id,
       );
-      expect(response.status).toBe(403);
+      expect(response.status).toBe(400);
     } finally {
       await harness.close();
     }
@@ -156,7 +149,7 @@ describe('production input contract', () => {
     ['direct image URL', { image_url: 'https://example.test/input.png' }],
     ['unknown media field', { audio_urls: ['https://example.test/a.mp3'] }],
   ])('rejects %s before creating a task', async (_name, override) => {
-    const harness = await createContractHarness({ productionSpec: testSpec });
+    const harness = await createContractHarness({ allowProduction: true });
     try {
       const input = await harness.prisma.asset.create({
         data: {

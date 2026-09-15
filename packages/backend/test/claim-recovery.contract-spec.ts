@@ -2,18 +2,6 @@ import { createContractHarness } from './contract-harness';
 import { Prisma } from '@prisma/client';
 import { inspectedImageFixture, referenceImageWorkflowRequest } from './workflow-fixtures';
 
-const testSpec = {
-  version: 'test-v1',
-  model: 'test-model',
-  duration: 5,
-  ratio: '16:9',
-  resolution: 'test-resolution',
-  generateAudio: false,
-  watermark: true,
-  pricingVersion: 'test-price-v1',
-  reserveCny: '2.000000',
-};
-
 // Worker Job 模型的 TS 镜像：与 packages/worker/models.py 的 Job 字段一一对应
 // （pydantic populate_by_name 允许直接按 camelCase 字段名解析 Backend 响应）。
 // 合同测试必须用真实 recover 响应构造 Job，而不是手写一份不同的 fixture。
@@ -56,7 +44,7 @@ async function createProductionTask(
       'Authorization': `Bearer ${harness.actorToken}`,
       'Idempotency-Key': idempotencyKey,
     },
-    body: JSON.stringify(await referenceImageWorkflowRequest(harness, 'claim contract', assetId, 'test-resolution')),
+    body: JSON.stringify(await referenceImageWorkflowRequest(harness, 'claim contract', assetId, '720p')),
   });
   expect(response.status).toBe(201);
   return response.json();
@@ -86,7 +74,7 @@ describe('T03: Claim admission and recovery contract', () => {
   let assetIds: string[];
 
   beforeAll(async () => {
-    harness = await createContractHarness({ productionSpec: testSpec });
+    harness = await createContractHarness({ allowProduction: true });
 
     await harness.prisma.productionGate.upsert({
       where: { id: 'production' },

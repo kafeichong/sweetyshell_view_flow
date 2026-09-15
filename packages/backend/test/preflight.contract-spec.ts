@@ -1,14 +1,8 @@
 import { createContractHarness } from './contract-harness';
 import { inspectedImageFixture, referenceImageWorkflowRequest } from './workflow-fixtures';
 
-const productionSpec = {
-  version: 'preflight-contract-v1', model: 'test-model', duration: 5, ratio: '16:9',
-  resolution: 'test-resolution', generateAudio: false, watermark: true,
-  pricingVersion: 'test-price-v1', reserveCny: '2.000000',
-};
-
 test('authenticated metadata preflight stays nonexecutable and binds confirmed submission to actual stored bytes', async () => {
-  const h = await createContractHarness({ productionSpec });
+  const h = await createContractHarness({ allowProduction: true });
   try {
     await h.prisma.productionGate.upsert({ where: { id: 'production' }, create: { id: 'production', paused: false }, update: { paused: false } });
     await h.prisma.actorCredential.update({ where: { actorId: h.actorId }, data: { dailyLimitCny: '100', monthlyLimitCny: '1000' } });
@@ -17,9 +11,8 @@ test('authenticated metadata preflight stays nonexecutable and binds confirmed s
     } });
     const seeded = await referenceImageWorkflowRequest(h, 'product preflight', asset.id);
     const seedId = (seeded as { preflightId: string }).preflightId;
-    const seed = await h.prisma.task.findUniqueOrThrow({ where: { id: seedId } });
-    const intent = (seed.requestSnapshot as any).intent;
-    await h.prisma.task.delete({ where: { id: seedId } });
+    const seed = await h.prisma.preflightRecord.findUniqueOrThrow({ where: { id: seedId } });
+    const intent = seed.effectiveRequest;
     const post = (path: string, body: unknown, auth = true) => fetch(`${h.appUrl}/api/v1/tasks${path}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'confirmed-contract', ...(auth ? { Authorization: `Bearer ${h.actorToken}` } : {}) }, body: JSON.stringify(body),
     });
@@ -28,11 +21,11 @@ test('authenticated metadata preflight stays nonexecutable and binds confirmed s
     const report = await preview.json();
     expect({ status: preview.status, message: report.message }).toEqual({ status: 201, message: undefined });
     expect(report).toMatchObject({ willCallProvider: false, willUploadMedia: false });
-    const stored = await h.prisma.task.findUniqueOrThrow({ where: { id: report.preflightId } });
-    expect(stored.status).toBe('preview');
-    expect(stored.executionPlan).toBeNull();
-    expect(await h.prisma.taskBudgetReservation.count({ where: { taskId: stored.id } })).toBe(0);
-    expect(await h.prisma.executionAttempt.count({ where: { taskId: stored.id } })).toBe(0);
+    const stored = await h.prisma.preflightRecord.findUniqueOrThrow({ where: { id: report.preflightId } });
+    expect(stored.effectiveRequest).toEqual(intent);
+    expect(await h.prisma.task.count({ where: { actorId: h.actorId } })).toBe(0);
+    expect(await h.prisma.taskBudgetReservation.count({ where: { actorId: h.actorId } })).toBe(0);
+    expect(await h.prisma.executionAttempt.count({ where: { task: { actorId: h.actorId } } })).toBe(0);
     const body = { ...seeded, preflightId: report.preflightId };
     expect((await post('', { ...body, confirmLiveSubmission: false })).status).toBe(400);
     expect((await post('', { ...body, prompt: { positive: 'changed' } })).status).toBe(400);

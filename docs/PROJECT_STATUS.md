@@ -8,6 +8,72 @@
 
 ## 0. 本轮交付判断
 
+### 2026-09-15：R7 代码清理与自动化总回归已完成，实际 ComfyUI 验收仍待执行
+
+R7 已把 Backend 合同测试全部迁移到当前 v2 语义：Preview 只创建独立 `PreflightRecord`，对 Task、Attempt、预算预占和 Provider create 的增量均为 0；Production 测试先调用真实 `/api/v1/tasks/preflight`，再只提交 `preflightId + executionSlotId + media slot 绑定`。参考图 5 秒 720p 的预算边界按当前官方公式使用 7.560000 元；Provider usage 测试使用官方 `completion_tokens`，并按冻结的 `seedance-2.5-public-catalog-2026-09-15` 快照结算。源码：`packages/backend/test/workflow-fixtures.ts`、`preflight.contract-spec.ts`、`budget.contract-spec.ts`、`provider-outcome.contract-spec.ts`。
+
+已删除没有运行时调用者、只靠旧测试互相维持的 `production-spec.ts`、`workflow-registry.ts`、`workflow-preflight.ts` 及其测试；`VIDEO_FLOW_PRODUCTION_SPEC_JSON` 不再出现在代码或合同脚本中。当前唯一新任务合同是 v2 workflow catalog + 独立 Preflight + 服务端冻结报价/执行快照；旧 `mode=preview` 和 `confirmLiveSubmission` 只保留负向拒绝测试。测试夹具使用明确的 `allowProduction/readyWorkflows`，且临时 ready 只存在于 `test/contract-backend.cjs` 的依赖替身，正式三份合同资源仍全部为 `implementation=incomplete / admission.enabled=false`。
+
+本轮实际验证：Backend `npm run build` 和 26 suites / 272 tests；HTTP smoke 通过；Worker 214 passed / 26 个仓库外 workflow JSON 预期 skip / 21 deselected；客户端 117 passed；合同同步检查通过；隔离合同中 Backend 51/51、Fake Provider 7/7、真实 Backend/DB/Worker/Fake Provider 19 passed / 2 个外部场景 skip；空库和模拟历史库均成功应用 13 个 migration，历史 Decimal 值核验通过；`git diff --check` 通过。合同脚本结束后清理容器、网络和测试卷。
+
+R7 尚未完成的边界：未在目标 ComfyUI 中重新安装当前插件、重启、导入 8 份模板并实际 Queue；两个跨包 skip 对应的外部/运行环境验收不能计为通过。未部署、未提交、未推送、未上传真实素材、未连接真实 OSS/Ark、未创建付费任务。
+
+### 2026-09-15：R6 八类工作流均已形成自动化纵向证据，尚待真实 ComfyUI 与外部缺项
+
+R6 新增统一模板合同测试，对当前 8 份 `*-preflight-v1.comfy.json` 逐条检查全局 link、节点 input/output 反向引用、类型一致性、默认 Preview，以及从请求节点可达输出节点；同时明确参考图模板只有一个 `ProductInput/ProductRequest`，客户端时长选项为完整 4–30 秒。当前客户端完整回归 117 passed。源码：`packages/comfyui-video-flow-client/tests/test_workflow_templates.py`。
+
+R6.1 已把仓库内官方 `referenceImage` fixture 接入实际 Worker 编译器测试：30 秒请求生成官方 content 角色和参数，3/31 秒在 Provider 调用前拒绝。Worker 定向 16 passed；Backend 工作流解析、冻结预检、素材 slot 绑定与预占定向 2 suites / 21 passed。
+
+R6.2 文生视频新 v2 纵向合同已独立跑通 4 秒与 30 秒两条边界。正式预检和提交使用空媒体列表，冻结 `executionPlan.media` 为空，Worker 生成的 Provider `content` 只有 Prompt 文本，不创建、绑定或伪造输入 Asset；实际参数报价、预算预占、Fake Provider create、`usage.completion_tokens` 结算、输出 Asset 和 delivery ready 均完成。管理员任务报告最终只有 `output` Asset。测试：`packages/worker/tests/test_mvp_live_contract.py::LiveMVPContractTests::test_text_to_video_four_and_thirty_seconds_never_bind_an_input_asset`，1 passed。
+
+R6.2 按 TDD 先观察到旧合同辅助函数强制读取 `payload.media[0]` 的 `IndexError`，随后将测试链改为按 `workflowKey` 构建媒体描述和 `slotId → assetId` 绑定；空媒体工作流自然生成空绑定。`scripts/run_mvp_contract.sh` 的 ready workflow 改为仅由显式测试环境变量配置，默认仍只允许参考图，生产源合同和正式运行时没有新增绕过开关。本轮回归：Worker 定向 16 passed、全量 208 passed / 26 个仓库外 workflow 资产缺失导致的预期 skip / 14 deselected；客户端全量 107 passed；Backend build、Fake Provider 7 passed、全新/历史库 13 个 migration 均由 R6.2 隔离纵向脚本再次通过。
+
+R6.3 首帧工作流也已用官方 fixture 和新 v2 纵向合同覆盖。fixture 明确断言 `image_url + first_frame`、`ratio=adaptive`、4 秒和有声字段；纵向合同进一步跑通 4 秒与 30 秒，冻结媒体角色只含 `first_frame`，报价按已检查首帧 1280×720 比例解析 720p 输出尺寸并预占，Worker 向 Fake Provider 保留 `adaptive` 和首帧角色，最终完成 usage 结算与交付。测试：`test_seedance_execution_policy.py` 定向 17 passed；`test_first_frame_adaptive_four_and_thirty_seconds_reach_delivery` 1 passed；Worker 最新全量 209 passed / 26 个预期 skip / 15 deselected。测试先因辅助器只识别参考图/纯文本而失败，随后仅把合同测试 descriptor 构建扩展为按图片角色生成，没有修改生产准入或源合同状态。
+
+R6.4 首尾帧工作流已使用两个内容、哈希、对象键和 Asset ID 均不同的隔离图片完成纵向合同。4 秒和 30 秒请求均以 `ratio=adaptive` 通过正式预检；冻结快照严格保持 `first_frame → last_frame` 及各自 `slotId → assetId`，Worker 向 Fake Provider 发送两个不同 URL 并保持同样角色顺序，随后完成实际预占、单次 create、usage 结算和交付。RED 阶段因尾帧 descriptor 错用首帧哈希而在 Task/预占前得到 `PREFLIGHT_ACTUAL_CONTENT_MISMATCH`，修正后转绿，证明测试能捕获素材错绑。官方 fixture 编译器测试同时覆盖 `image_url + first_frame/last_frame`、`adaptive`、时长和有声字段。
+
+官方说明首尾帧输出比例只锁定首帧；尾帧画幅不一致时会被拉伸。Backend 报价回归因此加入首帧 900×1600、尾帧 1600×900 的组合，确认 720p 仍按首帧解析为 720×1280、`adaptiveBasis=first_frame`，5 秒预占为 7.560000 元，不按尾帧或两帧平均。R6.4 验证：纵向合同 1 passed；Worker 编译器 17 passed、全量 209 passed / 26 个预期 skip / 16 deselected；Backend 报价/预检/目录 3 suites / 30 passed；客户端模板与请求节点 25 passed。
+
+R6.5 全模态参考当前形成了不能混写成“全部通过”的双结果。无输入视频的图片+音频组合可按官方公式确定预占，已在 4 秒和 30 秒两条纵向合同中完成不同 Asset 精确绑定、正式预检、预算预占、Worker 编译、Fake Provider 的 `image_url/reference_image + audio_url/reference_audio` payload、usage 结算和交付。含输入视频的图片+视频+音频组合则只允许完成 Preview：请求检查通过并保留每段实际视频时长，但报价明确为 `unavailable`，缺项为 `INPUT_VIDEO_MINIMUM_TOKENS_UNRESOLVED`，Production 返回 `QUOTE_UNAVAILABLE`，对应执行槽无 Task，Worker 运行后 Provider create 仍为 0。没有用公式估算值、固定金额或刊例价绕过最低 Token 规则。
+
+Worker 新增官方 `omniReference` fixture 回归，明确保持图片加两个视频的角色、`omni_reference_task_type=reference`、15 秒和 MOV 字段。客户端已移除固定 `3 图 + 1 视频 + 1 音频` 的临时节点，改为独立图片、视频、音频节点：每个节点可接入上一份 `reference_media` 并追加一项，按链路顺序生成稳定的分角色 slot。客户端本地检查接受官方上限 `30 图 + 10 视频 + 10 音频 = 50 项`，超过任一角色或总数立即拒绝；视频和音频各自 30 秒总时长规则继续复用统一媒体检查器，完整 Preview 仍由 Backend 合同复验。模板示范图片 → 视频 → 音频链式组合并保持默认 Preview，不把示范数量当作产品上限。R6.5 当前验证：两条纵向合同各 1 passed；Worker 编译器 18 passed、全量 210 passed / 26 个预期 skip / 18 deselected；Backend 报价/预检/目录 3 suites / 30 passed；客户端最新全量 111 passed，模板结构 4 passed。
+
+R6.5 尚不能标记完整完成：客户端数量入口已覆盖官方上限，MOV 归档扩展名/MIME 也已由 R6.6 共用修复；但含视频最低 Token 明细仍未取得，目标 ComfyUI 也未实际导入和 Queue。因此本项保持部分完成和 fail-closed，不勾选 ROADMAP。
+
+R6.6 视频编辑已完成当前可安全验证的自动化边界。Worker 编译器现在直接使用官方 `videoEdit` fixture，确认 `reference_video`、`duration=-1`、`ratio=adaptive`、`omni_reference_task_type=edit` 和 `output_format=mov`，定向 18 passed。客户端新增 `VideoFlowVideoEditRequest` 和第 6 份 Preview/Production 模板：至少需要一段 4–30 秒参考视频，请求节点固定官方特殊字段，不向用户暴露可产生非法组合的普通时长、比例和格式选项。
+
+现代 Worker 归档链不再把所有视频写成 MP4：它从冻结 `executionPlan.outputFormat` 选择扩展名和 MIME。MP4 仍归档为 `result.mp4 / video/mp4`；MOV 归档为本地 `.mov`、OSS `result.mov` 和 Asset `video/quicktime`，同一 task + attempt 的稳定幂等 key 不变。MOV 定向归档 2 passed；Worker 最新全量 212 passed / 26 个预期 skip / 19 deselected，客户端最新全量 113 passed。
+
+视频编辑隔离纵向合同在全新/历史 PostgreSQL 应用全部 13 个 migration，Backend build 和 Fake Provider 7 passed 后运行 1 passed：Preview 请求检查通过并完整保留 `-1/adaptive/mov`，报价明确缺少 `INPUT_VIDEO_MINIMUM_TOKENS_UNRESOLVED`，Production 返回 `QUOTE_UNAVAILABLE`，执行槽无 Task，Worker 周期后 Provider create 数不变。R6.6 仍不能勾选：最低 Token 明细未取得，因而尚无合法 Production Task 可跑 MOV 全链；目标 ComfyUI 也未实际导入和 Queue。
+
+R6.7 视频延长已完成当前可安全验证的自动化边界。客户端新增 `VideoFlowVideoExtendRequest` 和第 7 份 Preview/Production 模板：示范三段参考视频链式输入，允许继续按统一集合规则增删图片、视频或音频；输出时长只开放整数 4–30 秒，比例固定 `adaptive`，正式字段冻结为 `omni_reference_task_type=extend` 和 `outputFormat=mov`。Worker 直接消费仓库内官方 `videoExtend` fixture，确认三个 `reference_video` 的角色顺序、11 秒、`adaptive/extend/mov` 均由现有正式编译器保留，无需新增另一套编译路径。
+
+视频延长隔离纵向合同同样在全新/历史 PostgreSQL 应用全部 13 个 migration，Backend build、Fake Provider 7 passed 和目标 live contract 1 passed：Preview 检查通过并完整保留 `11/adaptive/mov`；因输入视频最低 Token 明细仍缺失，报价为 `unavailable`，Production 返回 `QUOTE_UNAVAILABLE`，执行槽无 Task，Worker 周期后 Provider create 数不变。R6.7 仍不能勾选：尚无合法 Production 报价与 MOV 交付纵向证据，目标 ComfyUI 也未实际导入和 Queue。
+
+R6.8 音频参考已完成自动化正式链路。官方资料确认 Seedance 2.5 支持纯音频参考，属于全模态 `reference` 子任务；图片/视频/音频组合继续由 R6.5 负责。客户端新增 `VideoFlowAudioReferenceRequest` 和第 8 份模板，示范两段音频链式输入，产品边界为 1–10 段 `reference_audio`、总时长不超过 30 秒，输出时长开放整数 4–30 秒；混入图片或视频时明确提示改用全模态模板。Worker 官方 `audioReference` fixture 断言实际正式编译结果为 `audio_url/reference_audio + omni_reference_task_type=reference`。
+
+纯音频不含输入视频，因此 R6.8 的 4 秒和 30 秒请求都在隔离纵向合同中获得基于实际参数的非零预占，创建一次 Fake Provider Task，按 `usage.completion_tokens` 结算并完成 MP4 交付。首次运行只因测试误认为 `pricingSnapshot` 顶层含 `inputVideoDurationSeconds` 而失败；修正为断言冻结 `reserveCny` 非零后转绿，没有修改生产报价服务。最终回归：Worker 214 passed / 26 个预期 skip / 21 deselected，客户端 117 passed，合同资源与同步 6 passed；全新/历史库 13 个 migration、Backend build、Fake Provider 7 passed、目标 live contract 1 passed。R6.8 仍不勾选 ROADMAP，因为目标 ComfyUI 尚未实际安装、导入并 Queue Preview，源合同继续 fail-closed。
+
+参考图新 v2 纵向合同现已独立跑通 4 秒与 30 秒两条边界：隔离 PostgreSQL 从空库和模拟历史库应用 13 个 migration；真实 Backend Controller/Guard 创建独立 Preview，再用测试 bootstrap 临时把且只把参考图工作流设为 ready；正式提交复验 verified Asset 实际字节并按报价预占；真实 Worker 编译冻结快照后只向 Fake Provider create 一次；Fake Provider 返回 `usage.completion_tokens`；Backend 按冻结价格结算；Worker 完成 MP4 下载、归档、Asset 登记和 delivery ready。最终断言覆盖 Provider payload 时长/角色、预占金额、usage 推算金额、reservation settled 和交付 Asset。测试：`packages/worker/tests/test_mvp_live_contract.py::LiveMVPContractTests::test_reference_image_four_and_thirty_seconds_reach_delivery_with_frozen_usage`，1 passed；Fake Provider 7 passed；Worker 全量 208 passed / 26 个仓库外 workflow 资产缺失导致的预期 skip / 13 deselected。
+
+该链路实际观察到两次 RED：旧总合同先以 42 failed / 9 passed 暴露旧 Preview Task、旧 ProductionSpec 等 R7 待迁移用例；新纵向合同首次运行又因 Fake Provider 返回旧 `total_tokens` 而使当前 Seedance 2.5 费用状态成为 `unavailable`。修正方式是让 Fake Provider 按当前官方合同返回 `completion_tokens`，没有放宽生产结算器。`scripts/run_mvp_contract.sh` 新增显式的定向运行参数，默认仍会运行旧完整合同，不会把已知失败隐藏为绿色；回环合同进程同时清空本机代理变量，避免测试误走 SOCKS。
+
+R6.1–R6.4 的自动纵向证据已经具备，但目标 ComfyUI 尚未重新安装、导入模板并实际 Queue Preview，因此 ROADMAP 的 R6.1–R6.4 暂不勾选，源合同仍保持 `implementation=incomplete`、`admission.enabled=false`、`validation=not_run`。测试 bootstrap 的 ready 覆盖不会进入生产运行时。
+
+此前盘点出的 Worker 固定 `.mp4` 缺口已由 R6.6 修复，并用 MOV 本地路径、对象键和 `video/quicktime` Asset 登记回归覆盖。R6.1–R6.4 的 MP4 路径保持不变；R6.5–R6.7 后续仍需在其合法 Production 纵向合同中再次验证实际 MOV 交付。本轮只有隔离数据库、Fake Provider、Fake OSS 产生测试数据，脚本结束后容器、网络和测试卷均已清理；未调用真实 Provider/OSS，未创建付费任务，未安装、部署、提交或推送。
+
+### 2026-09-15：R5 客户端统一入口已完成自动化验收（本地未提交）
+
+客户端已开始消费 R4 的正式合同。Production 会先调用 `GET /api/v1/tasks/slots/:slotId/current`：存在未完成本地交付的 Task 时直接恢复，不读取预检有效期，也不受新任务额度或暂停状态影响；槽为空后才检查新任务条件。正式创建请求已改为只发送 `mode + preflightId + executionSlotId + media[{slotId,assetId}]`，不再发送旧的 `confirmLiveSubmission`、Prompt、生成规格、价格或按顺序猜测的 role。源码：`packages/comfyui-video-flow-client/preflight_nodes.py`、`client.py`、`submission_state.py`。
+
+6 份当前 Preview/Production 模板均保存独立执行槽；前端扩展保证原节点继续使用已有槽，复制正式提交节点时生成新槽。Production 模式不再使用一次性确认布尔值；当前内容没有有效预检时，本次 Queue 自动执行无上传 Preview 并停止，提示用户检查后再次 Queue。源码：`execution_slot.py`、`web/execution_slot.js`、`web/execution_slot_identity.mjs`、`workflows/*-preflight-v1.comfy.json`。
+
+客户端下载成功后先把本地路径、大小和 SHA-256 写入按账号隔离的槽回执，再调用 client-delivery 确认；确认失败时下次 Queue 会重新校验本地文件并只重试原 Task 的确认，不重复下载或生成。槽回执同时保存当前轮次的原请求、精确 POST body、幂等键和 Task；未完成提交重试原 key，上一轮本地交付确认且服务端释放槽后生成新轮次 key，同一有效预检已验证可顺序创建 `task-1`、`task-2`。
+
+Preview 和 Production 首次自动 Preview 现在使用同一报告结构，只展示服务器权威 `effectiveRequest`、逐项 `requestCheck`、Preview 零上传状态、报价依据及当时的 `canSubmit/blockers`，不再并列展示客户端原始 request。新一轮执行开始会覆盖旧成功提示；执行错误会显示失败原因，避免旧绿色状态残留。源码：`preflight_nodes.py`、`web/preflight_report.js`、`web/preflight_report_state.mjs`。
+
+旧上传式 Preview、旧无预检 Production、固定 5 秒 OneClick 和旧文本 Preview 已从 ComfyUI 注册表移除，对应 3 份 workflow 和 1 份 production example 不再由安装器交付；`nodes.py` 只保留 Config 与凭已有 `taskId` 等待/下载的恢复能力，`examples/seedance-resume.json` 保留。加入 R6 模板检查后的当前客户端完整回归为 `107 passed`，R5 代码与自动化验收仍保持通过。尚未执行目标 ComfyUI 的重新安装、重启、模板导入、报告渲染和 Queue Prompt 操作验收，因此不能据此宣称实际客户端已交付或链路可用。
+
 ### 2026-09-15：R4 正式提交、执行槽与唯一 Worker 编译器已完成（仅本地分支）
 
 R4 已实现新的正式提交服务。`POST /api/v1/tasks` 的 Production 请求只接受 `preflightId`、稳定 `executionSlotId` 和 `media[{slotId,assetId}]`；不接受客户端重复提交 Prompt、生成规格、摘要、价格或 Provider 字段，也不再使用一次性 `confirmLiveSubmission`。服务端从有效 `PreflightRecord` 重建冻结 executionPlan，原样固化合同/意图/报价摘要、服务端模型、实际生成参数、`reserveCny` 和 `pricingSnapshot`。素材工作流按 `slotId` 精确绑定同账号 `verified` 输入 Asset，并在创建前流式复验对象实际 SHA-256/大小，事务内再次检查预检、报价、素材、Production 暂停、Actor 权限和额度。源码：`packages/backend/src/tasks/production-submission.service.ts`、`preflight.service.ts`、`task-budget.service.ts`。
@@ -16,7 +82,7 @@ Task 已增加 `executionSlotId`、`slotSequence`、`preflightId`、三个摘要
 
 Worker 新任务只经过 `providers/seedance_execution_policy.py::compile_seedance_payload`：它校验冻结执行规则摘要、服务端模型、workflow 官方能力、媒体角色/顺序、4/30 秒边界、编辑特殊 `-1`、比例、分辨率、输出格式和 Provider 特殊字段，再构造 Ark payload。完整目录使用独立 `catalogDigest`；Task/Preflight 的 `contractDigest` 只覆盖模型、官方能力、媒体角色、生成参数和 Provider 字段，不包含当前 `implementation`、`admission`、验收、展示或价格状态。Worker 要求冻结 `workflowVersion` 存在，但不再要求等于最新目录 revision，也不读取当前准入状态；工作流关闭只阻止 Backend 创建新 Task，不否定已创建 Task。重复的 `seedance_compiler.py` 已移除。编译发生在写入 Provider submitted 证据之前；编译失败时 Provider create 为 0，并释放确认未调用 Provider 的预算预占。已有 `providerTaskId`、提交结果不确定、归档恢复和 usage 证据边界保持不变。源码：`packages/backend/src/tasks/workflow-catalog.service.ts`、`packages/worker/providers/seedance_execution_policy.py`。
 
-R4 完成的是通用 Backend/Worker 正式执行层，不等于 8 类工作流已经对用户开放。按照 v2.1 规范，当前 8 类工作流仍保持 `capability=confirmed`、`implementation=incomplete`、`admission.enabled=false`、`validation=not_run`。生产源码没有打开工作流的测试环境变量；Backend 单元测试使用测试文件内的 Catalog fixture，真实 Nest 合同通过 `test/contract-backend.cjs` 在测试模块中替换依赖。客户端仍发送旧一次性确认字段，稳定槽、本地回执和交付确认尚待 R5；各工作流模板及完整纵向合同尚待 R6。含输入视频的最低 Token 规则仍未取得可执行值，因此相关报价继续 `unavailable`。当前本地代码不可直接作为已可用 Production 客户端发布。首次改变执行规则前仍须把旧摘要对应合同加入 Worker 版本注册并保留到旧 Task 排空；当前尚未上线，没有旧 v2 正式 Task 需要迁移。
+R4 完成的是通用 Backend/Worker 正式执行层，不等于 8 类工作流已经对用户开放。按照 v2.1 规范，当前 8 类工作流仍保持 `capability=confirmed`、`implementation=incomplete`、`admission.enabled=false`、`validation=not_run`。生产源码没有打开工作流的测试环境变量；Backend 单元测试使用测试文件内的 Catalog fixture，真实 Nest 合同通过 `test/contract-backend.cjs` 在测试模块中替换依赖。R5 已让客户端改用稳定槽、本地回执和交付确认；各工作流模板及完整纵向合同尚待 R6。含输入视频的最低 Token 规则仍未取得可执行值，因此相关报价继续 `unavailable`。当前本地代码不可直接作为已可用 Production 客户端发布。首次改变执行规则前仍须把旧摘要对应合同加入 Worker 版本注册并保留到旧 Task 排空；当前尚未上线，没有旧 v2 正式 Task 需要迁移。
 
 本次实际验证：
 
@@ -25,7 +91,7 @@ R4 完成的是通用 Backend/Worker 正式执行层，不等于 8 类工作流�
 - 客户端：`cd packages/comfyui-video-flow-client && .venv/bin/python -m pytest -q -rs`，98 passed；该结果只证明现有客户端回归，不能替代 R5 新协议实现；
 - 合同资源：revision `2026-09-15.3` 的三份 `seedance-workflows.v2.json` 字节一致；Node 合同/同步 6 passed；Backend 与 Worker 的执行规则摘要均为 `2e95034c85ad474935befa206d2b7721eb4c3748653a83c5f6a40fdf390e8ecc`；脚本回归 26 passed，其中 Fake Provider 7 passed，证明冻结 4 秒 payload 原样到达，31 秒在编译阶段拒绝且 create=0；
 - HTTP/数据库：隔离 PostgreSQL 的空库和模拟历史库均成功应用全部 13 个 migration；`20260915170000_decimal_execution_costs` 将 `Task.cost` 和 Attempt 的估算、usage 推算、账单金额统一为 `Decimal(18,6)`，历史有限浮点值保留为数据库实际值并规范到 6 位，`NaN/Infinity` 会使迁移明确失败；`test/preflight-v2.contract-spec.ts` 2 passed，真实 Nest/Guard/Prisma 下验证同槽并发只创建 1 个 Task/1 次预占、原 Task 恢复、客户端交付确认及下一序号创建，全程无 Attempt/Provider 调用；容器、网络和临时卷已清理；
-- 现有 CI 完整合同仍有 42/51 个旧用例失败：这些用例继续构造旧 Preview Task、`confirmLiveSubmission` 和固定 `test-resolution`。它们不是 R4 新合同失败，也没有为保绿恢复旧接口；按 ROADMAP R7 将改为新纵向合同或归档。在 R7 完成前不能宣称完整合同 CI 全绿。
+- R7 已将此前 42/51 个旧合同失败迁移到 v2 纵向合同；当前 Backend 合同为 51/51 通过。该结果仅证明隔离测试环境，不代表源合同已开放或真实 ComfyUI/Ark 已验收。
 
 未部署、未安装新客户端、未上传素材、未调用 Ark/真实 OSS、未创建真实 Provider Task 或付费任务。
 
@@ -78,7 +144,7 @@ R1 已将新版 Preview 从 Task 域中拆出：`POST /api/v1/tasks/preflight` �
 
 工作流目录已从同一 v2 合同返回 8 类工作流的角色、参数和 `capability / implementation / admission / validation` 四维状态；源合同通过 `scripts/sync_workflow_contracts.mjs` 同步到 Backend/Worker 构建资源。Prisma migration `20260915090000_add_preflight_records` 只新增 `preflight_records` 与索引，不改写 Task、Attempt、Asset 或预算数据。旧 `mode=preview` Task 创建已返回 `PREVIEW_TASK_CREATION_RETIRED`；已有 Task 的授权查询保持独立。
 
-R1 完成时尚未接入实际参数报价和正式快照消费，这两项缺口现已分别由顶部 R3/R4 结果取代。8 类工作流仍因 v2 全链未完成而保持 `incomplete / admission=false`。旧 `workflow-registry.ts`、`workflow-preflight.ts` 只剩历史兼容/旧测试引用，计划在 R7 移除，当前 v2 API 不调用它们。
+R1 完成时尚未接入实际参数报价和正式快照消费，这两项缺口现已分别由顶部 R3/R4 结果取代。8 类工作流仍因目标 ComfyUI 与外部验收未完成而保持 `incomplete / admission=false`。R7 已删除旧 `workflow-registry.ts`、`workflow-preflight.ts` 和固定 ProductionSpec 路径；当前 v2 API 只使用统一工作流合同、独立预检记录和冻结报价/执行快照。
 
 本次实际验证：
 

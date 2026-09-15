@@ -56,13 +56,58 @@ _preflight_receipts = {}
 _preflight_lock = threading.Lock()
 
 
+def _workflow_intent(payload):
+    generation = payload["generation"]
+    intent = {
+        "contractVersion": 2,
+        "workflowKey": payload["workflowKey"],
+        "prompt": payload["prompt"],
+        "generation": {
+            "duration": generation["duration"],
+            "ratio": generation["ratio"],
+            "resolution": generation["resolution"],
+            "generateAudio": generation.get("generateAudio", True),
+            "watermark": generation.get("watermark", False),
+            "outputFormat": generation.get("outputFormat", "mp4"),
+        },
+        "media": [],
+    }
+    image_roles = {"reference_image", "first_frame", "last_frame"}
+    for index, item in enumerate(payload.get("media", []), start=1):
+        role = item["role"]
+        if role in image_roles:
+            object_name = "last.png" if role == "last_frame" else "reference.png"
+            mime_type = "image/png"
+            metadata = {"kind": "image", "width": 1280, "height": 720}
+        elif role == "reference_audio":
+            object_name = "audio.wav"
+            mime_type = "audio/wav"
+            metadata = {"kind": "audio", "durationSeconds": 10, "audioCodec": "pcm_s16le"}
+        elif role == "reference_video":
+            object_name = "video.mp4"
+            mime_type = "video/mp4"
+            metadata = {
+                "kind": "video", "width": 1280, "height": 720,
+                "durationSeconds": 6, "frameRate": 24,
+                "videoCodec": "h264", "audioCodec": "aac",
+            }
+        else:
+            raise AssertionError(f"unsupported live-contract media role: {role}")
+        content = f"contract-object:live-contract/{object_name}".encode()
+        intent["media"].append({
+            "slotId": f"{role.replace('_', '-')}-{index}",
+            "role": role,
+            "sha256": hashlib.sha256(content).hexdigest(),
+            "sizeBytes": len(content),
+            "mimeType": mime_type,
+            "metadata": metadata,
+        })
+    return intent
+
+
 def preflight_production(client, payload, headers=None):
     """Exercise the authenticated preflight route; reuse one receipt per test intent."""
-    intent = {key: payload[key] for key in ("workflowKey", "prompt", "generation")}
-    content = b"contract-object:live-contract/reference.png"
-    intent["media"] = [{"role": "reference_image", "sha256": hashlib.sha256(content).hexdigest(),
-                        "sizeBytes": len(content), "mimeType": "image/png",
-                        "metadata": {"kind": "image", "width": 1280, "height": 720}}]
+    intent = _workflow_intent(payload)
     cache_key = (str(client.base_url), (headers or {}).get("Authorization", client.headers.get("Authorization")), json.dumps(intent, sort_keys=True))
     with _preflight_lock:
         if cache_key not in _preflight_receipts:
@@ -73,7 +118,19 @@ def preflight_production(client, payload, headers=None):
             assert report["willCallProvider"] is False
             assert report["willUploadMedia"] is False
             _preflight_receipts[cache_key] = report["preflightId"]
-        return None, {**payload, "preflightId": _preflight_receipts[cache_key], "confirmLiveSubmission": True}
+        idempotency_key = (headers or {}).get("Idempotency-Key", "contract-reference")
+        media = payload.get("media", [])
+        descriptors = intent["media"]
+        assert len(media) == len(descriptors)
+        return None, {
+            "mode": "production",
+            "preflightId": _preflight_receipts[cache_key],
+            "executionSlotId": payload.get("executionSlotId", f"slot-{idempotency_key}"),
+            "media": [
+                {"slotId": descriptor["slotId"], "assetId": item["assetId"]}
+                for descriptor, item in zip(descriptors, media)
+            ],
+        }
 
 
 def post_confirmed(client, payload, headers=None):
@@ -158,13 +215,554 @@ class LiveMVPContractTests(unittest.TestCase):
                 "media": [{"assetId": required_env("VIDEO_FLOW_LIVE_ASSET_ID"), "role": "reference_image"}],
             }, {"Authorization": f"Bearer {self.actor_token}"})
             self.assertIsNone(error)
-            response = client.get(f"/api/v1/tasks/{confirmed['preflightId']}",
+            response = client.get(f"/api/v1/tasks/preflight/{confirmed['preflightId']}/check",
                                   headers={"Authorization": f"Bearer {self.actor_token}"})
             response.raise_for_status()
-            self.assertEqual(response.json()["status"], "preview")
+            self.assertEqual(response.json()["requestCheck"]["status"], "passed")
+            self.assertFalse(response.json()["willCallProvider"])
 
         self._run_one_cycle()
 
+        self.assertEqual(provider_stats(self.provider_url)["createCount"], before)
+
+    def test_reference_image_four_and_thirty_seconds_reach_delivery_with_frozen_usage(self):
+        asset_id = required_env("VIDEO_FLOW_LIVE_ASSET_ID")
+        for duration in (4, 30):
+            prompt = f"live reference boundary {duration}s"
+            with self._api() as client:
+                response = post_confirmed(
+                    client,
+                    headers={
+                        "Authorization": f"Bearer {self.actor_token}",
+                        "Idempotency-Key": f"r6-reference-{duration}s",
+                    },
+                    payload={
+                        "mode": "production",
+                        "workflowKey": "seedance.reference-image-to-video.v1",
+                        "prompt": {"positive": prompt},
+                        "generation": {
+                            "duration": duration,
+                            "ratio": "16:9",
+                            "resolution": "720p",
+                            "generateAudio": True,
+                            "watermark": False,
+                            "outputFormat": "mp4",
+                        },
+                        "media": [{"assetId": asset_id, "role": "reference_image"}],
+                    },
+                )
+            response.raise_for_status()
+            task = response.json()
+            self.assertEqual(task["executionPlan"]["duration"], duration)
+
+            before = provider_stats(self.provider_url)["createCountsByKey"].get(prompt, 0)
+            self._run_one_cycle()
+            stats = provider_stats(self.provider_url)
+            self.assertEqual(stats["createCountsByKey"].get(prompt, 0), before + 1)
+            self.assertEqual(stats["lastCreatePayload"]["duration"], duration)
+            self.assertEqual(stats["lastCreatePayload"]["content"][1]["role"], "reference_image")
+
+            with self._api() as client:
+                summary = client.get(
+                    f"/api/v1/tasks/{task['id']}",
+                    headers={"Authorization": f"Bearer {self.actor_token}"},
+                )
+            summary.raise_for_status()
+            result = summary.json()
+            self.assertEqual(result["execution"]["status"], "completed")
+            self.assertEqual(result["delivery"]["status"], "ready")
+            self.assertIsNotNone(result["delivery"]["assetId"])
+            self.assertIn(result["costSummary"]["status"], {"usage_calculated", "billed"})
+            self.assertEqual(
+                result["costSummary"]["reservedCny"],
+                task["executionPlan"]["reserveCny"],
+            )
+            self.assertEqual(result["costSummary"]["reservationState"], "settled")
+            self.assertIsNotNone(result["costSummary"]["usageCalculatedCny"])
+
+    def test_text_to_video_four_and_thirty_seconds_never_bind_an_input_asset(self):
+        for duration in (4, 30):
+            prompt = f"live text boundary {duration}s"
+            with self._api() as client:
+                response = post_confirmed(
+                    client,
+                    headers={
+                        "Authorization": f"Bearer {self.actor_token}",
+                        "Idempotency-Key": f"r6-text-{duration}s",
+                    },
+                    payload={
+                        "mode": "production",
+                        "workflowKey": "seedance.text-to-video.v1",
+                        "prompt": {"positive": prompt},
+                        "generation": {
+                            "duration": duration,
+                            "ratio": "16:9",
+                            "resolution": "720p",
+                            "generateAudio": True,
+                            "watermark": False,
+                            "outputFormat": "mp4",
+                        },
+                        "media": [],
+                    },
+                )
+            response.raise_for_status()
+            task = response.json()
+            self.assertEqual(task["executionPlan"]["media"], [])
+            self.assertEqual(task["executionPlan"]["duration"], duration)
+
+            before = provider_stats(self.provider_url)["createCountsByKey"].get(prompt, 0)
+            self._run_one_cycle()
+            stats = provider_stats(self.provider_url)
+            self.assertEqual(stats["createCountsByKey"].get(prompt, 0), before + 1)
+            self.assertEqual(stats["lastCreatePayload"]["content"], [
+                {"type": "text", "text": prompt},
+            ])
+            self.assertEqual(stats["lastCreatePayload"]["duration"], duration)
+
+            with self._api() as client:
+                summary = client.get(
+                    f"/api/v1/tasks/{task['id']}",
+                    headers={"Authorization": f"Bearer {self.actor_token}"},
+                )
+                report = client.get(
+                    f"/api/v1/admin/tasks/{task['id']}/report",
+                    headers={"X-Admin-Token": self.admin_token},
+                )
+            summary.raise_for_status()
+            report.raise_for_status()
+            result = summary.json()
+            self.assertEqual(result["execution"]["status"], "completed")
+            self.assertEqual(result["delivery"]["status"], "ready")
+            self.assertEqual(result["costSummary"]["reservationState"], "settled")
+            self.assertIsNotNone(result["costSummary"]["usageCalculatedCny"])
+            self.assertEqual([asset["role"] for asset in report.json()["assets"]], ["output"])
+
+    def test_first_frame_adaptive_four_and_thirty_seconds_reach_delivery(self):
+        asset_id = required_env("VIDEO_FLOW_LIVE_ASSET_ID")
+        for duration in (4, 30):
+            prompt = f"live first frame adaptive {duration}s"
+            with self._api() as client:
+                response = post_confirmed(
+                    client,
+                    headers={
+                        "Authorization": f"Bearer {self.actor_token}",
+                        "Idempotency-Key": f"r6-first-frame-{duration}s",
+                    },
+                    payload={
+                        "mode": "production",
+                        "workflowKey": "seedance.first-frame-to-video.v1",
+                        "prompt": {"positive": prompt},
+                        "generation": {
+                            "duration": duration,
+                            "ratio": "adaptive",
+                            "resolution": "720p",
+                            "generateAudio": True,
+                            "watermark": False,
+                            "outputFormat": "mp4",
+                        },
+                        "media": [{"assetId": asset_id, "role": "first_frame"}],
+                    },
+                )
+            response.raise_for_status()
+            task = response.json()
+            self.assertEqual(task["executionPlan"]["duration"], duration)
+            self.assertEqual(task["executionPlan"]["ratio"], "adaptive")
+            self.assertEqual(
+                [item["role"] for item in task["executionPlan"]["media"]],
+                ["first_frame"],
+            )
+
+            before = provider_stats(self.provider_url)["createCountsByKey"].get(prompt, 0)
+            self._run_one_cycle()
+            stats = provider_stats(self.provider_url)
+            self.assertEqual(stats["createCountsByKey"].get(prompt, 0), before + 1)
+            self.assertEqual(stats["lastCreatePayload"]["ratio"], "adaptive")
+            self.assertEqual(stats["lastCreatePayload"]["duration"], duration)
+            self.assertEqual(stats["lastCreatePayload"]["content"][1]["role"], "first_frame")
+
+            with self._api() as client:
+                summary = client.get(
+                    f"/api/v1/tasks/{task['id']}",
+                    headers={"Authorization": f"Bearer {self.actor_token}"},
+                )
+            summary.raise_for_status()
+            result = summary.json()
+            self.assertEqual(result["execution"]["status"], "completed")
+            self.assertEqual(result["delivery"]["status"], "ready")
+            self.assertEqual(result["costSummary"]["reservationState"], "settled")
+            self.assertIsNotNone(result["costSummary"]["usageCalculatedCny"])
+
+    def test_first_last_frames_keep_distinct_slot_bindings_and_provider_order(self):
+        first_asset_id = required_env("VIDEO_FLOW_LIVE_ASSET_ID")
+        last_asset_id = required_env("VIDEO_FLOW_LIVE_LAST_ASSET_ID")
+        for duration in (4, 30):
+            prompt = f"live first last adaptive {duration}s"
+            with self._api() as client:
+                response = post_confirmed(
+                    client,
+                    headers={
+                        "Authorization": f"Bearer {self.actor_token}",
+                        "Idempotency-Key": f"r6-first-last-{duration}s",
+                    },
+                    payload={
+                        "mode": "production",
+                        "workflowKey": "seedance.first-last-frame-to-video.v1",
+                        "prompt": {"positive": prompt},
+                        "generation": {
+                            "duration": duration,
+                            "ratio": "adaptive",
+                            "resolution": "720p",
+                            "generateAudio": True,
+                            "watermark": False,
+                            "outputFormat": "mp4",
+                        },
+                        "media": [
+                            {"assetId": first_asset_id, "role": "first_frame"},
+                            {"assetId": last_asset_id, "role": "last_frame"},
+                        ],
+                    },
+                )
+            response.raise_for_status()
+            task = response.json()
+            self.assertEqual(
+                [(item["role"], item["assetId"]) for item in task["executionPlan"]["media"]],
+                [("first_frame", first_asset_id), ("last_frame", last_asset_id)],
+            )
+            self.assertEqual(task["executionPlan"]["ratio"], "adaptive")
+
+            before = provider_stats(self.provider_url)["createCountsByKey"].get(prompt, 0)
+            self._run_one_cycle()
+            stats = provider_stats(self.provider_url)
+            self.assertEqual(stats["createCountsByKey"].get(prompt, 0), before + 1)
+            provider_media = stats["lastCreatePayload"]["content"][1:]
+            self.assertEqual([item["role"] for item in provider_media], ["first_frame", "last_frame"])
+            self.assertNotEqual(
+                provider_media[0]["image_url"]["url"],
+                provider_media[1]["image_url"]["url"],
+            )
+
+            with self._api() as client:
+                summary = client.get(
+                    f"/api/v1/tasks/{task['id']}",
+                    headers={"Authorization": f"Bearer {self.actor_token}"},
+                )
+            summary.raise_for_status()
+            result = summary.json()
+            self.assertEqual(result["execution"]["status"], "completed")
+            self.assertEqual(result["delivery"]["status"], "ready")
+            self.assertEqual(result["costSummary"]["reservationState"], "settled")
+            self.assertIsNotNone(result["costSummary"]["usageCalculatedCny"])
+
+    def test_omni_image_audio_four_and_thirty_seconds_reach_delivery(self):
+        image_asset_id = required_env("VIDEO_FLOW_LIVE_ASSET_ID")
+        audio_asset_id = required_env("VIDEO_FLOW_LIVE_AUDIO_ASSET_ID")
+        for duration in (4, 30):
+            prompt = f"live omni image audio {duration}s"
+            with self._api() as client:
+                response = post_confirmed(
+                    client,
+                    headers={
+                        "Authorization": f"Bearer {self.actor_token}",
+                        "Idempotency-Key": f"r6-omni-image-audio-{duration}s",
+                    },
+                    payload={
+                        "mode": "production",
+                        "workflowKey": "seedance.omni-reference.v1",
+                        "prompt": {"positive": prompt},
+                        "generation": {
+                            "duration": duration,
+                            "ratio": "16:9",
+                            "resolution": "720p",
+                            "generateAudio": True,
+                            "watermark": False,
+                            "outputFormat": "mp4",
+                        },
+                        "media": [
+                            {"assetId": image_asset_id, "role": "reference_image"},
+                            {"assetId": audio_asset_id, "role": "reference_audio"},
+                        ],
+                    },
+                )
+            response.raise_for_status()
+            task = response.json()
+            self.assertEqual(
+                [item["role"] for item in task["executionPlan"]["media"]],
+                ["reference_image", "reference_audio"],
+            )
+            self.assertEqual(task["executionPlan"]["omni_reference_task_type"], "reference")
+
+            before = provider_stats(self.provider_url)["createCountsByKey"].get(prompt, 0)
+            self._run_one_cycle()
+            stats = provider_stats(self.provider_url)
+            self.assertEqual(stats["createCountsByKey"].get(prompt, 0), before + 1)
+            self.assertEqual(
+                [(item["type"], item.get("role")) for item in stats["lastCreatePayload"]["content"][1:]],
+                [("image_url", "reference_image"), ("audio_url", "reference_audio")],
+            )
+            self.assertEqual(stats["lastCreatePayload"]["duration"], duration)
+
+            with self._api() as client:
+                summary = client.get(
+                    f"/api/v1/tasks/{task['id']}",
+                    headers={"Authorization": f"Bearer {self.actor_token}"},
+                )
+            summary.raise_for_status()
+            result = summary.json()
+            self.assertEqual(result["execution"]["status"], "completed")
+            self.assertEqual(result["delivery"]["status"], "ready")
+            self.assertEqual(result["costSummary"]["reservationState"], "settled")
+            self.assertIsNotNone(result["costSummary"]["usageCalculatedCny"])
+
+    def test_audio_reference_four_and_thirty_seconds_reach_delivery_without_video_minimum(self):
+        audio_asset_id = required_env("VIDEO_FLOW_LIVE_AUDIO_ASSET_ID")
+        for duration in (4, 30):
+            prompt = f"live audio reference {duration}s"
+            with self._api() as client:
+                response = post_confirmed(
+                    client,
+                    headers={
+                        "Authorization": f"Bearer {self.actor_token}",
+                        "Idempotency-Key": f"r6-audio-reference-{duration}s",
+                    },
+                    payload={
+                        "mode": "production",
+                        "workflowKey": "seedance.audio-reference-to-video.v1",
+                        "prompt": {"positive": prompt},
+                        "generation": {
+                            "duration": duration,
+                            "ratio": "16:9",
+                            "resolution": "720p",
+                            "generateAudio": True,
+                            "watermark": False,
+                            "outputFormat": "mp4",
+                        },
+                        "media": [{"assetId": audio_asset_id, "role": "reference_audio"}],
+                    },
+                )
+            response.raise_for_status()
+            task = response.json()
+            self.assertEqual([item["role"] for item in task["executionPlan"]["media"]], ["reference_audio"])
+            self.assertEqual(task["executionPlan"]["omni_reference_task_type"], "reference")
+            self.assertGreater(float(task["executionPlan"]["reserveCny"]), 0)
+
+            before = provider_stats(self.provider_url)["createCountsByKey"].get(prompt, 0)
+            self._run_one_cycle()
+            stats = provider_stats(self.provider_url)
+            self.assertEqual(stats["createCountsByKey"].get(prompt, 0), before + 1)
+            self.assertEqual(
+                [(item["type"], item.get("role")) for item in stats["lastCreatePayload"]["content"][1:]],
+                [("audio_url", "reference_audio")],
+            )
+            self.assertEqual(stats["lastCreatePayload"]["duration"], duration)
+            self.assertEqual(stats["lastCreatePayload"]["omni_reference_task_type"], "reference")
+
+            with self._api() as client:
+                summary = client.get(
+                    f"/api/v1/tasks/{task['id']}",
+                    headers={"Authorization": f"Bearer {self.actor_token}"},
+                )
+            summary.raise_for_status()
+            result = summary.json()
+            self.assertEqual(result["execution"]["status"], "completed")
+            self.assertEqual(result["delivery"]["status"], "ready")
+            self.assertEqual(result["costSummary"]["reservationState"], "settled")
+            self.assertIsNotNone(result["costSummary"]["usageCalculatedCny"])
+
+    def test_omni_input_video_stays_preview_only_until_minimum_tokens_are_known(self):
+        slot_id = "slot-r6-omni-video-unresolved-minimum"
+        payload = {
+            "mode": "production",
+            "workflowKey": "seedance.omni-reference.v1",
+            "prompt": {"positive": "live omni unresolved video minimum"},
+            "generation": {
+                "duration": 15,
+                "ratio": "16:9",
+                "resolution": "720p",
+                "generateAudio": True,
+                "watermark": False,
+                "outputFormat": "mp4",
+            },
+            "media": [
+                {"assetId": required_env("VIDEO_FLOW_LIVE_ASSET_ID"), "role": "reference_image"},
+                {"assetId": required_env("VIDEO_FLOW_LIVE_VIDEO_ASSET_ID"), "role": "reference_video"},
+                {"assetId": required_env("VIDEO_FLOW_LIVE_AUDIO_ASSET_ID"), "role": "reference_audio"},
+            ],
+        }
+        before = provider_stats(self.provider_url)["createCount"]
+        with self._api() as client:
+            intent = _workflow_intent(payload)
+            preview = client.post(
+                "/api/v1/tasks/preflight",
+                headers={"Authorization": f"Bearer {self.actor_token}"},
+                json=intent,
+            )
+            preview.raise_for_status()
+            report = preview.json()
+            self.assertEqual(report["requestCheck"]["status"], "passed")
+            self.assertEqual(report["quote"]["status"], "unavailable")
+            self.assertIn("INPUT_VIDEO_MINIMUM_TOKENS_UNRESOLVED", report["quote"]["missing"])
+            self.assertIn("QUOTE_UNAVAILABLE", [item["code"] for item in report["productionAdmission"]["blockers"]])
+
+            rejected = client.post(
+                "/api/v1/tasks",
+                headers={
+                    "Authorization": f"Bearer {self.actor_token}",
+                    "Idempotency-Key": "r6-omni-video-unresolved-minimum",
+                },
+                json={
+                    "mode": "production",
+                    "preflightId": report["preflightId"],
+                    "executionSlotId": slot_id,
+                    "media": [
+                        {"slotId": descriptor["slotId"], "assetId": item["assetId"]}
+                        for descriptor, item in zip(intent["media"], payload["media"])
+                    ],
+                },
+            )
+            self.assertEqual(rejected.status_code, 400)
+            self.assertIn("QUOTE_UNAVAILABLE", rejected.text)
+            current = client.get(
+                f"/api/v1/tasks/slots/{slot_id}/current",
+                headers={"Authorization": f"Bearer {self.actor_token}"},
+            )
+            current.raise_for_status()
+            self.assertIsNone(current.json()["currentTask"])
+
+        self._run_one_cycle()
+        self.assertEqual(provider_stats(self.provider_url)["createCount"], before)
+
+    def test_video_edit_preview_freezes_special_fields_but_production_stays_closed(self):
+        slot_id = "slot-r6-video-edit-unresolved-minimum"
+        payload = {
+            "mode": "production",
+            "workflowKey": "seedance.video-edit.v1",
+            "prompt": {"positive": "remove the background from @video1"},
+            "generation": {
+                "duration": -1,
+                "ratio": "adaptive",
+                "resolution": "720p",
+                "generateAudio": True,
+                "watermark": False,
+                "outputFormat": "mov",
+            },
+            "media": [{
+                "assetId": required_env("VIDEO_FLOW_LIVE_VIDEO_ASSET_ID"),
+                "role": "reference_video",
+            }],
+        }
+        before = provider_stats(self.provider_url)["createCount"]
+
+        with self._api() as client:
+            intent = _workflow_intent(payload)
+            preview = client.post(
+                "/api/v1/tasks/preflight",
+                headers={"Authorization": f"Bearer {self.actor_token}"},
+                json=intent,
+            )
+            preview.raise_for_status()
+            report = preview.json()
+
+            self.assertEqual(report["requestCheck"]["status"], "passed")
+            self.assertEqual(report["effectiveRequest"]["generation"], payload["generation"])
+            self.assertEqual(report["quote"]["status"], "unavailable")
+            self.assertIn("INPUT_VIDEO_MINIMUM_TOKENS_UNRESOLVED", report["quote"]["missing"])
+            self.assertIn("QUOTE_UNAVAILABLE", [
+                item["code"] for item in report["productionAdmission"]["blockers"]
+            ])
+
+            rejected = client.post(
+                "/api/v1/tasks",
+                headers={
+                    "Authorization": f"Bearer {self.actor_token}",
+                    "Idempotency-Key": "r6-video-edit-unresolved-minimum",
+                },
+                json={
+                    "mode": "production",
+                    "preflightId": report["preflightId"],
+                    "executionSlotId": slot_id,
+                    "media": [{
+                        "slotId": intent["media"][0]["slotId"],
+                        "assetId": payload["media"][0]["assetId"],
+                    }],
+                },
+            )
+            self.assertEqual(rejected.status_code, 400)
+            self.assertIn("QUOTE_UNAVAILABLE", rejected.text)
+            current = client.get(
+                f"/api/v1/tasks/slots/{slot_id}/current",
+                headers={"Authorization": f"Bearer {self.actor_token}"},
+            )
+            current.raise_for_status()
+            self.assertIsNone(current.json()["currentTask"])
+
+        self._run_one_cycle()
+        self.assertEqual(provider_stats(self.provider_url)["createCount"], before)
+
+    def test_video_extend_preview_freezes_special_fields_but_production_stays_closed(self):
+        slot_id = "slot-r6-video-extend-unresolved-minimum"
+        payload = {
+            "mode": "production",
+            "workflowKey": "seedance.video-extend.v1",
+            "prompt": {"positive": "extend @video1 backward by 11 seconds"},
+            "generation": {
+                "duration": 11,
+                "ratio": "adaptive",
+                "resolution": "720p",
+                "generateAudio": True,
+                "watermark": False,
+                "outputFormat": "mov",
+            },
+            "media": [{
+                "assetId": required_env("VIDEO_FLOW_LIVE_VIDEO_ASSET_ID"),
+                "role": "reference_video",
+            }],
+        }
+        before = provider_stats(self.provider_url)["createCount"]
+
+        with self._api() as client:
+            intent = _workflow_intent(payload)
+            preview = client.post(
+                "/api/v1/tasks/preflight",
+                headers={"Authorization": f"Bearer {self.actor_token}"},
+                json=intent,
+            )
+            preview.raise_for_status()
+            report = preview.json()
+
+            self.assertEqual(report["requestCheck"]["status"], "passed")
+            self.assertEqual(report["effectiveRequest"]["generation"], payload["generation"])
+            self.assertEqual(report["quote"]["status"], "unavailable")
+            self.assertIn("INPUT_VIDEO_MINIMUM_TOKENS_UNRESOLVED", report["quote"]["missing"])
+            self.assertIn("QUOTE_UNAVAILABLE", [
+                item["code"] for item in report["productionAdmission"]["blockers"]
+            ])
+
+            rejected = client.post(
+                "/api/v1/tasks",
+                headers={
+                    "Authorization": f"Bearer {self.actor_token}",
+                    "Idempotency-Key": "r6-video-extend-unresolved-minimum",
+                },
+                json={
+                    "mode": "production",
+                    "preflightId": report["preflightId"],
+                    "executionSlotId": slot_id,
+                    "media": [{
+                        "slotId": intent["media"][0]["slotId"],
+                        "assetId": payload["media"][0]["assetId"],
+                    }],
+                },
+            )
+            self.assertEqual(rejected.status_code, 400)
+            self.assertIn("QUOTE_UNAVAILABLE", rejected.text)
+            current = client.get(
+                f"/api/v1/tasks/slots/{slot_id}/current",
+                headers={"Authorization": f"Bearer {self.actor_token}"},
+            )
+            current.raise_for_status()
+            self.assertIsNone(current.json()["currentTask"])
+
+        self._run_one_cycle()
         self.assertEqual(provider_stats(self.provider_url)["createCount"], before)
 
     def test_single_intent_creates_the_provider_task_exactly_once(self):
@@ -490,23 +1088,23 @@ class AdmissionBoundaryTests(unittest.TestCase):
             self.assertEqual(blocked.status_code, 503)
             self.assertEqual(provider_stats(self.provider_url)["createCount"], before)
 
-            # 暂停只拦新准入：已有任务的查询不受影响（预览仍可创建）。
+            # 暂停只拦正式准入；Preview 仍通过独立 preflight 入口创建记录。
             with self._api() as client:
-                task = client.post(
-                    "/api/v1/tasks",
+                preview = client.post(
+                    "/api/v1/tasks/preflight",
                     headers={
                         "Authorization": f"Bearer {self.actor_token}",
-                        "Idempotency-Key": "e13-existing",
                     },
-                    json={
-                        "mode": "preview",
+                    json=_workflow_intent({
                         "workflowKey": "seedance.text-to-video.v1",
                         "prompt": {"positive": "e13 preview under pause"},
                         "generation": {"duration": 5, "ratio": "16:9", "resolution": "720p"},
                         "media": [],
-                    },
+                    }),
                 )
-            self.assertEqual(task.status_code, 201)
+            self.assertEqual(preview.status_code, 201)
+            self.assertFalse(preview.json()["willCallProvider"])
+            self.assertEqual(provider_stats(self.provider_url)["createCount"], before)
         finally:
             resumed = self._set_gate(False, "contract: restore after boundary check")
             self.assertEqual(resumed.status_code, 200)

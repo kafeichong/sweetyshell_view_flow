@@ -2,25 +2,13 @@ import { createContractHarness } from './contract-harness';
 import { Prisma } from '@prisma/client';
 import { inspectedImageFixture, referenceImageWorkflowRequest } from './workflow-fixtures';
 
-const testSpec = {
-  version: 'test-v1',
-  model: 'test-model',
-  duration: 5,
-  ratio: '16:9',
-  resolution: 'test-resolution',
-  generateAudio: false,
-  watermark: true,
-  pricingVersion: 'test-price-v1',
-  reserveCny: '2.000000',
-};
-
 describe('T02: Budget reservation and admission', () => {
   let harness: Awaited<ReturnType<typeof createContractHarness>>;
   let actorToken: string;
   let actorId: string;
 
   beforeAll(async () => {
-    harness = await createContractHarness({ productionSpec: testSpec });
+    harness = await createContractHarness({ allowProduction: true });
     actorToken = harness.actorToken;
     actorId = harness.actorId;
 
@@ -91,7 +79,7 @@ describe('T02: Budget reservation and admission', () => {
         'Authorization': `Bearer ${actorToken}`,
         'Idempotency-Key': 'test-reserve-1',
       },
-      body: JSON.stringify(await referenceImageWorkflowRequest(harness, 'test reservation', assetIds[0], 'test-resolution')),
+      body: JSON.stringify(await referenceImageWorkflowRequest(harness, 'test reservation', assetIds[0], '720p')),
     });
 
     expect(response.status).toBe(201);
@@ -108,13 +96,13 @@ describe('T02: Budget reservation and admission', () => {
 
   it('rejects when daily budget exceeded', async () => {
     const assetIds = (global as any).testAssetIds || [];
-    // testSpec.reserveCny is 2.000000; set a limit that allows exactly one task
+    // test quote reserve is 7.560000; set a limit that allows exactly one task
     await harness.prisma.actorCredential.update({
       where: { actorId },
-      data: { dailyLimitCny: new Prisma.Decimal('2.000000') },
+      data: { dailyLimitCny: new Prisma.Decimal('7.560000') },
     });
 
-    // First task should succeed (2 CNY estimate)
+    // First task should succeed (7.56 CNY estimate)
     const response1 = await fetch(`${harness.appUrl}/api/v1/tasks`, {
       method: 'POST',
       headers: {
@@ -122,12 +110,12 @@ describe('T02: Budget reservation and admission', () => {
         'Authorization': `Bearer ${actorToken}`,
         'Idempotency-Key': 'test-daily-limit-1',
       },
-      body: JSON.stringify(await referenceImageWorkflowRequest(harness, 'first task', assetIds[0], 'test-resolution')),
+      body: JSON.stringify(await referenceImageWorkflowRequest(harness, 'first task', assetIds[0], '720p')),
     });
 
     expect(response1.status).toBe(201);
 
-    // Second task should fail: another 2 CNY reservation would exceed the 2 CNY limit
+    // Second task should fail: another 7.56 CNY reservation would exceed the 7.56 CNY limit
     const response2 = await fetch(`${harness.appUrl}/api/v1/tasks`, {
       method: 'POST',
       headers: {
@@ -135,12 +123,12 @@ describe('T02: Budget reservation and admission', () => {
         'Authorization': `Bearer ${actorToken}`,
         'Idempotency-Key': 'test-daily-limit-2',
       },
-      body: JSON.stringify(await referenceImageWorkflowRequest(harness, 'second task', assetIds[1], 'test-resolution')),
+      body: JSON.stringify(await referenceImageWorkflowRequest(harness, 'second task', assetIds[1], '720p')),
     });
 
     expect(response2.status).toBe(429);
     const error = await response2.json();
-    expect(error.message).toContain('Daily budget limit exceeded');
+    expect(error.message).toBe('DAILY_LIMIT_EXCEEDED');
 
     // Restore limit for other tests
     await harness.prisma.actorCredential.update({
@@ -151,7 +139,7 @@ describe('T02: Budget reservation and admission', () => {
 
   it('allows same idempotency key without double reservation', async () => {
     const assetIds = (global as any).testAssetIds || [];
-    const body = await referenceImageWorkflowRequest(harness, 'idempotent task', assetIds[0], 'test-resolution');
+    const body = await referenceImageWorkflowRequest(harness, 'idempotent task', assetIds[0], '720p');
 
     // First request
     const response1 = await fetch(`${harness.appUrl}/api/v1/tasks`, {
@@ -193,7 +181,7 @@ describe('T02: Budget reservation and admission', () => {
 
   it('handles concurrent requests with same key correctly', async () => {
     const assetIds = (global as any).testAssetIds || [];
-    const body = await referenceImageWorkflowRequest(harness, 'concurrent task', assetIds[0], 'test-resolution');
+    const body = await referenceImageWorkflowRequest(harness, 'concurrent task', assetIds[0], '720p');
 
     // Send two concurrent requests
     const [response1, response2] = await Promise.all([
@@ -249,12 +237,12 @@ describe('T02: Budget reservation and admission', () => {
         'Authorization': `Bearer ${actorToken}`,
         'Idempotency-Key': 'test-paused-1',
       },
-      body: JSON.stringify(await referenceImageWorkflowRequest(harness, 'test pause', assetIds[0], 'test-resolution')),
+      body: JSON.stringify(await referenceImageWorkflowRequest(harness, 'test pause', assetIds[0], '720p')),
     });
 
     expect(response.status).toBe(503);
     const error = await response.json();
-    expect(error.message).toContain('Production is paused');
+    expect(error.message).toBe('PRODUCTION_PAUSED');
 
     // Re-enable for other tests
     await harness.prisma.productionGate.update({
@@ -280,12 +268,12 @@ describe('T02: Budget reservation and admission', () => {
         'Authorization': `Bearer ${actorToken}`,
         'Idempotency-Key': 'test-no-limits-1',
       },
-      body: JSON.stringify(await referenceImageWorkflowRequest(harness, 'test no limits', assetIds[0], 'test-resolution')),
+      body: JSON.stringify(await referenceImageWorkflowRequest(harness, 'test no limits', assetIds[0], '720p')),
     });
 
     expect(response.status).toBe(429);
     const error = await response.json();
-    expect(error.message).toContain('Budget limits not configured');
+    expect(error.message).toBe('NO_LIMITS_CONFIGURED');
 
     // Restore limits for other tests
     await harness.prisma.actorCredential.update({
@@ -299,10 +287,10 @@ describe('T02: Budget reservation and admission', () => {
 
   it('admits only one of two different idempotency keys racing for the last budget slot', async () => {
     const assetIds = (global as any).testAssetIds || [];
-    // testSpec.reserveCny is 2.000000; a 2.000000 daily limit allows exactly one task.
+    // test quote reserve is 7.560000; a 7.560000 daily limit allows exactly one task.
     await harness.prisma.actorCredential.update({
       where: { actorId },
-      data: { dailyLimitCny: new Prisma.Decimal('2.000000') },
+      data: { dailyLimitCny: new Prisma.Decimal('7.560000') },
     });
 
     const makeRequest = async (key: string, assetId: string) =>
@@ -313,7 +301,7 @@ describe('T02: Budget reservation and admission', () => {
           'Authorization': `Bearer ${actorToken}`,
           'Idempotency-Key': key,
         },
-        body: JSON.stringify(await referenceImageWorkflowRequest(harness, 'race for budget', assetId, 'test-resolution')),
+        body: JSON.stringify(await referenceImageWorkflowRequest(harness, 'race for budget', assetId, '720p')),
       });
 
     const [response1, response2] = await Promise.all([
@@ -357,7 +345,7 @@ describe('T02: Budget reservation and admission', () => {
         'Authorization': `Bearer ${actorToken}`,
         'Idempotency-Key': 'test-period-keys-1',
       },
-      body: JSON.stringify(await referenceImageWorkflowRequest(harness, 'period keys', assetIds[0], 'test-resolution')),
+      body: JSON.stringify(await referenceImageWorkflowRequest(harness, 'period keys', assetIds[0], '720p')),
     });
 
     expect(response.status).toBe(201);
@@ -377,7 +365,7 @@ describe('T02: Budget reservation and admission', () => {
     // The backend process reads VIDEO_FLOW_DAILY_TASK_LIMIT at startup, so this
     // needs a dedicated harness spawned with the override, not the shared one.
     const limitedHarness = await createContractHarness({
-      productionSpec: testSpec,
+      allowProduction: true,
       env: { VIDEO_FLOW_DAILY_TASK_LIMIT: '1' },
     });
     try {
@@ -421,7 +409,7 @@ describe('T02: Budget reservation and admission', () => {
           'Authorization': `Bearer ${limitedHarness.actorToken}`,
           'Idempotency-Key': 'test-daily-count-1',
         },
-        body: JSON.stringify(await referenceImageWorkflowRequest(limitedHarness, 'first of the day', asset.id, 'test-resolution')),
+        body: JSON.stringify(await referenceImageWorkflowRequest(limitedHarness, 'first of the day', asset.id, '720p')),
       });
       expect(first.status).toBe(201);
 
@@ -432,11 +420,11 @@ describe('T02: Budget reservation and admission', () => {
           'Authorization': `Bearer ${limitedHarness.actorToken}`,
           'Idempotency-Key': 'test-daily-count-2',
         },
-        body: JSON.stringify(await referenceImageWorkflowRequest(limitedHarness, 'second of the day', asset2.id, 'test-resolution')),
+        body: JSON.stringify(await referenceImageWorkflowRequest(limitedHarness, 'second of the day', asset2.id, '720p')),
       });
       expect(second.status).toBe(429);
       const error = await second.json();
-      expect(error.message).toMatch(/task count/i);
+      expect(error.message).toBe('DAILY_TASK_COUNT_EXCEEDED');
     } finally {
       await limitedHarness.close();
     }

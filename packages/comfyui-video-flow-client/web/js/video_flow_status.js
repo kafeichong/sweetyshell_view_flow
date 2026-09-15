@@ -7,7 +7,9 @@ import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
 
 const WATCHED_NODES = new Set([
-  "VideoFlowSeedanceProduction",
+  "VideoFlowConfirmedCreate",
+  "VideoFlowPolicyWait",
+  "VideoFlowPolicyDownload",
   "VideoFlowWaitTask",
   "VideoFlowLoadResult",
 ]);

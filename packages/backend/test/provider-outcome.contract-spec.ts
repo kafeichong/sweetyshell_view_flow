@@ -4,21 +4,9 @@ import { inspectedImageFixture, referenceImageWorkflowRequest } from './workflow
 
 // 计费规则与 task-cost.ts 登记的一致：价格版本 + 模型都要匹配，
 // 否则终态只会进人工核查，不会套一个错公式结算。
-const PRICING_VERSION = 'seedance-token-v1';
+const PRICING_VERSION = 'seedance-2.5-public-catalog-2026-09-15';
 const VERIFIED_MODEL = 'doubao-seedance-2-5-260628';
 const RATE_PER_MILLION = 70;
-
-const testSpec = {
-  version: 'test-v1',
-  model: VERIFIED_MODEL,
-  duration: 5,
-  ratio: '16:9',
-  resolution: 'test-resolution',
-  generateAudio: false,
-  watermark: true,
-  pricingVersion: PRICING_VERSION,
-  reserveCny: '2.000000',
-};
 
 function expectedCost(tokens: number): string {
   // 与 Backend 的 tokenCostCny 同构（Decimal 向上取整到 6 位）：
@@ -44,7 +32,7 @@ async function createProductionTask(
       'Authorization': `Bearer ${harness.actorToken}`,
       'Idempotency-Key': key,
     },
-    body: JSON.stringify(await referenceImageWorkflowRequest(harness, 'provider outcome contract', assetId, 'test-resolution')),
+    body: JSON.stringify(await referenceImageWorkflowRequest(harness, 'provider outcome contract', assetId, '720p')),
   });
   expect(response.status).toBe(201);
   return response.json();
@@ -100,7 +88,7 @@ describe('T05: Provider outcome settlement contract', () => {
   let assetIds: string[];
 
   beforeAll(async () => {
-    harness = await createContractHarness({ productionSpec: testSpec });
+    harness = await createContractHarness({ allowProduction: true });
 
     await harness.prisma.productionGate.upsert({
       where: { id: 'production' },
@@ -177,7 +165,7 @@ describe('T05: Provider outcome settlement contract', () => {
     const response = await reportOutcome(harness, claimed.attemptId, {
       providerTaskId: 'provider-outcome-1',
       status: 'succeeded',
-      usage: { total_tokens: 10000 },
+      usage: { completion_tokens: 10000 },
     });
 
     expect(response.status).toBe(200);
@@ -193,7 +181,7 @@ describe('T05: Provider outcome settlement contract', () => {
       where: { id: claimed.attemptId },
     });
     expect(attempt!.status).toBe('completed');
-    expect(attempt!.providerUsage).toEqual({ total_tokens: 10000 });
+    expect(attempt!.providerUsage).toEqual({ completion_tokens: 10000 });
     expect(attempt!.pricingVersion).toBe(PRICING_VERSION);
 
     const reservation = await harness.prisma.taskBudgetReservation.findUnique({
@@ -214,7 +202,7 @@ describe('T05: Provider outcome settlement contract', () => {
     const body = {
       providerTaskId: 'provider-outcome-repeat',
       status: 'succeeded',
-      usage: { total_tokens: 10000 },
+      usage: { completion_tokens: 10000 },
     };
 
     const first = await reportOutcome(harness, claimed.attemptId, body);
@@ -238,13 +226,13 @@ describe('T05: Provider outcome settlement contract', () => {
     await reportOutcome(harness, claimed.attemptId, {
       providerTaskId: 'provider-outcome-conflict',
       status: 'succeeded',
-      usage: { total_tokens: 10000 },
+      usage: { completion_tokens: 10000 },
     });
 
     const conflict = await reportOutcome(harness, claimed.attemptId, {
       providerTaskId: 'provider-outcome-conflict',
       status: 'succeeded',
-      usage: { total_tokens: 20000 },
+      usage: { completion_tokens: 20000 },
     });
     expect(conflict.status).toBe(200);
     expect((await conflict.json()).outcome).toBe('review');
@@ -253,7 +241,7 @@ describe('T05: Provider outcome settlement contract', () => {
     const attempt = await harness.prisma.executionAttempt.findUnique({
       where: { id: claimed.attemptId },
     });
-    expect(attempt!.providerUsage).toEqual({ total_tokens: 10000 });
+    expect(attempt!.providerUsage).toEqual({ completion_tokens: 10000 });
 
     const reservation = await harness.prisma.taskBudgetReservation.findUnique({
       where: { taskId: task.id },
@@ -296,7 +284,7 @@ describe('T05: Provider outcome settlement contract', () => {
     const response = await reportOutcome(harness, claimed.attemptId, {
       providerTaskId: 'provider-outcome-failed',
       status: 'failed',
-      usage: { total_tokens: 5000 },
+      usage: { completion_tokens: 5000 },
       errorCode: 'CONTENT_POLICY',
     });
     expect(response.status).toBe(200);
@@ -340,13 +328,13 @@ describe('T05: Provider outcome settlement contract', () => {
     await reportOutcome(harness, claimed.attemptId, {
       providerTaskId: 'provider-owned',
       status: 'succeeded',
-      usage: { total_tokens: 1000 },
+      usage: { completion_tokens: 1000 },
     });
 
     const response = await reportOutcome(harness, claimed.attemptId, {
       providerTaskId: 'provider-someone-else',
       status: 'succeeded',
-      usage: { total_tokens: 1000 },
+      usage: { completion_tokens: 1000 },
     });
 
     expect(response.status).toBe(409);
@@ -388,7 +376,7 @@ describe('T05: Provider outcome settlement contract', () => {
       where: { id: claimed.attemptId },
     });
     expect(attempt!.costStatus).toBe('billed');
-    expect(attempt!.billedCostCny).toBeCloseTo(3.5);
+    expect(attempt!.billedCostCny!.toFixed(6)).toBe('3.500000');
   });
 
   it('releases a reviewed reservation without claiming a billed amount', async () => {

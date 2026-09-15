@@ -1,7 +1,21 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 import { ComfyWidgets } from "../../scripts/widgets.js";
-const watched = new Set(["VideoFlowRequestPreflight", "VideoFlowPolicyDownload"]);
+import { failedReport, pendingReport } from "./preflight_report_state.mjs";
+
+const watched = new Set(["VideoFlowRequestPreflight", "VideoFlowConfirmedCreate", "VideoFlowPolicyDownload"]);
+
+function setReport(node, value) {
+  if (!node.preflightReport) {
+    node.preflightReport = ComfyWidgets.STRING(node, "检查报告", ["STRING", { multiline: true }], app).widget;
+    node.preflightReport.options.serialize = false;
+    if (node.preflightReport.inputEl) node.preflightReport.inputEl.readOnly = true;
+  }
+  node.preflightReport.value = value;
+  node.setSize(node.computeSize());
+  node.setDirtyCanvas(true, true);
+}
+
 app.registerExtension({
   name: "video.flow.preflight.report",
   beforeRegisterNodeDef(nodeType, nodeData) {
@@ -9,21 +23,21 @@ app.registerExtension({
     const original = nodeType.prototype.onExecuted;
     nodeType.prototype.onExecuted = function (message) {
       original?.apply(this, arguments);
-      if (!this.preflightReport) {
-        this.preflightReport = ComfyWidgets.STRING(this, "检查报告", ["STRING", { multiline: true }], app).widget;
-        this.preflightReport.options.serialize = false;
-        if (this.preflightReport.inputEl) this.preflightReport.inputEl.readOnly = true;
-      }
-      this.preflightReport.value = (message.text || []).join("\n");
-      this.setSize(this.computeSize());
-      this.setDirtyCanvas(true, true);
+      setReport(this, (message.text || []).join("\n"));
     };
   },
   setup() {
     api.addEventListener("execution_start", () => {
       for (const node of app.graph?._nodes || []) {
-        if (node.preflightReport) node.preflightReport.value = "本次检查尚未完成，请等待结果。";
+        if (node.preflightReport) setReport(node, pendingReport());
       }
+    });
+    api.addEventListener("execution_error", ({ detail } = {}) => {
+      const nodeId = detail?.node_id ?? detail?.node;
+      const node = app.graph?.getNodeById?.(nodeId);
+      if (!node || !watched.has(node.comfyClass)) return;
+      const message = detail?.exception_message || detail?.exception_type || detail?.error;
+      setReport(node, failedReport(message));
     });
   },
 });

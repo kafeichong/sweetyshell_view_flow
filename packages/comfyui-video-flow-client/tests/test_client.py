@@ -380,6 +380,37 @@ def test_create_task_rejects_unknown_mode():
     raise AssertionError("unknown mode must be rejected before any HTTP call")
 
 
+def test_slot_recovery_and_client_delivery_use_authenticated_task_routes():
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        if request.method == "GET":
+            return httpx.Response(
+                200,
+                json={"executionSlotId": "slot / 1", "currentTask": {"id": "task-1"}},
+            )
+        return httpx.Response(
+            200,
+            json={"taskId": "task-1", "clientDeliveryStatus": "delivered", "applied": True},
+        )
+
+    client = VideoFlowClient(
+        VideoFlowConfig("https://backend.test", "secret-token"),
+        httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    current = client.get_current_task_for_slot("slot / 1")
+    delivered = client.confirm_client_delivery("task-1")
+
+    assert current["currentTask"]["id"] == "task-1"
+    assert delivered["clientDeliveryStatus"] == "delivered"
+    assert requests[0].url.raw_path == b"/api/v1/tasks/slots/slot%20%2F%201/current"
+    assert requests[0].headers["authorization"] == "Bearer secret-token"
+    assert requests[1].method == "POST"
+    assert requests[1].url.path == "/api/v1/tasks/task-1/client-delivery"
+
+
 def test_upload_media_sends_content_hash_for_deduplication():
     import hashlib
 

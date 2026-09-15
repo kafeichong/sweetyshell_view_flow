@@ -45,14 +45,14 @@ class FakeProviderState:
 
     def _next_usage(self) -> dict[str, Any] | None:
         if self.usage_mode == "valid":
-            return {"total_tokens": 1000}
+            return {"completion_tokens": 1000}
         if self.usage_mode == "missing":
             return {}
         if self.usage_mode == "invalid":
-            return {"total_tokens": "bad"}
+            return {"completion_tokens": "bad"}
         if self.usage_mode == "negative":
-            return {"total_tokens": -10}
-        return {"total_tokens": 1000}
+            return {"completion_tokens": -10}
+        return {"completion_tokens": 1000}
 
     def create_task(self, payload: dict[str, Any]) -> dict[str, str]:
         if self.create_status != 200:

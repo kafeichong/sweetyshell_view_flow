@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from artifact_delivery import (
+    artifact_format_spec,
     artifact_object_key,
     validate_artifact_file,
     verify_uploaded_object,
@@ -247,7 +248,15 @@ class JobExecutor:
         if not attempt_id:
             return False
 
-        object_key = artifact_object_key(job.id, attempt_id, job.createdAt)
+        output_format = (
+            job.executionPlan.get("outputFormat", "mp4")
+            if isinstance(job.executionPlan, dict)
+            else "mp4"
+        )
+        extension, mime_type = artifact_format_spec(output_format)
+        object_key = artifact_object_key(
+            job.id, attempt_id, job.createdAt, output_format
+        )
 
         if not task_status.result_url:
             await self._report_delivery(
@@ -260,7 +269,7 @@ class JobExecutor:
             print(f"[{job.id}] Provider completed without a result url; delivery failed")
             return False
 
-        local_path = self.output_dir / f"{job.id}-{attempt_id}.mp4"
+        local_path = self.output_dir / f"{job.id}-{attempt_id}.{extension}"
 
         try:
             await self.adapter_for(job).download_video(task_status.result_url, str(local_path))
@@ -318,7 +327,11 @@ class JobExecutor:
             return False
 
         registered = await self.register_artifact(
-            job.id, object_key, str(local_path), attempt_id=attempt_id
+            job.id,
+            object_key,
+            str(local_path),
+            attempt_id=attempt_id,
+            mime_type=mime_type,
         )
         if not registered:
             await self._report_delivery(
@@ -362,6 +375,7 @@ class JobExecutor:
         local_path: str,
         *,
         attempt_id: str,
+        mime_type: str,
     ) -> bool:
         """登记产物 Asset；同 key 重复登记由 Backend 幂等返回既有行。"""
         return await self.create_asset(
@@ -370,6 +384,7 @@ class JobExecutor:
             local_path,
             attempt_id=attempt_id,
             file_type="video",
+            mime_type=mime_type,
         )
 
     async def _report_delivery(
@@ -728,6 +743,7 @@ class JobExecutor:
         local_path: str,
         attempt_id: Optional[str] = None,
         file_type: str = "video",
+        mime_type: Optional[str] = None,
     ) -> bool:
         """登记产物 Asset；返回是否成功，由调用方决定交付状态。
 
@@ -743,7 +759,7 @@ class JobExecutor:
                 "objectKey": object_key,
                 "bucket": self.oss_uploader.bucket_name,
                 "mediaType": file_type,
-                "mimeType": "video/mp4" if file_type == "video" else None,
+                "mimeType": mime_type or ("video/mp4" if file_type == "video" else None),
                 "sizeBytes": file_size,
             }
             if attempt_id:

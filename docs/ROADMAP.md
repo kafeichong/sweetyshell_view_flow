@@ -278,16 +278,16 @@ expect(unknownQuote.status).toBe('unavailable');
 
 **接口：** 共用状态流 `resolve_slot → recover_current → preview_if_required → submit_next → wait → download_and_finish_round`。Backend 按 actor 与槽返回权威当前 Task；客户端回执只缓存槽、Task、本地交付状态和本地路径。当前 Task 未完成本地交付时先恢复；槽空闲且当前内容缺少有效预检时，本次 Queue 只 Preview 并停止；再次 Queue 才上传和提交。
 
-- [ ] 覆盖已有taskId且预检过期/额度不足/生产暂停时仍可查询取片；凭证失效或任务越权仍拒绝；Provider create增量为0。
-- [ ] Production 节点首次创建稳定 `executionSlotId`，修改内容不改变槽，复制节点生成新槽；同一槽不支持并行生成。
-- [ ] 本地回执保存执行槽、原请求、幂等键、任务标识、本地交付状态、路径和文件摘要，查询身份仍按账号隔离；回执丢失或更换客户端后可从 Backend 按槽恢复。
-- [ ] Production 模式保持不变；当前内容无有效预检时第一次 Queue 只 Preview 并停止。有效预检可用于多个顺序 Task，不新增一次性确认状态。
-- [ ] Provider 成功但归档、签名 URL、下载、本地校验或 client delivery 确认失败时继续原 Task；客户端下载校验后先持久化回执，再确认交付并返回本地路径，下一次 Queue 创建新 Task 并独立计费。
-- [ ] 报告展示唯一 effectiveRequest、逐项错误、实际文件未上传状态、报价依据和canSubmit/blockers；失败清除旧绿色提示。
-- [ ] 统一执行入口先处理已有任务，再要求新预检；同时交付凭taskId查询/取片的恢复模板。
-- [ ] 验收：所有仍注册的 Preview 节点均无上传；同槽在本地交付前最多一个 Task；暂停不阻断已有任务恢复；交付后的下一次 Queue 能顺序创建下一版。
+- [x] 覆盖已有taskId且预检过期/额度不足/生产暂停时仍可查询取片；凭证失效或任务越权仍拒绝；Provider create增量为0。
+- [x] Production 节点首次创建稳定 `executionSlotId`，修改内容不改变槽，复制节点生成新槽；同一槽不支持并行生成。
+- [x] 本地回执保存执行槽、原请求、幂等键、任务标识、本地交付状态、路径和文件摘要，查询身份仍按账号隔离；回执丢失或更换客户端后可从 Backend 按槽恢复。
+- [x] Production 模式保持不变；当前内容无有效预检时第一次 Queue 只 Preview 并停止。有效预检可用于多个顺序 Task，不新增一次性确认状态。
+- [x] Provider 成功但归档、签名 URL、下载、本地校验或 client delivery 确认失败时继续原 Task；客户端下载校验后先持久化回执，再确认交付并返回本地路径，下一次 Queue 创建新 Task 并独立计费。
+- [x] 报告展示唯一 effectiveRequest、逐项错误、实际文件未上传状态、报价依据和canSubmit/blockers；失败清除旧绿色提示。
+- [x] 统一执行入口先处理已有任务，再要求新预检；同时交付凭taskId查询/取片的恢复模板。
+- [x] 自动化验收：所有仍注册的 Preview 节点均无上传；同槽在本地交付前最多一个 Task；暂停不阻断已有任务恢复；交付后的下一次 Queue 能顺序创建下一版。实际 ComfyUI 导入、状态渲染和 Queue Prompt 仍属于发布前操作验收，不由单测替代。
 
-运行：客户端 `.venv/bin/python -m pytest tests/test_execution_slot.py tests/test_submission_state.py tests/test_preflight_nodes.py tests/test_client.py tests/test_nodes.py -q`。
+运行：客户端 `.venv/bin/python -m pytest -q`；报告前端状态定向测试为 `.venv/bin/python -m pytest tests/test_preflight_report_web.py -q`。
 
 ### R6：八类工作流逐项贯通
 
@@ -302,7 +302,7 @@ expect(unknownQuote.status).toBe('unavailable');
 | 2 | seedance.text-to-video.v1 | 无媒体、不假造Asset；修复文本模板连线；正式编译和提交 |
 | 3 | seedance.first-frame-to-video.v1 | first_frame角色；自适应解析、计费和同名文件刷新 |
 | 4 | seedance.first-last-frame-to-video.v1 | 两帧角色顺序、尺寸组合、自适应计费 |
-| 5 | seedance.omni-reference.v1 | 图片/视频/音频混合、各类数量及总时长、最低Token |
+| 5 | seedance.omni-reference.v1 | 图片/视频/音频可链式组合；覆盖30图、10视频、10音频、总数50、各类总时长及最低Token |
 | 6 | seedance.video-edit.v1 | 编辑语义、特殊时长、容器格式、实际输入成本 |
 | 7 | seedance.video-extend.v1 | 延长方向/时长语义、输出规格与成本上界 |
 | 8 | seedance.audio-reference-to-video.v1 | 纯音频/允许组合的官方合同、音频检查和正式编译 |
@@ -326,7 +326,7 @@ expect(unknownQuote.status).toBe('unavailable');
 - [ ] 按实际产物格式保存正确扩展名/MIME，支持该工作流要求的MOV等格式，不把所有结果仅重命名为MP4。
 - [ ] 验收：逐行记录隔离合同证据；真实模型效果与正式出片留到R8，不能用状态枚举替代实现。
 
-运行：客户端 `.venv/bin/python -m pytest tests/test_workflow_templates.py -q`；Worker `venv/bin/python -m pytest tests/test_seedance_execution_policy.py -q`；仓库根运行第5节隔离合同。
+运行：客户端 `.venv/bin/python -m pytest tests/test_workflow_templates.py -q`；Worker `venv/bin/python -m pytest tests/test_seedance_execution_policy.py -q`；仓库根运行第5节隔离合同。逐工作流开发期间可显式设置 `VIDEO_FLOW_SKIP_LEGACY_CONTRACT_SUITES=1`、`VIDEO_FLOW_LIVE_PYTEST_TARGET=<单项节点>` 和 `VIDEO_FLOW_LIVE_MIN_TESTS=1` 运行新纵向合同；默认值不得跳过旧完整套件，R7 必须恢复完整绿色。
 
 ### R7：全链回归、安装清理与旧路径退出
 
@@ -335,9 +335,9 @@ expect(unknownQuote.status).toBe('unavailable');
 
 - [ ] 将F01–F15全部纳入持久用例；测试名称和断言对应职责，不再为旧错误行为保绿。
 - [ ] 实现并运行第5节故障矩阵；Preview对Task/Attempt/Reservation/素材上传/Provider调用的增量全部为0。
-- [ ] 全新安装和升级已有测试库两条迁移测试通过；历史Task/Provider ID/产物/预算可查询并可恢复，未执行迁移不能伪报通过。
+- [x] 全新安装和升级已有测试库两条迁移测试通过；历史Task/Provider ID/产物/预算可查询并可恢复，未执行迁移不能伪报通过。
 - [ ] 打包合同资源、所有模板和素材探测依赖；清理本插件旧注册/旧文件时先备份，只操作经确认属于本插件的文件。
-- [ ] 对旧接口/配置/节点/编译器进行引用搜索，删除已被替代的执行分支与维护错误语义的测试；使用Git/归档保留历史，不运行两套新提交合同。
+- [x] 对旧接口/配置/节点/编译器进行引用搜索，删除已被替代的执行分支与维护错误语义的测试；使用Git/归档保留历史，不运行两套新提交合同。
 - [ ] 三包完整回归、隔离跨包和实际ComfyUI假服务验证通过；更新runbook中的协议升级与恢复说明。
 - [ ] 验收：F01–F15各有关闭证据；外部依赖skip与未执行的验收明确列出，不能计为已完成。
 

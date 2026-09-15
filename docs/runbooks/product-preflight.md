@@ -170,4 +170,4 @@ npm run build
 npx jest workflow-catalog.service preflight.service v1-tasks.controller --runInBand
 ```
 
-R4 真实 HTTP/数据库合同由 `test/preflight-v2.contract-spec.ts` 覆盖；测试环境禁止真实 Provider 凭证。完整 `scripts/run_mvp_contract.sh` 仍包含旧创建合同，当前失败项按 ROADMAP R7 迁移或归档，不能据此恢复旧 Preview Task 或 `confirmLiveSubmission`。
+真实 HTTP/数据库合同由 `test/preflight-v2.contract-spec.ts`、`test/preflight.contract-spec.ts` 和 `test/preflight-http.smoke.cjs` 覆盖；测试环境禁止真实 Provider 凭证。`scripts/run_mvp_contract.sh` 已只运行 v2 Preview/Production 合同：源合同保持 fail-closed，测试 Backend 通过依赖替身临时开放指定工作流。旧 Preview Task、`confirmLiveSubmission` 和 `VIDEO_FLOW_PRODUCTION_SPEC_JSON` 已退出，不得恢复为新提交路径。

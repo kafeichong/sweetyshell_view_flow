@@ -13,12 +13,29 @@ from pathlib import Path
 from typing import Any, Optional, Tuple
 
 
-def artifact_object_key(task_id: str, attempt_id: str, created_at: str) -> str:
+def artifact_format_spec(output_format: str) -> tuple[str, str]:
+    """Return the file extension and MIME for a frozen Provider format."""
+    formats = {
+        "mp4": ("mp4", "video/mp4"),
+        "mov": ("mov", "video/quicktime"),
+    }
+    try:
+        return formats[output_format]
+    except KeyError as error:
+        raise ValueError(f"unsupported artifact output format: {output_format}") from error
+
+
+def artifact_object_key(
+    task_id: str,
+    attempt_id: str,
+    created_at: str,
+    output_format: str = "mp4",
+) -> str:
     """按任务创建日生成稳定对象键。
 
     归档补偿可能跨越午夜，因此目录日期取 Task 的 ``created_at``，并统一转换为
     UTC；不能取执行/上传时的当前时间。产物位置为
-    ``videos/YYYY/MM/DD/{taskId}/{attemptId}/result.mp4``。
+    ``videos/YYYY/MM/DD/{taskId}/{attemptId}/result.{format}``。
     """
     if not task_id or not attempt_id:
         raise ValueError("task_id and attempt_id are required for an artifact key")
@@ -33,9 +50,10 @@ def artifact_object_key(task_id: str, attempt_id: str, created_at: str) -> str:
         raise ValueError("created_at must include a timezone")
 
     created_utc = parsed.astimezone(timezone.utc)
+    extension, _ = artifact_format_spec(output_format)
     return (
         f"videos/{created_utc:%Y/%m/%d}/"
-        f"{task_id}/{attempt_id}/result.mp4"
+        f"{task_id}/{attempt_id}/result.{extension}"
     )
 
 

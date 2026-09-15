@@ -7,6 +7,9 @@ COMPOSE_FILE="$SCRIPT_DIR/compose.contract.yml"
 PROJECT_NAME="video-flow-contract"
 CONTRACT_DB_PORT="${VIDEO_FLOW_CONTRACT_DB_PORT:-55432}"
 CONTRACT_PROVIDER_PORT="${VIDEO_FLOW_CONTRACT_PROVIDER_PORT:-19091}"
+# 仅供 contract-backend.cjs 的依赖替身使用：跨包矩阵必须覆盖全部已声明
+# 工作流；正式 catalog 资源仍保持 fail-closed。
+CONTRACT_READY_WORKFLOWS="${VIDEO_FLOW_CONTRACT_READY_WORKFLOWS:-seedance.text-to-video.v1,seedance.reference-image-to-video.v1,seedance.first-frame-to-video.v1,seedance.first-last-frame-to-video.v1,seedance.omni-reference.v1,seedance.video-edit.v1,seedance.video-extend.v1,seedance.audio-reference-to-video.v1}"
 DATABASE_URL="postgresql://video_contract:video_contract@127.0.0.1:${CONTRACT_DB_PORT}/video_flow_contract"
 UPGRADE_DATABASE_URL="postgresql://video_contract:video_contract@127.0.0.1:${CONTRACT_DB_PORT}/video_flow_upgrade_contract"
 if test -x "$REPO_ROOT/packages/worker/venv/bin/python"; then
@@ -129,10 +132,14 @@ fi
 
 npm run build
 
-VIDEO_FLOW_TEST_MODE=1 \
-DATABASE_URL="$DATABASE_URL" \
-VIDEO_FLOW_PROVIDER_BASE_URL="http://127.0.0.1:${CONTRACT_PROVIDER_PORT}/api/v3" \
-npm run test:contract -- --runInBand
+if test "${VIDEO_FLOW_SKIP_LEGACY_CONTRACT_SUITES:-0}" != "1"; then
+  VIDEO_FLOW_TEST_MODE=1 \
+  DATABASE_URL="$DATABASE_URL" \
+  VIDEO_FLOW_PROVIDER_BASE_URL="http://127.0.0.1:${CONTRACT_PROVIDER_PORT}/api/v3" \
+    npm run test:contract -- --runInBand
+else
+  echo '按显式配置跳过旧合同套件，仅运行新工作流纵向合同'
+fi
 
 cd "$REPO_ROOT"
 "$CONTRACT_PYTHON" -m pytest scripts/tests/test_fake_provider.py -q
@@ -163,17 +170,45 @@ else
       INSERT INTO production_gates (id, paused, reason) VALUES ('production', false, 'live contract')
       ON CONFLICT (id) DO UPDATE SET paused = false, reason = 'live contract';
       INSERT INTO assets (id, owner_id, role, object_key, file_hash, inspection_status, media_type, mime_type, media_metadata, size_bytes)
-      VALUES (gen_random_uuid(), 'live-contract-actor', 'input', 'live-contract/reference.png', '2bec78f9edca83498eba36c257e0d0a95a0ff0a21c6ff985739c51a5e0c81ec5', 'uploaded', 'image', 'image/png', json_build_object('kind', 'image', 'width', 1280, 'height', 720), 43)
+      VALUES (gen_random_uuid(), 'live-contract-actor', 'input', 'live-contract/reference.png', '2bec78f9edca83498eba36c257e0d0a95a0ff0a21c6ff985739c51a5e0c81ec5', 'verified', 'image', 'image/png', json_build_object('kind', 'image', 'width', 1280, 'height', 720), 43)
+      ON CONFLICT (owner_id, role, file_hash) DO NOTHING;
+      INSERT INTO assets (id, owner_id, role, object_key, file_hash, inspection_status, media_type, mime_type, media_metadata, size_bytes)
+      VALUES (gen_random_uuid(), 'live-contract-actor', 'input', 'live-contract/last.png', 'bbe001f704b684e176736ece7542c7e3edb76b3c3e5b0ed4c14f9f89c2365587', 'verified', 'image', 'image/png', json_build_object('kind', 'image', 'width', 1280, 'height', 720), 38)
+      ON CONFLICT (owner_id, role, file_hash) DO NOTHING;
+      INSERT INTO assets (id, owner_id, role, object_key, file_hash, inspection_status, media_type, mime_type, media_metadata, size_bytes)
+      VALUES (gen_random_uuid(), 'live-contract-actor', 'input', 'live-contract/audio.wav', '80e4320275831d70a161ed0c0b35a1d92d61ed537a29c772e06d9129c3509883', 'verified', 'audio', 'audio/wav', json_build_object('kind', 'audio', 'durationSeconds', 10, 'audioCodec', 'pcm_s16le'), 39)
+      ON CONFLICT (owner_id, role, file_hash) DO NOTHING;
+      INSERT INTO assets (id, owner_id, role, object_key, file_hash, inspection_status, media_type, mime_type, media_metadata, size_bytes)
+      VALUES (gen_random_uuid(), 'live-contract-actor', 'input', 'live-contract/video.mp4', '5df585981ac0b823eedcf3580e24ad2db223b7829bbaa593e2d3c2d835557f85', 'verified', 'video', 'video/mp4', json_build_object('kind', 'video', 'width', 1280, 'height', 720, 'durationSeconds', 6, 'frameRate', 24, 'videoCodec', 'h264', 'audioCodec', 'aac'), 39)
       ON CONFLICT (owner_id, role, file_hash) DO NOTHING;
     " >/dev/null
 
   LIVE_ASSET_ID="$(docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" exec -T postgres \
     psql -At -U video_contract -d video_flow_contract -c "
       SELECT id FROM assets
-      WHERE owner_id = 'live-contract-actor' AND role = 'input' AND inspection_status = 'uploaded'
-      ORDER BY created_at LIMIT 1;" | tr -d '\r')"
+      WHERE owner_id = 'live-contract-actor' AND object_key = 'live-contract/reference.png';" | tr -d '\r')"
   if test -z "$LIVE_ASSET_ID"; then
     echo '未能准备跨包合同的输入素材' >&2
+    exit 1
+  fi
+  LIVE_LAST_ASSET_ID="$(docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" exec -T postgres \
+    psql -At -U video_contract -d video_flow_contract -c "
+      SELECT id FROM assets
+      WHERE owner_id = 'live-contract-actor' AND object_key = 'live-contract/last.png';" | tr -d '\r')"
+  if test -z "$LIVE_LAST_ASSET_ID"; then
+    echo '未能准备跨包合同的尾帧输入素材' >&2
+    exit 1
+  fi
+  LIVE_AUDIO_ASSET_ID="$(docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" exec -T postgres \
+    psql -At -U video_contract -d video_flow_contract -c "
+      SELECT id FROM assets
+      WHERE owner_id = 'live-contract-actor' AND object_key = 'live-contract/audio.wav';" | tr -d '\r')"
+  LIVE_VIDEO_ASSET_ID="$(docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" exec -T postgres \
+    psql -At -U video_contract -d video_flow_contract -c "
+      SELECT id FROM assets
+      WHERE owner_id = 'live-contract-actor' AND object_key = 'live-contract/video.mp4';" | tr -d '\r')"
+  if test -z "$LIVE_AUDIO_ASSET_ID" || test -z "$LIVE_VIDEO_ASSET_ID"; then
+    echo '未能准备跨包合同的音频或视频输入素材' >&2
     exit 1
   fi
 
@@ -184,11 +219,12 @@ else
   VIDEO_FLOW_ADMIN_TOKEN="$LIVE_ADMIN_TOKEN" \
   VIDEO_FLOW_WORKER_TOKEN="$LIVE_WORKER_TOKEN" \
   VIDEO_FLOW_PRODUCTION_ACTORS="live-contract-actor" \
+  VIDEO_FLOW_CONTRACT_READY_WORKFLOWS="$CONTRACT_READY_WORKFLOWS" \
+  VIDEO_FLOW_DAILY_TASK_LIMIT="1000" \
   OSS_ACCESS_KEY_ID="live-contract-oss" \
   OSS_ACCESS_KEY_SECRET="live-contract-oss-secret" \
   OSS_BUCKET="live-contract-bucket" \
   OSS_REGION="oss-cn-beijing" \
-  VIDEO_FLOW_PRODUCTION_SPEC_JSON='{"version":"live-v1","model":"doubao-seedance-2-5-260628","duration":5,"ratio":"16:9","resolution":"720p","generateAudio":false,"watermark":true,"pricingVersion":"seedance-token-v1","reserveCny":"2.000000"}' \
   PORT=$LIVE_PORT \
   node test/contract-backend.cjs >"$LIVE_LOG" 2>&1 &
   LIVE_BACKEND_PID="$!"
@@ -218,6 +254,7 @@ else
   #   VIDEO_FLOW_BACKEND_URL / VIDEO_FLOW_WORKER_TOKEN。
   # - 宿主机没有容器里的 /app/output 与 /app/audit，用临时目录替代。
   # - 本机可能挂着 SOCKS/HTTP 代理：回环地址必须直连，否则 create 会打到代理上。
+  LIVE_PYTEST_TARGET="${VIDEO_FLOW_LIVE_PYTEST_TARGET:-tests/test_mvp_live_contract.py}"
   VIDEO_FLOW_TEST_MODE=1 \
   DATABASE_URL="$DATABASE_URL" \
   VIDEO_FLOW_PROVIDER_BASE_URL="http://127.0.0.1:${CONTRACT_PROVIDER_PORT}/api/v3" \
@@ -229,31 +266,41 @@ else
   VIDEO_FLOW_LIVE_PROVIDER_URL="http://127.0.0.1:${CONTRACT_PROVIDER_PORT}" \
   VIDEO_FLOW_LIVE_ACTOR_TOKEN="$LIVE_ACTOR_TOKEN" \
   VIDEO_FLOW_LIVE_ASSET_ID="$LIVE_ASSET_ID" \
+  VIDEO_FLOW_LIVE_LAST_ASSET_ID="$LIVE_LAST_ASSET_ID" \
+  VIDEO_FLOW_LIVE_AUDIO_ASSET_ID="$LIVE_AUDIO_ASSET_ID" \
+  VIDEO_FLOW_LIVE_VIDEO_ASSET_ID="$LIVE_VIDEO_ASSET_ID" \
   VIDEO_FLOW_AUDIT_DIR="$(mktemp -d -t video-flow-live-audit.XXXXXX)" \
   COMFYUI_OUTPUT_DIR="$(mktemp -d -t video-flow-live-output.XXXXXX)" \
 OSS_ENDPOINT="http://127.0.0.1:${CONTRACT_PROVIDER_PORT}/oss" \
 OSS_CNAME=1 \
 OSS_ACCESS_KEY_ID="live-contract-oss" \
 OSS_ACCESS_KEY_SECRET="live-contract-oss-secret" \
-OSS_BUCKET="live-contract-bucket" \
-OSS_REGION="oss-cn-beijing" \
+  OSS_BUCKET="live-contract-bucket" \
+  OSS_REGION="oss-cn-beijing" \
+  ALL_PROXY="" \
+  all_proxy="" \
+  HTTP_PROXY="" \
+  http_proxy="" \
+  HTTPS_PROXY="" \
+  https_proxy="" \
   NO_PROXY="127.0.0.1,localhost" \
   no_proxy="127.0.0.1,localhost" \
-  "$CONTRACT_WORKER_PYTHON" -m pytest tests/test_mvp_live_contract.py -m live_contract -p no:cacheprovider || {
+    "$CONTRACT_WORKER_PYTHON" -m pytest "$LIVE_PYTEST_TARGET" -m live_contract -p no:cacheprovider || {
     echo '跨包合同失败；后端日志：' >&2
     tail -60 "$LIVE_LOG" >&2
     exit 1
   }
 
   # 漏跑必须失败：跨包用例被静默排除等于没跑。
-  live_collect_output="$("$CONTRACT_WORKER_PYTHON" -m pytest tests/test_mvp_live_contract.py -m live_contract \
+  live_collect_output="$("$CONTRACT_WORKER_PYTHON" -m pytest "$LIVE_PYTEST_TARGET" -m live_contract \
     --collect-only -q -p no:cacheprovider 2>/dev/null)"
   live_collected="$(echo "$live_collect_output" | awk '{ for (i = 1; i <= NF; i++) if ($i == "collected" && i >= 3) print $(i - 2) }')"
   if test -z "$live_collected"; then
     echo "跨包合同用例收集失败: $live_collect_output" >&2
     exit 1
   fi
-  if test "$live_collected" -lt 5; then
+  minimum_live_tests="${VIDEO_FLOW_LIVE_MIN_TESTS:-5}"
+  if test "$live_collected" -lt "$minimum_live_tests"; then
     echo "跨包合同用例数异常（过少）: $live_collect_output" >&2
     exit 1
   fi

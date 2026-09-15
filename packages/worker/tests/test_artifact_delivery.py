@@ -7,6 +7,7 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from artifact_delivery import (  # noqa: E402
+    artifact_format_spec,
     artifact_object_key,
     object_size_from_head,
     validate_artifact_file,
@@ -42,6 +43,17 @@ class ArtifactObjectKeyTests(unittest.TestCase):
         for args in (("", "attempt-1"), ("task-1", ""), ("", "")):
             with self.assertRaises(ValueError):
                 artifact_object_key(*args, "2026-09-10T00:00:00+00:00")
+
+    def test_mov_key_and_mime_follow_the_frozen_output_format(self):
+        created_at = "2026-09-15T00:00:00+00:00"
+
+        assert artifact_object_key(
+            "task-edit", "attempt-edit", created_at, "mov"
+        ) == "videos/2026/09/15/task-edit/attempt-edit/result.mov"
+        assert artifact_format_spec("mov") == ("mov", "video/quicktime")
+        assert artifact_format_spec("mp4") == ("mp4", "video/mp4")
+        with self.assertRaises(ValueError):
+            artifact_format_spec("avi")
 
 
 class ArtifactFileValidationTests(unittest.TestCase):

@@ -34,7 +34,9 @@ def test_comfyui_image_input_uses_shared_inspector_without_retaining_file_bytes(
 
 def test_all_image_input_nodes_force_same_filename_to_be_reinspected():
     assert n.ProductInput.IS_CHANGED() != n.ProductInput.IS_CHANGED()
-    assert n.MultiReferenceInput.IS_CHANGED() != n.MultiReferenceInput.IS_CHANGED()
+    assert n.ReferenceImageInput.IS_CHANGED() != n.ReferenceImageInput.IS_CHANGED()
+    assert n.ReferenceVideoInput.IS_CHANGED() != n.ReferenceVideoInput.IS_CHANGED()
+    assert n.ReferenceAudioInput.IS_CHANGED() != n.ReferenceAudioInput.IS_CHANGED()
     assert n.FirstFrameInput.IS_CHANGED() != n.FirstFrameInput.IS_CHANGED()
     assert n.FirstLastFrameInput.IS_CHANGED() != n.FirstLastFrameInput.IS_CHANGED()
 
@@ -56,7 +58,8 @@ def test_preview_only_sends_descriptors_and_skips_paid_chain(tmp_path, monkeypat
     monkeypatch.setattr(n, 'VideoFlowClient', Client)
     config = VideoFlowConfig('https://test', 'token', receipt_dir=str(tmp_path / 'receipts'))
     policy = n.ExecutionPolicy().execute()[0]
-    checked = n.RequestPreview().check(config, policy, request)['result'][0]
+    preview_result = n.RequestPreview().check(config, policy, request)
+    checked = preview_result['result'][0]
     task = n.CreateTask().submit(config, policy, checked)[0]
     n.WaitTask().wait(config, task)
     result = n.DownloadResult().download(config, task)
@@ -67,25 +70,94 @@ def test_preview_only_sends_descriptors_and_skips_paid_chain(tmp_path, monkeypat
     assert set(calls[0][1]['media'][0]) == {'slotId', 'sha256', 'role', 'mimeType', 'sizeBytes', 'metadata'}
     assert 'data' not in json.dumps(calls[0][1]).replace('metadata', '')
     assert 'path' not in json.dumps(calls[0][1])
+    report = json.loads(preview_result['ui']['text'][0])
+    assert 'request' not in report
+    assert report['effectiveRequest'] == request['intent']
+    assert report['mediaTransfer'] == {
+        'uploaded': False,
+        'willUploadDuringPreview': False,
+    }
+    assert report['productionAdmission']['blockers'] == [{'code': 'WORKFLOW_NOT_READY'}]
+    assert report['quote']['quoteDigest'] == 'quote-digest'
 
 
-def test_skip_preview_and_changed_input_cannot_upload(tmp_path, monkeypatch):
+def test_production_without_current_preflight_runs_preview_and_stops_before_upload(tmp_path, monkeypatch):
     request = inputs(tmp_path, monkeypatch)
     config = VideoFlowConfig('https://test', 'token', receipt_dir=str(tmp_path / 'receipts'))
-    policy = n.ExecutionPolicy().execute('production', True)[0]
-    with pytest.raises(ValueError, match='尚未通过 Preview'):
-        n.RequestPreview().check(config, policy, request)
-    n.store(config).save(n.fingerprint(request['intent']), {'preflightId': 'p1', 'expiresAt': '2000-01-01T00:00:00+00:00'})
-    with pytest.raises(ValueError, match='过期'):
-        n.RequestPreview().check(config, policy, request)
-    request['intent']['prompt']['positive'] = 'changed'
-    with pytest.raises(ValueError, match='尚未通过 Preview'):
-        n.RequestPreview().check(config, policy, request)
+    policy = n.ExecutionPolicy().execute('production')[0]
+    calls = []
+    record = {
+        'preflightId': 'fresh-preview',
+        'expiresAt': (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat(),
+        'willCallProvider': False,
+        'willUploadMedia': False,
+        'effectiveRequest': request['intent'],
+        'requestCheck': {'status': 'passed', 'items': []},
+        'productionAdmission': {'canSubmit': True, 'blockers': []},
+        'intentDigest': 'intent-digest',
+        'quote': {'quoteDigest': 'quote-digest', 'status': 'estimated'},
+    }
+
+    class Client:
+        def __init__(self, _config):
+            self.client = self
+
+        def receipt_store(self, root):
+            from receipts import ReceiptStore
+            return ReceiptStore(root)
+
+        def _headers(self):
+            return {}
+
+        def get_current_task_for_slot(self, execution_slot_id):
+            calls.append(('get-current', execution_slot_id))
+            return {'executionSlotId': execution_slot_id, 'currentTask': None}
+
+        def post(self, url, **kwargs):
+            calls.append(('preview', url, kwargs['json']))
+            return SimpleNamespace(status_code=201, json=lambda: record)
+
+        def upload_media(self, *_args, **_kwargs):
+            raise AssertionError('invalid preflight must not upload')
+
+    monkeypatch.setattr(n, 'VideoFlowClient', Client)
+
+    checked = n.RequestPreview().check(config, policy, request)['result'][0]
+    result = n.CreateTask().submit(
+        config,
+        policy,
+        checked,
+        execution_slot_id='slot-1',
+    )
+
+    assert result['result'][0] == {
+        'mode': 'preview',
+        'execution_slot_id': 'slot-1',
+        'preflight_id': 'fresh-preview',
+        'requires_second_queue': True,
+    }
+    report = json.loads(result['ui']['text'][0])
+    assert '再次 Queue' in report['message']
+    assert report['effectiveRequest'] == request['intent']
+    assert report['requestCheck']['status'] == 'passed'
+    assert report['mediaTransfer']['uploaded'] is False
+    assert report['quote']['quoteDigest'] == 'quote-digest'
+    assert report['productionAdmission']['canSubmit'] is True
+    assert calls == [
+        ('get-current', 'slot-1'),
+        ('preview', 'https://test/api/v1/tasks/preflight', request['intent']),
+    ]
+    assert n.store(config).load(n.fingerprint(request['intent']))['preflightId'] == 'fresh-preview'
 
 
-def test_unknown_mode_and_missing_confirmation_rejected():
-    with pytest.raises(ValueError): n.ExecutionPolicy().execute('unknown', True)
-    with pytest.raises(ValueError): n.ExecutionPolicy().execute('production', False)
+def test_unknown_mode_rejected_and_production_does_not_use_one_time_confirmation():
+    with pytest.raises(ValueError):
+        n.ExecutionPolicy().execute('unknown')
+
+    assert n.ExecutionPolicy.INPUT_TYPES()['required'] == {
+        'mode': (['preview', 'production'], {'default': 'preview'}),
+    }
+    assert n.ExecutionPolicy().execute('production') == ({'mode': 'production'},)
 
 
 def test_product_request_exposes_creative_generation_options():
@@ -111,7 +183,7 @@ def test_text_to_video_template_is_preview_only_and_has_no_media_input():
     workflow = json.loads((Path(__file__).parents[1] / 'workflows/seedance-text-to-video-preflight-v1.comfy.json').read_text())
     nodes = {node['id']: node for node in workflow['nodes']}
 
-    assert next(node for node in nodes.values() if node['type'] == 'VideoFlowExecutionPolicy')['widgets_values'] == ['preview', False]
+    assert next(node for node in nodes.values() if node['type'] == 'VideoFlowExecutionPolicy')['widgets_values'] == ['preview']
     assert next(node for node in nodes.values() if node['type'] == 'VideoFlowTextRequest')['type'] == 'VideoFlowTextRequest'
     assert not any(node['type'] == 'VideoFlowProductInput' for node in nodes.values())
 
@@ -125,7 +197,7 @@ def test_frame_workflow_templates_are_preview_only_and_connected(name, request_t
     workflow = json.loads((Path(__file__).parents[1] / 'workflows' / name).read_text())
     nodes = {node['id']: node for node in workflow['nodes']}
     policy = next(node for node in nodes.values() if node['type'] == 'VideoFlowExecutionPolicy')
-    assert policy['widgets_values'] == ['preview', False]
+    assert policy['widgets_values'] == ['preview']
     assert any(node['type'] == request_type for node in nodes.values())
     assert any(node['type'] == input_type for node in nodes.values())
     for link_id, source, output, target, inlet, kind in workflow['links']:
@@ -146,25 +218,184 @@ def test_first_and_last_frame_requests_preserve_media_roles_and_order(tmp_path, 
                                      'generateAudio': True, 'watermark': False, 'outputFormat': 'mp4'}
 
 
-def test_multi_reference_request_preserves_all_reference_image_descriptors():
+def test_multi_reference_request_preserves_mixed_media_descriptors():
     media = [
         {'descriptor': {'role': 'reference_image', 'sha256': 'a' * 64}},
-        {'descriptor': {'role': 'reference_image', 'sha256': 'b' * 64}},
+        {'descriptor': {'role': 'reference_video', 'sha256': 'b' * 64}},
+        {'descriptor': {'role': 'reference_audio', 'sha256': 'c' * 64}},
     ]
-    request = n.MultiReferenceRequest().build(media, '文案和两张参考图', 15, '9:16', '1080p')[0]
+    request = n.MultiReferenceRequest().build(media, '文案和全模态参考', 15, '9:16', '1080p')[0]
 
     assert request['intent']['workflowKey'] == 'seedance.omni-reference.v1'
-    assert len(request['intent']['media']) == 2
-    assert all(item['role'] == 'reference_image' for item in request['intent']['media'])
+    assert [item['role'] for item in request['intent']['media']] == [
+        'reference_image', 'reference_video', 'reference_audio',
+    ]
     assert request['intent']['generation'] == {'duration': 15, 'ratio': '9:16', 'resolution': '1080p',
                                                'generateAudio': True, 'watermark': False, 'outputFormat': 'mp4'}
+
+
+def test_reference_media_inputs_chain_arbitrary_mixed_items_with_stable_role_slots(tmp_path, monkeypatch):
+    for name in ('image-1.png', 'image-2.png', 'clip.mp4', 'sound.wav'):
+        (tmp_path / name).write_bytes(name.encode())
+    monkeypatch.setitem(__import__('sys').modules, 'folder_paths', SimpleNamespace(
+        get_input_directory=lambda: str(tmp_path),
+        get_annotated_filepath=lambda name: str(tmp_path / name),
+    ))
+    monkeypatch.setattr(n, 'inspect_media', lambda path, role, slot_id: {
+        'path': str(path),
+        'descriptor': {'slotId': slot_id, 'role': role, 'sha256': role},
+    })
+
+    assert n.ReferenceImageInput.INPUT_TYPES()['optional'] == {
+        'reference_media': ('VIDEO_FLOW_LOCAL_MEDIA_LIST',),
+    }
+    first = n.ReferenceImageInput().inspect('image-1.png')[0]
+    video = n.ReferenceVideoInput().inspect('clip.mp4', first)[0]
+    second = n.ReferenceImageInput().inspect('image-2.png', video)[0]
+    media = n.ReferenceAudioInput().inspect('sound.wav', second)[0]
+
+    assert [item['descriptor']['role'] for item in media] == [
+        'reference_image', 'reference_video', 'reference_image', 'reference_audio',
+    ]
+    assert [item['descriptor']['slotId'] for item in media] == [
+        'reference-image-1', 'reference-video-1', 'reference-image-2', 'reference-audio-1',
+    ]
+
+
+def test_reference_media_inputs_enforce_official_item_limits(monkeypatch):
+    monkeypatch.setattr(n, 'inspect_product', lambda filename, role, slot_id: {
+        'filename': filename,
+        'descriptor': {'slotId': slot_id, 'role': role, 'metadata': {}},
+    })
+
+    images = []
+    for index in range(30):
+        images = n.ReferenceImageInput().inspect(f'image-{index}.png', images)[0]
+    assert len(images) == 30
+    with pytest.raises(ValueError, match='参考图片最多 30 张'):
+        n.ReferenceImageInput().inspect('image-31.png', images)
+
+    videos = []
+    for index in range(10):
+        videos = n.ReferenceVideoInput().inspect(f'video-{index}.mp4', videos)[0]
+    assert len(videos) == 10
+    with pytest.raises(ValueError, match='参考视频最多 10 段'):
+        n.ReferenceVideoInput().inspect('video-11.mp4', videos)
+
+    audios = []
+    for index in range(10):
+        audios = n.ReferenceAudioInput().inspect(f'audio-{index}.wav', audios)[0]
+    assert len(audios) == 10
+    with pytest.raises(ValueError, match='参考音频最多 10 段'):
+        n.ReferenceAudioInput().inspect('audio-11.wav', audios)
+
+
+def test_multi_reference_request_accepts_fifty_items_and_rejects_invalid_collections():
+    media = [
+        {'descriptor': {'role': 'reference_image', 'slotId': f'reference-image-{index}', 'metadata': {}}}
+        for index in range(1, 31)
+    ] + [
+        {'descriptor': {'role': 'reference_video', 'slotId': f'reference-video-{index}', 'metadata': {'durationSeconds': 3}}}
+        for index in range(1, 11)
+    ] + [
+        {'descriptor': {'role': 'reference_audio', 'slotId': f'reference-audio-{index}', 'metadata': {'durationSeconds': 3}}}
+        for index in range(1, 11)
+    ]
+
+    request = n.MultiReferenceRequest().build(media, '使用全部参考素材', 30, '16:9', '1080p')[0]
+    assert len(request['intent']['media']) == 50
+
+    with pytest.raises(ValueError, match='至少需要一个参考图片、视频或音频'):
+        n.MultiReferenceRequest().build([], '没有参考素材')
+    with pytest.raises(ValueError, match='参考素材总数最多 50 个'):
+        n.MultiReferenceRequest().build(media + [media[0]], '素材超限')
+
+
+def test_video_edit_request_freezes_official_special_fields_and_requires_video():
+    video = {'descriptor': {
+        'slotId': 'reference-video-1', 'role': 'reference_video',
+        'metadata': {'durationSeconds': 12},
+    }}
+
+    request = n.VideoEditRequest().build([video], '只保留主角', '1080p')[0]
+
+    assert request['intent']['workflowKey'] == 'seedance.video-edit.v1'
+    assert request['intent']['generation'] == {
+        'duration': -1, 'ratio': 'adaptive', 'resolution': '1080p',
+        'generateAudio': True, 'watermark': False, 'outputFormat': 'mov',
+    }
+    assert request['intent']['media'] == [video['descriptor']]
+
+    with pytest.raises(ValueError, match='至少需要一段参考视频'):
+        n.VideoEditRequest().build([], '没有视频')
+    with pytest.raises(ValueError, match='至少需要一段参考视频'):
+        n.VideoEditRequest().build([{'descriptor': {'role': 'reference_image', 'metadata': {}}}], '只有图片')
+    with pytest.raises(ValueError, match='编辑输入视频时长必须为 4–30 秒'):
+        n.VideoEditRequest().build([{'descriptor': {
+            'role': 'reference_video', 'metadata': {'durationSeconds': 3},
+        }}], '视频过短')
+
+
+def test_video_extend_request_freezes_official_special_fields_and_requires_video():
+    video = {'descriptor': {
+        'slotId': 'reference-video-1', 'role': 'reference_video',
+        'metadata': {'durationSeconds': 12},
+    }}
+    image = {'descriptor': {
+        'slotId': 'reference-image-1', 'role': 'reference_image',
+        'metadata': {'width': 1280, 'height': 720},
+    }}
+
+    request = n.VideoExtendRequest().build(
+        [video, image], '向后延长 @video1，让 @image1 中的角色入画', 30, '1080p'
+    )[0]
+
+    assert request['intent']['workflowKey'] == 'seedance.video-extend.v1'
+    assert request['intent']['generation'] == {
+        'duration': 30, 'ratio': 'adaptive', 'resolution': '1080p',
+        'generateAudio': True, 'watermark': False, 'outputFormat': 'mov',
+    }
+    assert request['intent']['media'] == [video['descriptor'], image['descriptor']]
+    assert n.VideoExtendRequest.INPUT_TYPES()['required']['duration'][0] == list(range(4, 31))
+
+    with pytest.raises(ValueError, match='至少需要一段参考视频'):
+        n.VideoExtendRequest().build([], '向后延长')
+    with pytest.raises(ValueError, match='至少需要一段参考视频'):
+        n.VideoExtendRequest().build([image], '向后延长')
+
+
+def test_audio_reference_request_accepts_only_audio_and_exposes_ordinary_generation_fields():
+    audios = [
+        {'descriptor': {
+            'slotId': f'reference-audio-{index}', 'role': 'reference_audio',
+            'metadata': {'durationSeconds': 5},
+        }}
+        for index in range(1, 3)
+    ]
+
+    request = n.AudioReferenceRequest().build(audios, '参考两段声音生成画面', 30, '9:16', '1080p')[0]
+
+    assert request['intent']['workflowKey'] == 'seedance.audio-reference-to-video.v1'
+    assert request['intent']['generation'] == {
+        'duration': 30, 'ratio': '9:16', 'resolution': '1080p',
+        'generateAudio': True, 'watermark': False, 'outputFormat': 'mp4',
+    }
+    assert request['intent']['media'] == [item['descriptor'] for item in audios]
+    assert n.AudioReferenceRequest.INPUT_TYPES()['required']['duration'][0] == list(range(4, 31))
+
+    with pytest.raises(ValueError, match='至少需要一段参考音频'):
+        n.AudioReferenceRequest().build([], '没有音频')
+    with pytest.raises(ValueError, match='只接受参考音频'):
+        n.AudioReferenceRequest().build(audios + [{
+            'descriptor': {'slotId': 'reference-image-1', 'role': 'reference_image', 'metadata': {}}
+        }], '混入图片')
 
 
 def test_multi_reference_template_is_preview_only():
     from pathlib import Path
     workflow = json.loads((Path(__file__).parents[1] / 'workflows/seedance-multi-reference-preflight-v1.comfy.json').read_text())
     policy = next(node for node in workflow['nodes'] if node['type'] == 'VideoFlowExecutionPolicy')
-    assert policy['widgets_values'] == ['preview', False]
+    assert policy['widgets_values'] == ['preview']
     assert any(node['type'] == 'VideoFlowMultiReferenceRequest' for node in workflow['nodes'])
 
 
@@ -179,28 +410,99 @@ def test_confirmed_submission_reuses_receipt_without_uploading_again(tmp_path, m
               'requestCheck': {'status': 'passed', 'items': []},
               'productionAdmission': {'canSubmit': True, 'blockers': []},
               'intentDigest': 'intent-digest', 'quote': {'quoteDigest': 'quote-digest', 'status': 'estimated'}}
+    created = False
     def handle(req):
+        nonlocal created
         calls.append((req.method, req.url.path))
         if req.url.path.endswith('/preflight'): return httpx.Response(201, json=record)
+        if '/slots/' in req.url.path:
+            return httpx.Response(200, json={
+                'executionSlotId': 'slot-1',
+                'currentTask': {'id': 't1', 'clientDeliveryStatus': 'pending'} if created else None,
+            })
         if req.url.path.endswith('/check'): return httpx.Response(200, json=record)
         if req.url.path.endswith('/upload-ticket'): return httpx.Response(201, json={'assetId': 'a1', 'alreadyUploaded': True})
         if req.method == 'POST' and req.url.path.endswith('/tasks'):
             body = json.loads(req.content)
-            assert body['preflightId'] == 'p1' and body['confirmLiveSubmission'] is True
-            assert body['mode'] == 'production'
-            assert body['media'] == [{'assetId': 'a1', 'role': 'reference_image'}]
+            assert body == {
+                'mode': 'production',
+                'preflightId': 'p1',
+                'executionSlotId': 'slot-1',
+                'media': [{'slotId': 'reference-image', 'assetId': 'a1'}],
+            }
+            created = True
             return httpx.Response(201, json={'id': 't1'})
         if req.url.path.endswith('/tasks/t1'): return httpx.Response(200, json={'id': 't1'})
         raise AssertionError(str(req.url))
     monkeypatch.setattr(n, 'VideoFlowClient', lambda cfg: VideoFlowClient(cfg, httpx.Client(transport=httpx.MockTransport(handle))))
     n.RequestPreview().check(config, n.ExecutionPolicy().execute()[0], request)
-    policy = n.ExecutionPolicy().execute('production', True)[0]
+    policy = n.ExecutionPolicy().execute('production')[0]
     checked = n.RequestPreview().check(config, policy, request)['result'][0]
-    assert n.CreateTask().submit(config, policy, checked)[0]['task_id'] == 't1'
-    assert n.CreateTask().submit(config, policy, checked)[0]['task_id'] == 't1'
+    first = n.CreateTask().submit(config, policy, checked, execution_slot_id='slot-1')[0]
+    second = n.CreateTask().submit(config, policy, checked, execution_slot_id='slot-1')[0]
+    assert first['task_id'] == second['task_id'] == 't1'
+    assert first['recovered'] is False
+    assert second['recovered'] is True
     assert calls.count(('POST', '/api/v1/assets/upload-ticket')) == 1
     assert calls.count(('POST', '/api/v1/tasks')) == 1
+    assert calls.index(('GET', '/api/v1/tasks/slots/slot-1/current')) < calls.index(('GET', '/api/v1/tasks/preflight/p1/check'))
     assert calls.index(('GET', '/api/v1/tasks/preflight/p1/check')) < calls.index(('POST', '/api/v1/assets/upload-ticket'))
+
+
+def test_existing_slot_task_recovers_before_expired_preflight_or_current_admission(tmp_path, monkeypatch):
+    request = inputs(tmp_path, monkeypatch)
+    config = VideoFlowConfig('https://test', 'token', receipt_dir=str(tmp_path / 'receipts'))
+    calls = []
+
+    class Client:
+        def __init__(self, _config):
+            pass
+
+        def receipt_store(self, root):
+            from receipts import ReceiptStore
+            return ReceiptStore(root)
+
+        def get_current_task_for_slot(self, execution_slot_id):
+            calls.append(('get-current', execution_slot_id))
+            return {
+                'executionSlotId': execution_slot_id,
+                'currentTask': {
+                    'id': 'task-paid-1',
+                    'status': 'running',
+                    'clientDeliveryStatus': 'pending',
+                },
+            }
+
+        def upload_media(self, *_args, **_kwargs):
+            raise AssertionError('recovery must not upload media')
+
+        def create_task_with_receipt(self, **_kwargs):
+            raise AssertionError('recovery must not create another task')
+
+    monkeypatch.setattr(n, 'VideoFlowClient', Client)
+    n.store(config).save(n.fingerprint(request['intent']), {
+        'preflightId': 'expired-preflight',
+        'expiresAt': '2000-01-01T00:00:00+00:00',
+        'productionAdmission': {'canSubmit': False, 'blockers': [{'code': 'PRODUCTION_PAUSED'}]},
+    })
+    policy = n.ExecutionPolicy().execute('production')[0]
+
+    checked = n.RequestPreview().check(config, policy, request)['result'][0]
+    result = n.CreateTask().submit(
+        config,
+        policy,
+        checked,
+        generation_version=1,
+        execution_slot_id='slot-1',
+    )[0]
+
+    assert result == {
+        'mode': 'production',
+        'task_id': 'task-paid-1',
+        'execution_slot_id': 'slot-1',
+        'recovered': True,
+    }
+    assert calls == [('get-current', 'slot-1')]
 
 
 def test_workflow_links_resolve_and_default_is_preview():
@@ -208,12 +510,36 @@ def test_workflow_links_resolve_and_default_is_preview():
     workflow = json.loads((Path(__file__).parents[1] / 'workflows/seedance-product-preflight-v1.comfy.json').read_text())
     nodes = {node['id']: node for node in workflow['nodes']}
     policy = next(node for node in nodes.values() if node['type'] == 'VideoFlowExecutionPolicy')
-    assert policy['widgets_values'] == ['preview', False]
+    assert policy['widgets_values'] == ['preview']
     for link_id, source, output, target, inlet, kind in workflow['links']:
         assert link_id in nodes[source]['outputs'][output]['links']
         assert nodes[source]['outputs'][output]['type'] == kind
         assert nodes[target]['inputs'][inlet]['link'] == link_id
         assert nodes[target]['inputs'][inlet]['type'] == kind
+
+
+def test_each_current_template_has_its_own_persistent_execution_slot():
+    from pathlib import Path
+
+    workflow_root = Path(__file__).parents[1] / 'workflows'
+    names = [
+        'seedance-product-preflight-v1.comfy.json',
+        'seedance-text-to-video-preflight-v1.comfy.json',
+        'seedance-first-frame-to-video-preflight-v1.comfy.json',
+        'seedance-first-last-frame-to-video-preflight-v1.comfy.json',
+        'seedance-multi-reference-preflight-v1.comfy.json',
+    ]
+    slots = []
+
+    for name in names:
+        workflow = json.loads((workflow_root / name).read_text())
+        create = next(node for node in workflow['nodes'] if node['type'] == 'VideoFlowConfirmedCreate')
+        slot_id, generation_version = create['widgets_values']
+        assert slot_id.startswith('slot-template-')
+        assert generation_version == 1
+        slots.append(slot_id)
+
+    assert len(slots) == len(set(slots))
 
 
 def test_policy_preview_returns_comfyui_video_player_payload(tmp_path, monkeypatch):
@@ -245,3 +571,141 @@ def test_policy_preview_without_video_only_shows_message():
 
     assert result['result'] == ('',)
     assert '未生成视频' in result['ui']['text'][0]
+
+
+def test_download_persists_verified_file_before_confirmation_and_retries_original_task(tmp_path, monkeypatch):
+    from pathlib import Path
+    from receipts import ReceiptStore
+
+    output = tmp_path / 'output'
+    output.mkdir()
+    monkeypatch.setitem(__import__('sys').modules, 'folder_paths', SimpleNamespace(
+        get_output_directory=lambda: str(output),
+    ))
+    config = VideoFlowConfig('https://test', 'token', receipt_dir=str(tmp_path / 'receipts'))
+    receipts = ReceiptStore(config.receipt_dir)
+    calls = []
+
+    class Client:
+        def __init__(self, _config):
+            pass
+
+        def receipt_store(self, root):
+            assert root == config.receipt_dir
+            return receipts
+
+        def download_task_result(self, task_id, output_dir):
+            calls.append(('download', task_id))
+            path = Path(output_dir) / 'task-1.mp4'
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b'verified-video')
+            return {
+                'taskId': task_id,
+                'assetId': 'asset-1',
+                'mimeType': 'video/mp4',
+                'sizeBytes': len(b'verified-video'),
+                'sha256': 'a36c654f80c9638143e35ed8133c0e877ee2991b598003e3d5fd992f99984cc7',
+                'localPath': str(path),
+            }
+
+        def confirm_client_delivery(self, task_id):
+            calls.append(('confirm', task_id))
+            saved = receipts.load('slot:slot-1')
+            assert saved['localDeliveryStatus'] == 'downloaded'
+            assert Path(saved['localPath']).read_bytes() == b'verified-video'
+            if calls.count(('confirm', task_id)) == 1:
+                raise RuntimeError('temporary confirmation failure')
+            return {'taskId': task_id, 'clientDeliveryStatus': 'delivered'}
+
+    monkeypatch.setattr(n, 'VideoFlowClient', Client)
+    task = {
+        'mode': 'production',
+        'task_id': 'task-1',
+        'execution_slot_id': 'slot-1',
+        'recovered': True,
+    }
+
+    with pytest.raises(RuntimeError, match='confirmation failure'):
+        n.DownloadResult().download(config, task)
+
+    assert receipts.load('slot:slot-1')['localDeliveryStatus'] == 'downloaded'
+    result = n.DownloadResult().download(config, task)
+
+    assert result['result'] == (str(output / 'video-flow' / 'task-1.mp4'),)
+    assert calls == [
+        ('download', 'task-1'),
+        ('confirm', 'task-1'),
+        ('confirm', 'task-1'),
+    ]
+    assert receipts.load('slot:slot-1')['localDeliveryStatus'] == 'confirmed'
+
+
+def test_delivered_slot_starts_a_new_idempotent_round_with_the_same_preflight(tmp_path, monkeypatch):
+    import httpx
+    from client import VideoFlowClient
+    from submission_state import record_confirmed, record_downloaded
+
+    config = VideoFlowConfig('https://test', 'token', receipt_dir=str(tmp_path / 'receipts'))
+    request = n.TextRequest().build('同一提示词连续生成两个版本', 5, '16:9', '720p')[0]
+    record = {
+        'preflightId': 'p1',
+        'expiresAt': (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat(),
+        'willCallProvider': False,
+        'willUploadMedia': False,
+        'effectiveRequest': request['intent'],
+        'requestCheck': {'status': 'passed', 'items': []},
+        'productionAdmission': {'canSubmit': True, 'blockers': []},
+        'intentDigest': 'intent-digest',
+        'quote': {'quoteDigest': 'quote-digest', 'status': 'estimated'},
+    }
+    submitted_keys = []
+
+    def handle(req):
+        if '/slots/' in req.url.path:
+            return httpx.Response(200, json={'executionSlotId': 'slot-1', 'currentTask': None})
+        if req.url.path.endswith('/check'):
+            return httpx.Response(200, json=record)
+        if req.method == 'POST' and req.url.path.endswith('/tasks'):
+            submitted_keys.append(req.headers['idempotency-key'])
+            return httpx.Response(201, json={'id': f'task-{len(submitted_keys)}'})
+        if req.url.path.endswith('/tasks/task-1'):
+            return httpx.Response(200, json={'id': 'task-1', 'clientDeliveryStatus': 'delivered'})
+        raise AssertionError(str(req.url))
+
+    monkeypatch.setattr(
+        n,
+        'VideoFlowClient',
+        lambda cfg: VideoFlowClient(cfg, httpx.Client(transport=httpx.MockTransport(handle))),
+    )
+    n.store(config).save(n.fingerprint(request['intent']), record)
+    policy = n.ExecutionPolicy().execute('production')[0]
+    checked = n.RequestPreview().check(config, policy, request)['result'][0]
+
+    first = n.CreateTask().submit(config, policy, checked, execution_slot_id='slot-1')[0]
+    receipts = VideoFlowClient(config).receipt_store(config.receipt_dir)
+    local = tmp_path / 'task-1.mp4'
+    local.write_bytes(b'first-version')
+    record_downloaded(receipts, 'slot-1', 'task-1', {
+        'localPath': str(local),
+        'sha256': '8b943375b74c94187dc51dc5a2e225d508f4974b4e388cc5200c787e8df159b0',
+        'sizeBytes': len(b'first-version'),
+        'assetId': 'asset-1',
+        'mimeType': 'video/mp4',
+    })
+    record_confirmed(receipts, 'slot-1', 'task-1')
+
+    second = n.CreateTask().submit(config, policy, checked, execution_slot_id='slot-1')[0]
+
+    assert first['task_id'] == 'task-1'
+    assert second['task_id'] == 'task-2'
+    assert len(submitted_keys) == 2
+    assert submitted_keys[0] != submitted_keys[1]
+    current_receipt = receipts.load('slot:slot-1')
+    assert current_receipt['taskId'] == 'task-2'
+    assert current_receipt['originalRequest'] == request['intent']
+    assert current_receipt['body'] == {
+        'mode': 'production',
+        'preflightId': 'p1',
+        'executionSlotId': 'slot-1',
+        'media': [],
+    }

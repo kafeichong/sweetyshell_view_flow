@@ -346,6 +346,61 @@ class ProviderSubmissionRecoveryTests(unittest.TestCase):
         self.assertEqual(delivery["json"]["objectKey"], expected_key)
         self.assertNotIn("signature", json.dumps(delivery["json"]))
 
+    def test_video_edit_archives_mov_with_quicktime_mime(self):
+        import executor as executor_module
+
+        downloaded_paths = []
+
+        async def download_video(_url, output_path):
+            downloaded_paths.append(output_path)
+            Path(output_path).write_bytes(b"mov-video")
+
+        adapter = SimpleNamespace(
+            default_model="doubao-seedance-2-5-260628",
+            create_task=AsyncMock(return_value={"task_id": "provider-edit"}),
+            poll_until_complete=AsyncMock(return_value=ProviderTaskStatus(
+                id="provider-edit", status="completed",
+                result_url="https://provider.test/result.mov",
+            )),
+            download_video=AsyncMock(side_effect=download_video),
+            pricing_version="seedance-token-v1",
+            classify_failure=lambda _message: executor_module.FailureType.UNKNOWN,
+        )
+        plan = approved_execution_plan() | {
+            "contractDigest": _WORKFLOW_CONTRACT_DIGEST,
+            "workflowVersion": _WORKFLOW_CONTRACT["contractRevision"],
+            "workflowKey": "seedance.video-edit.v1",
+            "media": [{"assetId": "asset-video-1", "role": "reference_video"}],
+            "duration": -1,
+            "ratio": "adaptive",
+            "omniReferenceTaskType": "edit",
+            "outputFormat": "mov",
+        }
+        job = Job(
+            id="job-edit", status="pending", created_by="alice", prompt="edit @video1",
+            created_at="2026-09-15T00:00:00+00:00", provider_profile="seedance-main",
+            attempt_id="attempt-edit", execution_plan=plan,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            job_executor = self._plan_job_executor(adapter, directory, client=_RecordingClient())
+            del job_executor.create_asset
+            job_executor.oss_uploader = _FakeOssUploader()
+            settings = SimpleNamespace(
+                comfyui_enabled=False, running_job_timeout_minutes=10,
+                task_status_check_interval=0, video_flow_audit_dir="",
+            )
+            with patch.object(executor_module, "settings", settings):
+                asyncio.run(job_executor.execute_job(job))
+
+            asset = next(call for call in job_executor.client.calls if call["method"] == "POST")["json"]
+            uploaded_key = job_executor.oss_uploader.uploaded[0][0]
+
+        self.assertTrue(downloaded_paths[0].endswith(".mov"))
+        self.assertEqual(uploaded_key, "videos/2026/09/15/job-edit/attempt-edit/result.mov")
+        self.assertEqual(asset["objectKey"], uploaded_key)
+        self.assertEqual(asset["mimeType"], "video/quicktime")
+
     def test_existing_provider_task_id_only_polls_without_creating_again(self):
         import executor as executor_module
 

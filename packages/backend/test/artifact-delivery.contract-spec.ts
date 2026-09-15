@@ -3,20 +3,8 @@ import { createContractHarness } from './contract-harness';
 import { Prisma } from '@prisma/client';
 import { inspectedImageFixture, referenceImageWorkflowRequest } from './workflow-fixtures';
 
-const PRICING_VERSION = 'seedance-token-v1';
+const PRICING_VERSION = 'seedance-2.5-public-catalog-2026-09-15';
 const VERIFIED_MODEL = 'doubao-seedance-2-5-260628';
-
-const testSpec = {
-  version: 'test-v1',
-  model: VERIFIED_MODEL,
-  duration: 5,
-  ratio: '16:9',
-  resolution: 'test-resolution',
-  generateAudio: false,
-  watermark: true,
-  pricingVersion: PRICING_VERSION,
-  reserveCny: '2.000000',
-};
 
 type Harness = Awaited<ReturnType<typeof createContractHarness>>;
 
@@ -37,7 +25,7 @@ async function createProductionTask(
       'Authorization': `Bearer ${harness.actorToken}`,
       'Idempotency-Key': key,
     },
-    body: JSON.stringify(await referenceImageWorkflowRequest(harness, 'artifact delivery contract', assetId, 'test-resolution')),
+    body: JSON.stringify(await referenceImageWorkflowRequest(harness, 'artifact delivery contract', assetId, '720p')),
   });
   expect(response.status).toBe(201);
   return response.json();
@@ -72,7 +60,7 @@ async function reportOutcome(
       body: JSON.stringify({
         providerTaskId,
         status: 'succeeded',
-        usage: { total_tokens: 10000 },
+        usage: { completion_tokens: 10000 },
       }),
     },
   );
@@ -161,7 +149,7 @@ describe('T06: Artifact delivery contract', () => {
 
   beforeAll(async () => {
     harness = await createContractHarness({
-      productionSpec: testSpec,
+      allowProduction: true,
       // 下载链接按需签发，合同环境用假凭证即可（签名是本地计算，不访问 OSS）。
       env: {
         OSS_ACCESS_KEY_ID: 'contract-oss-key',
@@ -306,7 +294,7 @@ describe('T06: Artifact delivery contract', () => {
       where: { id: claimed.attemptId },
     });
     expect(attempt!.status).toBe('completed');
-    expect(attempt!.providerUsage).toEqual({ total_tokens: 10000 });
+    expect(attempt!.providerUsage).toEqual({ completion_tokens: 10000 });
 
     const reservation = await harness.prisma.taskBudgetReservation.findUnique({
       where: { taskId: task.id },

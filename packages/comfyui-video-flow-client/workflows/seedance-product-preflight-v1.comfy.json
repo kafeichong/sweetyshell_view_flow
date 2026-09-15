@@ -70,8 +70,7 @@
         "Node name for S&R": "VideoFlowExecutionPolicy"
       },
       "widgets_values": [
-        "preview",
-        false
+        "preview"
       ]
     },
     {
@@ -196,7 +195,7 @@
     {
       "id": 6,
       "type": "VideoFlowConfirmedCreate",
-      "title": "⑤ 正式提交｜预检通过且确认后",
+      "title": "⑤ 正式提交｜恢复优先，按槽顺序生成",
       "pos": [
         1510,
         30
@@ -238,6 +237,7 @@
         "Node name for S&R": "VideoFlowConfirmedCreate"
       },
       "widgets_values": [
+        "slot-template-product-v1",
         1
       ]
     },
