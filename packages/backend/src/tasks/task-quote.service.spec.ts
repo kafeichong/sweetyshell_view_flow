@@ -160,11 +160,34 @@ describe('TaskQuoteService', () => {
 
     expect(quote.status).toBe('bounded');
     expect(quote.estimatedCny).toBeNull();
-    expect(quote.reserveCny).toBe('7.671090');
+    expect(quote.reserveCny).toBe('7.747810');
     expect(quote.basis).toEqual(expect.objectContaining({
+      // 表内最大像素照旧报出来，真正用于预留的是加过余量的 936,683。
       outputPixelUpperBound: 927408,
-      billedTokens: 109587,
+      outputReservedPixels: 936683,
+      billedTokens: 110683,
     }));
+  });
+
+  it('keeps the adaptive pixel bound above what the provider actually bills', () => {
+    const service = new TaskQuoteService(new PricingCatalog());
+
+    // 两条真实付费任务（5s/720p/adaptive，首帧 611x917、尾帧 717x1051，taskId
+    // 141babe3…/1614cd62…）：出片 786x1180 = 927,480 px，**比表内最大 927,408 多 72 px**，
+    // 结算 floor(121 x 927480/1024) = 109,594 tokens。表内最大像素因此不是严格上界，
+    // 预留要加余量才盖得住——这条用例把余量钉住，防止它被后来的人当冗余删掉。
+    const bounded = service.quote(
+      intent({ generation: { ...intent().generation, ratio: 'adaptive' } }), MODEL, new Date('2026-09-15T00:00:00.000Z'),
+    );
+
+    expect(bounded.status).toBe('bounded');
+    expect(bounded.basis).toEqual(expect.objectContaining({
+      outputPixelUpperBound: 927408,
+      outputReservedPixels: 936683,
+      billedTokens: 110683,
+    }));
+    // 110,683 > 109,594：预留盖得住实测结算。
+    expect(bounded.reserveCny).toBe('7.747810');
   });
 
   it('bills the official input-video minimum below the floor and the formula above it', () => {

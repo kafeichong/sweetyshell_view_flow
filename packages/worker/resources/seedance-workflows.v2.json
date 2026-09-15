@@ -149,11 +149,16 @@
         "note": "五条真实结算全部等于『(输出时长 × 帧率 + 1) 帧 × 宽 × 高 / 1024』再向下截断（最后一条是 adaptive 输出、尺寸不在合同像素表内，同样成立）；本实现向上取整，因此最多比 Provider 多留 1 token（480p 9:16 一条即 58,046 对 58,045）。30 秒边界尚未实测，最低 token 口径不随本调整变动。"
       },
       "adaptiveOutputBound": {
-        "status": "assumed_sufficient",
+        "status": "falsified_needs_margin",
         "verifiedOn": "2026-09-15",
-        "observed": "首帧 769×1163（比例 0.661，不匹配合同比例表）时，Provider 实际出片 528×798 —— 是首帧自身画幅的等比缩放，**不是表内任何一种尺寸**；像素数 421,344，低于 480p 表内最大值 428,544（21:9）。本例中 bounded 预占因此偏高（2.841650 对结算 2.793840），方向安全。",
-        "openRisk": "首帧画幅比 21:9 更宽（比例 > 2.33）时，表内最大像素是否仍是上界，**未经验证**。若否，bounded 预占会低估。",
-        "evidence": { "taskId": "f6b3732f-d314-4263-81a6-8a96e8218876", "providerTaskId": "cgt-20260915194409-mw10a" }
+        "observed": "表内最大像素**不是严格上界**。两条 5s/720p 首尾帧任务（taskId 141babe3… 与 1614cd62…，首帧 611×917、尾帧 717×1051）出片均为 786×1180 = 927,480 px，比 720p 表内最大 1112×834 = 927,408 多 72 px，结算 109,594 tokens > 按表内最大像素预留的 109,587。480p 同样越过：实测 528×798 = 421,344 > 表内最大 421,120。成因看起来是 Provider 按最接近的表内比例的**面积**给预算、再用首帧比例取整，取整就会略微超出。",
+        "policy": "bounded 路径按「表内最大像素 × 1.01」预留（ADAPTIVE_BOUND_MARGIN）；两次实测溢出为 0.008% 与 0.053%，1% 留足整数量级余量，代价是这几档多预留不到 0.1 元。可锁定尺寸的路径不加余量——那几档实际出片与表内尺寸逐位一致。",
+        "outputRatioRule": "自适应输出画幅**跟随首帧**：两条实测首帧比例 0.6663、产物 786×1180 = 0.6661，尾帧（0.6822）不参与定画幅。",
+        "evidence": [
+          { "taskId": "1614cd62-21f2-440a-a493-0d60923e3e77", "providerTaskId": "cgt-20260915195813-n7itd", "width": 786, "height": 1180, "completionTokens": 109594 },
+          { "taskId": "141babe3-906e-4b5a-998b-eaa6947d2ea6", "providerTaskId": "cgt-20260915200306-e72is", "width": 786, "height": 1180, "completionTokens": 109594 },
+          { "taskId": "f6b3732f-d314-4263-81a6-8a96e8218876", "providerTaskId": "cgt-20260915194409-mw10a", "width": 528, "height": 798, "completionTokens": 39912 }
+        ]
       }
     },
     "inputVideoMinimumTokens": {
@@ -405,8 +410,61 @@
           "reason": null
         },
         "validation": {
-          "status": "not_run",
-          "records": []
+          "status": "passed",
+          "records": [
+            {
+              "workflowKey": "seedance.first-last-frame-to-video.v1",
+              "model": "doubao-seedance-2-5-260628",
+              "acceptedAt": "2026-09-15",
+              "software": {
+                "contractRevision": "2026-09-15.4",
+                "contractDigest": "2e95034c85ad474935befa206d2b7721eb4c3748653a83c5f6a40fdf390e8ecc",
+                "specVersion": "workflow-production-v2"
+              },
+              "parameters": {
+                "duration": 5, "ratio": "adaptive", "resolution": "720p",
+                "outputFormat": "mp4", "generateAudio": true, "watermark": false,
+                "media": "first_frame 611x917 + last_frame 717x1051（均为 image/webp）"
+              },
+              "artifact": {
+                "taskId": "1614cd62-21f2-440a-a493-0d60923e3e77",
+                "providerTaskId": "cgt-20260915195813-n7itd",
+                "sha256": "f2a6dba74fbdb66568749a81b03acfd4cef2e26a0d4c950154389e37ef8a6664",
+                "bytes": 3340842, "width": 786, "height": 1180, "frames": 121, "durationSeconds": 5.056
+              },
+              "billing": {
+                "reservedCny": "7.671090", "settledCny": "7.671580",
+                "completionTokens": 109594, "status": "usage_calculated"
+              },
+              "evidenceRef": "/private/tmp/video-flow-comfy-acceptance/evidence/r8/r8-first-last-frame-5s-run2-evidence.json"
+            },
+            {
+              "workflowKey": "seedance.first-last-frame-to-video.v1",
+              "model": "doubao-seedance-2-5-260628",
+              "acceptedAt": "2026-09-15",
+              "software": {
+                "contractRevision": "2026-09-15.4",
+                "contractDigest": "2e95034c85ad474935befa206d2b7721eb4c3748653a83c5f6a40fdf390e8ecc",
+                "specVersion": "workflow-production-v2"
+              },
+              "parameters": {
+                "duration": 5, "ratio": "adaptive", "resolution": "720p",
+                "outputFormat": "mp4", "generateAudio": true, "watermark": false,
+                "media": "同上一轮（intentDigest 相同，两次独立出片）"
+              },
+              "artifact": {
+                "taskId": "141babe3-906e-4b5a-998b-eaa6947d2ea6",
+                "providerTaskId": "cgt-20260915200306-e72is",
+                "sha256": "79007cafa1eefe67129ca5f16a80827251c33b265cfdd4ceae2259b1f2d0c0ca",
+                "bytes": 3780959, "width": 786, "height": 1180, "frames": 121, "durationSeconds": 5.056
+              },
+              "billing": {
+                "reservedCny": "7.671090", "settledCny": "7.671580",
+                "completionTokens": 109594, "status": "usage_calculated"
+              },
+              "evidenceRef": "/private/tmp/video-flow-comfy-acceptance/evidence/r8/r8-first-last-frame-5s-run1-evidence.json"
+            }
+          ]
         }
       },
       "media": {

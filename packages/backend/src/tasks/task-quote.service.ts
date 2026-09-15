@@ -44,12 +44,16 @@ function adaptiveDimensions(intent: WorkflowIntent): { dimensions: [number, numb
     : { dimensions: null, basis: null };
 }
 
-function frameTokens(frames: Prisma.Decimal, width: number, height: number): number {
-  const value = frames.mul(width).mul(height).div(1024)
+function pixelTokens(pixelFrames: Prisma.Decimal): number {
+  const value = pixelFrames.div(1024)
     .toDecimalPlaces(0, Prisma.Decimal.ROUND_CEIL)
     .toNumber();
   if (!Number.isSafeInteger(value)) throw new Error('QUOTE_TOKEN_OVERFLOW');
   return value;
+}
+
+function frameTokens(frames: Prisma.Decimal, width: number, height: number): number {
+  return pixelTokens(frames.mul(width).mul(height));
 }
 
 function formulaTokens(seconds: Prisma.Decimal, width: number, height: number, frameRate: number): number {
@@ -66,6 +70,18 @@ function formulaTokens(seconds: Prisma.Decimal, width: number, height: number, f
  * 最低 token 口径不跟着动：它是官方表里逐行核对过的下限，且恒大于补帧后的公式值。
  */
 const OUTPUT_EXTRA_FRAMES = 1;
+
+/**
+ * 自适应输出锁不住比例时（首帧画幅不在官方像素表内），用「该分辨率表内最大像素」预留。
+ * **实测这个上界不是严格上界**：Provider 按最接近的表内比例的**面积**给预算，再用首帧
+ * 比例取整，取整会略微越过表内最大像素——720p 实测 786×1180 = 927,480（表内最大
+ * 1112×834 = 927,408，超 72），480p 实测 528×798 = 421,344（表内最大 421,120，超 224）。
+ * 少预留与"不得低估预占"冲突，因此统一加一个余量；两次实测溢出分别为 0.008% 与 0.053%，
+ * 取 1% 是留足整数量级的余量，代价只是这几档多预留不到 0.1 元。
+ * 可锁定尺寸的路径不加余量：那几档的实际出片与表内尺寸逐位一致。
+ * 证据见 contract.pricing.estimate.adaptiveOutputBound。
+ */
+const ADAPTIVE_BOUND_MARGIN = new Prisma.Decimal('1.01');
 
 /**
  * 官方对「输入包含视频」的请求设有最低计费用量：公式值低于最低值时按最低值计费。
@@ -107,6 +123,7 @@ export class TaskQuoteService {
     let adaptiveBasis: string | null = null;
     let bounded = false;
     let outputPixelUpperBound: number | undefined;
+    let outputReservedPixels: number | undefined;
     if (!dimensions && intent.generation.ratio === 'adaptive') {
       const adaptive = adaptiveDimensions(intent);
       dimensions = adaptive.dimensions;
@@ -114,6 +131,9 @@ export class TaskQuoteService {
       if (!dimensions) {
         const candidates = Object.values(contract.model.dimensions?.[intent.generation.resolution] ?? {}) as [number, number][];
         outputPixelUpperBound = Math.max(...candidates.map(([width, height]) => width * height));
+        outputReservedPixels = outputPixelUpperBound === undefined
+          ? undefined
+          : Math.ceil(new Prisma.Decimal(outputPixelUpperBound).mul(ADAPTIVE_BOUND_MARGIN).toNumber());
         const representative = candidates.find(([width, height]) => width * height === outputPixelUpperBound);
         dimensions = representative ?? null;
         bounded = true;
@@ -123,9 +143,10 @@ export class TaskQuoteService {
 
     const [width, height] = dimensions;
     const frameRate = contract.model.outputFrameRate;
-    const tokens = frameTokens(
-      inputSeconds.add(outputSeconds).mul(frameRate).add(OUTPUT_EXTRA_FRAMES), width, height,
-    );
+    const frames = inputSeconds.add(outputSeconds).mul(frameRate).add(OUTPUT_EXTRA_FRAMES);
+    const tokens = outputReservedPixels === undefined
+      ? frameTokens(frames, width, height)
+      : pixelTokens(frames.mul(outputReservedPixels));
     const minimumTokens = hasInputVideo
       ? formulaTokens(minimumTotalSeconds(outputSeconds), width, height, frameRate)
       : null;
@@ -145,6 +166,7 @@ export class TaskQuoteService {
       ...(adaptiveBasis ? { adaptiveBasis } : {}),
       ...(outputDurationBasis ? { outputDurationBasis } : {}),
       ...(outputPixelUpperBound ? { outputPixelUpperBound } : {}),
+      ...(outputReservedPixels ? { outputReservedPixels } : {}),
       generation: {
         generateAudio: intent.generation.generateAudio,
         watermark: intent.generation.watermark,
