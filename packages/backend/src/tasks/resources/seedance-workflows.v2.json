@@ -143,9 +143,17 @@
           { "taskId": "3614cb63-dd7b-47d6-82ee-49ffbf7bf366", "request": "4s/720p/16:9/有声", "frames": 97, "width": 1280, "height": 720, "completionTokens": 87300 },
           { "taskId": "d4d41580-f30c-4be1-96a7-6cce265451f1", "request": "5s/720p/16:9/有声", "frames": 121, "width": 1280, "height": 720, "completionTokens": 108900 },
           { "taskId": "994e3fb6-6d63-4a16-ac64-c96dca9ed3d2", "request": "5s/720p/16:9（参考图）", "frames": 121, "width": 1280, "height": 720, "completionTokens": 108900 },
-          { "taskId": "3bb48246-b626-4c2b-beb8-5211f1665728", "request": "6s/480p/9:16（参考图）", "frames": 145, "width": 480, "height": 854, "completionTokens": 58045 }
+          { "taskId": "3bb48246-b626-4c2b-beb8-5211f1665728", "request": "6s/480p/9:16（参考图）", "frames": 145, "width": 480, "height": 854, "completionTokens": 58045 },
+          { "taskId": "f6b3732f-d314-4263-81a6-8a96e8218876", "request": "4s/480p/adaptive（首帧）", "frames": 97, "width": 528, "height": 798, "completionTokens": 39912 }
         ],
-        "note": "四条真实结算全部等于『(输出时长 × 帧率 + 1) 帧 × 宽 × 高 / 1024』再向下截断；本实现向上取整，因此最多比 Provider 多留 1 token（480p 9:16 一条即 58,046 对 58,045）。30 秒边界尚未实测，最低 token 口径不随本调整变动。"
+        "note": "五条真实结算全部等于『(输出时长 × 帧率 + 1) 帧 × 宽 × 高 / 1024』再向下截断（最后一条是 adaptive 输出、尺寸不在合同像素表内，同样成立）；本实现向上取整，因此最多比 Provider 多留 1 token（480p 9:16 一条即 58,046 对 58,045）。30 秒边界尚未实测，最低 token 口径不随本调整变动。"
+      },
+      "adaptiveOutputBound": {
+        "status": "assumed_sufficient",
+        "verifiedOn": "2026-09-15",
+        "observed": "首帧 769×1163（比例 0.661，不匹配合同比例表）时，Provider 实际出片 528×798 —— 是首帧自身画幅的等比缩放，**不是表内任何一种尺寸**；像素数 421,344，低于 480p 表内最大值 428,544（21:9）。本例中 bounded 预占因此偏高（2.841650 对结算 2.793840），方向安全。",
+        "openRisk": "首帧画幅比 21:9 更宽（比例 > 2.33）时，表内最大像素是否仍是上界，**未经验证**。若否，bounded 预占会低估。",
+        "evidence": { "taskId": "f6b3732f-d314-4263-81a6-8a96e8218876", "providerTaskId": "cgt-20260915194409-mw10a" }
       }
     },
     "inputVideoMinimumTokens": {
@@ -330,8 +338,34 @@
           "reason": null
         },
         "validation": {
-          "status": "not_run",
-          "records": []
+          "status": "passed",
+          "records": [
+            {
+              "workflowKey": "seedance.first-frame-to-video.v1",
+              "model": "doubao-seedance-2-5-260628",
+              "acceptedAt": "2026-09-15",
+              "software": {
+                "contractRevision": "2026-09-15.4",
+                "contractDigest": "2e95034c85ad474935befa206d2b7721eb4c3748653a83c5f6a40fdf390e8ecc",
+                "specVersion": "workflow-production-v2"
+              },
+              "parameters": {
+                "duration": 4, "ratio": "adaptive", "resolution": "480p",
+                "outputFormat": "mp4", "generateAudio": true, "watermark": false
+              },
+              "artifact": {
+                "taskId": "f6b3732f-d314-4263-81a6-8a96e8218876",
+                "providerTaskId": "cgt-20260915194409-mw10a",
+                "sha256": "e6dd50282c1603261ef95357f8c69f5bbe41d4f2933a34a18482a9140eceaef5",
+                "bytes": 2677725, "width": 528, "height": 798, "frames": 97, "durationSeconds": 4.064
+              },
+              "billing": {
+                "reservedCny": "2.841650", "settledCny": "2.793840",
+                "completionTokens": 39912, "status": "usage_calculated"
+              },
+              "evidenceRef": "/private/tmp/video-flow-comfy-acceptance/evidence/r8/r8-first-frame-4s-evidence.json"
+            }
+          ]
         }
       },
       "media": {
