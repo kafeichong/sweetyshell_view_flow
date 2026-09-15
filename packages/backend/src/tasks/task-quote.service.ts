@@ -44,13 +44,28 @@ function adaptiveDimensions(intent: WorkflowIntent): { dimensions: [number, numb
     : { dimensions: null, basis: null };
 }
 
-function formulaTokens(seconds: Prisma.Decimal, width: number, height: number, frameRate: number): number {
-  const value = seconds.mul(width).mul(height).mul(frameRate).div(1024)
+function frameTokens(frames: Prisma.Decimal, width: number, height: number): number {
+  const value = frames.mul(width).mul(height).div(1024)
     .toDecimalPlaces(0, Prisma.Decimal.ROUND_CEIL)
     .toNumber();
   if (!Number.isSafeInteger(value)) throw new Error('QUOTE_TOKEN_OVERFLOW');
   return value;
 }
+
+function formulaTokens(seconds: Prisma.Decimal, width: number, height: number, frameRate: number): number {
+  return frameTokens(seconds.mul(frameRate), width, height);
+}
+
+/**
+ * Provider 实际按**出片帧数**结算，而官方"估算值"公式按秒数计算，两者差一帧：
+ * 四个真实付费任务（4s/720p 结算 87,300、5s/720p 结算 108,900 各一条、
+ * 6s/480p 9:16 结算 58,045，见 docs/PROJECT_STATUS.md）的 completion_tokens
+ * 全部等于「输出时长 × 帧率 + 1」帧乘以 宽 × 高 / 1024，且下载下来的成片帧数与
+ * 此完全一致——编码器把起始那一帧也计了费。少算这一帧会让预占系统性低于真实
+ * 结算，与项目"不得低估预占"的要求冲突，因此在输出部分补上。
+ * 最低 token 口径不跟着动：它是官方表里逐行核对过的下限，且恒大于补帧后的公式值。
+ */
+const OUTPUT_EXTRA_FRAMES = 1;
 
 /**
  * 官方对「输入包含视频」的请求设有最低计费用量：公式值低于最低值时按最低值计费。
@@ -108,7 +123,9 @@ export class TaskQuoteService {
 
     const [width, height] = dimensions;
     const frameRate = contract.model.outputFrameRate;
-    const tokens = formulaTokens(inputSeconds.add(outputSeconds), width, height, frameRate);
+    const tokens = frameTokens(
+      inputSeconds.add(outputSeconds).mul(frameRate).add(OUTPUT_EXTRA_FRAMES), width, height,
+    );
     const minimumTokens = hasInputVideo
       ? formulaTokens(minimumTotalSeconds(outputSeconds), width, height, frameRate)
       : null;

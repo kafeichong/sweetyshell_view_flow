@@ -52,14 +52,14 @@ describe('TaskQuoteService', () => {
 
     expect(quote).toMatchObject({
       status: 'estimated',
-      estimatedCny: '7.560000',
-      reserveCny: '7.560000',
+      estimatedCny: '7.623000',
+      reserveCny: '7.623000',
       pricingVersion: 'seedance-2.5-public-catalog-2026-09-15',
       basis: {
         output: { durationSeconds: 5, width: 1280, height: 720, frameRate: 24 },
         inputVideoSeconds: '0.000000',
-        formulaTokens: 108000,
-        billedTokens: 108000,
+        formulaTokens: 108900,
+        billedTokens: 108900,
         ratePerMillion: '70.00',
         rateSource: 'public_catalog',
         minimumTokensApplied: false,
@@ -69,6 +69,33 @@ describe('TaskQuoteService', () => {
     expect(quote.quoteDigest).toMatch(/^[a-f0-9]{64}$/);
   });
 
+  it('matches the four real paid settlements, which all bill one frame beyond duration x frameRate', () => {
+    const service = new TaskQuoteService(new PricingCatalog());
+    const now = new Date('2026-09-15T00:00:00.000Z');
+
+    // 四个真实付费任务的 usage.completion_tokens（见 docs/PROJECT_STATUS.md）：
+    //   3614cb63 4s/720p 16:9 → 87,300     d4d41580、994e3fb6 5s/720p 16:9 → 108,900
+    //   3bb48246 6s/480p 9:16 (480x854)   → 58,045
+    // 前三个与「时长 × 帧率 + 1」帧完全相等；第四个的每帧 token 不是整数
+    // (480×854/1024 = 400.3125)，Provider 截断到 58,045，这里向上取整到 58,046，
+    // 多留 1 token 是刻意保守，与"不得低估预占"一致。
+    const fourSeconds = service.quote(intent({ generation: { ...intent().generation, duration: 4 } }), MODEL, now);
+    const fiveSeconds = service.quote(intent(), MODEL, now);
+    const sixSecondsWide = service.quote(intent({
+      generation: { ...intent().generation, duration: 6, ratio: '9:16', resolution: '480p' },
+    }), MODEL, now);
+
+    expect(fourSeconds.basis).toEqual(expect.objectContaining({ billedTokens: 87300 }));
+    expect(fourSeconds.reserveCny).toBe('6.111000');
+    expect(fiveSeconds.basis).toEqual(expect.objectContaining({ billedTokens: 108900 }));
+    expect(fiveSeconds.reserveCny).toBe('7.623000');
+    expect(sixSecondsWide.basis).toEqual(expect.objectContaining({
+      output: { durationSeconds: 6, width: 480, height: 854, frameRate: 24 },
+      billedTokens: 58046,
+    }));
+    expect(sixSecondsWide.reserveCny).toBe('4.063220');
+  });
+
   it('uses the official dimensions for every fixed ratio instead of recomputing rounded pixels', () => {
     const service = new TaskQuoteService(new PricingCatalog());
 
@@ -76,9 +103,9 @@ describe('TaskQuoteService', () => {
 
     expect(quote.basis).toEqual(expect.objectContaining({
       output: { durationSeconds: 5, width: 752, height: 560, frameRate: 24 },
-      formulaTokens: 49350,
+      formulaTokens: 49762,
     }));
-    expect(quote.reserveCny).toBe('3.454500');
+    expect(quote.reserveCny).toBe('3.483340');
   });
 
   it('derives adaptive first-frame output from the checked first-frame ratio', () => {
@@ -123,7 +150,7 @@ describe('TaskQuoteService', () => {
       output: { durationSeconds: 5, width: 720, height: 1280, frameRate: 24 },
       adaptiveBasis: 'first_frame',
     }));
-    expect(quote.reserveCny).toBe('7.560000');
+    expect(quote.reserveCny).toBe('7.623000');
   });
 
   it('uses a documented resolution pixel upper bound when adaptive output cannot be locked', () => {
@@ -133,10 +160,10 @@ describe('TaskQuoteService', () => {
 
     expect(quote.status).toBe('bounded');
     expect(quote.estimatedCny).toBeNull();
-    expect(quote.reserveCny).toBe('7.607670');
+    expect(quote.reserveCny).toBe('7.671090');
     expect(quote.basis).toEqual(expect.objectContaining({
       outputPixelUpperBound: 927408,
-      billedTokens: 108681,
+      billedTokens: 109587,
     }));
   });
 
@@ -161,7 +188,7 @@ describe('TaskQuoteService', () => {
     }), MODEL, new Date('2026-09-15T00:00:00.000Z'));
 
     // 720p 16:9 每秒 21,600 token；输出 5 秒时最低计费总秒数为 ceil(5×5/3)=9。
-    // 公式值 7×21600=151,200 低于最低值 9×21600=194,400，按最低值计费。
+    // 公式值 169 帧 = 152,100 低于最低值 9×21600=194,400，按最低值计费。
     expect(twoSeconds).toMatchObject({
       status: 'estimated',
       pricingVersion: 'seedance-2.5-public-catalog-2026-09-15',
@@ -169,25 +196,25 @@ describe('TaskQuoteService', () => {
       missing: [],
       basis: {
         inputVideoSeconds: '2.000000',
-        formulaTokens: 151200,
+        formulaTokens: 152100,
         minimumTokens: 194400,
         billedTokens: 194400,
         minimumTokensApplied: true,
         ratePerMillion: '42.00',
       },
     });
-    // 输入到 4 秒时公式值恰好追平最低值，两种口径同价。
-    expect(fourSeconds).toMatchObject({ reserveCny: '8.164800' });
+    // 输入到 4 秒时公式值 217 帧 = 195,300 已经超过最低值，改按公式值计费。
+    expect(fourSeconds).toMatchObject({ reserveCny: '8.202600' });
     expect(fourSeconds.basis).toEqual(expect.objectContaining({
-      formulaTokens: 194400, billedTokens: 194400, minimumTokensApplied: false,
+      formulaTokens: 195300, billedTokens: 195300, minimumTokensApplied: false,
     }));
-    // 公式值 35×21600=756,000 高于最低值，按公式值计费。
-    expect(thirtySeconds).toMatchObject({ reserveCny: '31.752000', missing: [] });
+    // 公式值 841 帧 = 756,900 高于最低值，按公式值计费。
+    expect(thirtySeconds).toMatchObject({ reserveCny: '31.789800', missing: [] });
     expect(thirtySeconds.basis).toEqual(expect.objectContaining({
-      inputVideoSeconds: '30.000000', formulaTokens: 756000, billedTokens: 756000, minimumTokensApplied: false,
+      inputVideoSeconds: '30.000000', formulaTokens: 756900, billedTokens: 756900, minimumTokensApplied: false,
     }));
-    expect(multiple).toMatchObject({ reserveCny: '31.752000' });
-    expect(multiple.basis).toEqual(expect.objectContaining({ inputVideoSeconds: '30.000000', formulaTokens: 756000 }));
+    expect(multiple).toMatchObject({ reserveCny: '31.789800' });
+    expect(multiple.basis).toEqual(expect.objectContaining({ inputVideoSeconds: '30.000000', formulaTokens: 756900 }));
   });
 
   it('derives the input-video minimum from output duration alone, not from the resolution group', () => {
@@ -195,6 +222,7 @@ describe('TaskQuoteService', () => {
 
     // 480p 16:9 为 854×480，每秒 9,607.5 token。输出 4 秒 → 最低总秒数 ceil(20/3)=7
     // → 7×9607.5=67,252.5，向上取整 67,253（与方舟快查表 480p/4 秒行一致）。
+    // 公式值 145 帧 × 400.3125 = 58,045.3125 → 58,046，仍低于最低值。
     const quote = service.quote(intent({
       workflowKey: 'seedance.omni-reference.v1',
       generation: { ...intent().generation, duration: 4, resolution: '480p' },
@@ -202,7 +230,7 @@ describe('TaskQuoteService', () => {
     }), MODEL, new Date('2026-09-15T00:00:00.000Z'));
 
     expect(quote.basis).toEqual(expect.objectContaining({
-      formulaTokens: 57645,
+      formulaTokens: 58046,
       minimumTokens: 67253,
       billedTokens: 67253,
       minimumTokensApplied: true,
@@ -219,14 +247,14 @@ describe('TaskQuoteService', () => {
     }), MODEL, new Date('2026-09-15T00:00:00.000Z'));
 
     // 输出 12 秒 → 最低计费总秒数 ceil(60/3)=20 → 20×21600=432,000；
-    // 公式值 24×21600=518,400 更高，因此按公式值计费且不触发最低值。
-    expect(quote).toMatchObject({ status: 'estimated', reserveCny: '21.772800', missing: [] });
+    // 公式值 577 帧 × 900 = 519,300 更高，因此按公式值计费且不触发最低值。
+    expect(quote).toMatchObject({ status: 'estimated', reserveCny: '21.810600', missing: [] });
     expect(quote.basis).toEqual(expect.objectContaining({
       inputVideoSeconds: '12.000000',
       outputDurationBasis: 'single_reference_video',
-      formulaTokens: 518400,
+      formulaTokens: 519300,
       minimumTokens: 432000,
-      billedTokens: 518400,
+      billedTokens: 519300,
       minimumTokensApplied: false,
       output: expect.objectContaining({ durationSeconds: 12 }),
     }));
@@ -262,7 +290,7 @@ describe('TaskQuoteService', () => {
     const quote = service.quote(intent(), MODEL, new Date('2026-09-15T00:00:00.000Z'));
 
     expect(quote.pricingVersion).toBe('ark-order-2026-09-15');
-    expect(quote.reserveCny).toBe('6.480000');
+    expect(quote.reserveCny).toBe('6.534000');
     expect(quote.basis).toEqual(expect.objectContaining({ ratePerMillion: '60.00', rateSource: 'volcengine_order' }));
   });
 

@@ -11,9 +11,10 @@ import { WorkflowContractCatalog } from './workflow-contract';
 const rawContract = require('./resources/seedance-workflows.v2.json') as WorkflowContractCatalog;
 
 // 受控验收期间**允许**处于开启状态的工作流。没列在这里却被打开 = 回归。
-// 依据：docs/runbooks/r8-production-acceptance-scope.md（2026-09-15 授权的 R8 验收）。
-// 验收收口时必须把这里清空，并把该工作流改回关闭。
-const DECLARED_OPEN_WORKFLOWS: string[] = ['seedance.text-to-video.v1'];
+// 依据：docs/runbooks/r8-production-acceptance-scope.md。
+// R8 第一轮验收已收口（2026-09-15）：列表清空，text-to-video 改回关闭。下次
+// 需要真实付费验收时，在这里显式声明，并在收口时再次清空。
+const DECLARED_OPEN_WORKFLOWS: string[] = [];
 
 function textIntent(workflowKey = 'seedance.text-to-video.v1') {
   return {
@@ -47,10 +48,17 @@ describe('WorkflowCatalogService', () => {
       .sort();
     expect(open).toEqual([...DECLARED_OPEN_WORKFLOWS].sort());
     const closed = workflows.filter((item) => !DECLARED_OPEN_WORKFLOWS.includes(item.key));
-    expect(closed.every((item) => item.state.implementation === 'incomplete')).toBe(true);
     expect(closed.every((item) => item.state.admission.enabled === false)).toBe(true);
-    expect(closed.every((item) => item.state.admission.reason === 'V2_FULL_CHAIN_NOT_COMPLETE')).toBe(true);
-    expect(workflows.every((item) => item.state.validation.status === 'not_run')).toBe(true);
+    // 关闭原因会作为预检 blocker 详情回到客户端，所以不允许为空。
+    expect(closed.every((item) => (item.state.admission.reason ?? '').length > 0)).toBe(true);
+    // implementation=ready 必须由 validation 记录支撑：没有真实验收记录就不允许
+    // 宣称可用；反之未完成的工作流不允许留下验证记录。
+    const ready = workflows.filter((item) => item.state.implementation === 'ready');
+    expect(ready.every((item) => item.state.validation.status === 'passed')).toBe(true);
+    expect(ready.every((item) => item.state.validation.records.length > 0)).toBe(true);
+    const incomplete = workflows.filter((item) => item.state.implementation === 'incomplete');
+    expect(incomplete.every((item) => item.state.validation.status === 'not_run')).toBe(true);
+    expect(incomplete.every((item) => item.state.validation.records.length === 0)).toBe(true);
   });
 
   it('publishes the exact contract revision, digest and server-selected model with the directory', () => {

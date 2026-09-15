@@ -5,9 +5,10 @@ import test from 'node:test';
 const contractUrl = new URL('../../contracts/seedance-workflows.v2.json', import.meta.url);
 
 // 受控验收期间**允许**处于开启状态的工作流。没列在这里却被打开 = 回归。
-// 依据：docs/runbooks/r8-production-acceptance-scope.md（2026-09-15 授权的 R8 验收）。
-// 验收收口时必须把这里清空，并把该工作流改回关闭。
-const DECLARED_OPEN_WORKFLOWS = ['seedance.text-to-video.v1'];
+// 依据：docs/runbooks/r8-production-acceptance-scope.md。
+// R8 第一轮验收已收口（2026-09-15）：列表清空，text-to-video 改回关闭。下次
+// 需要真实付费验收时，在这里显式声明，并在收口时再次清空。
+const DECLARED_OPEN_WORKFLOWS = [];
 
 async function loadContract() {
   return JSON.parse(await readFile(contractUrl, 'utf8'));
@@ -37,15 +38,32 @@ test('v2 contract freezes the official Seedance 2.5 API and all eight workflows'
   for (const workflow of contract.workflows) {
     assert.equal(workflow.state.capability, 'confirmed');
     if (DECLARED_OPEN_WORKFLOWS.includes(workflow.key)) {
-      assert.equal(workflow.state.implementation, 'ready');
       assert.equal(workflow.state.admission.enabled, true);
       assert.equal(workflow.state.admission.reason, null);
     } else {
-      assert.equal(workflow.state.implementation, 'incomplete');
+      // 发货源合同里的付费入口必须全部关闭，且必须写明关闭原因（该原因会作为
+      // 预检 blocker 详情回到客户端）。
       assert.equal(workflow.state.admission.enabled, false);
-      assert.equal(workflow.state.admission.reason, 'V2_FULL_CHAIN_NOT_COMPLETE');
+      assert.equal(typeof workflow.state.admission.reason, 'string');
+      assert.ok(workflow.state.admission.reason.length > 0);
     }
-    assert.equal(workflow.state.validation.status, 'not_run');
+    // implementation=ready 由验证记录支撑才算数：没有真实验收记录就不允许宣称可用。
+    if (workflow.state.implementation === 'ready') {
+      assert.equal(workflow.state.validation.status, 'passed');
+      assert.ok(workflow.state.validation.records.length > 0, `${workflow.key} is ready without validation records`);
+      for (const record of workflow.state.validation.records) {
+        assert.equal(record.workflowKey, workflow.key);
+        assert.ok(record.parameters && record.software && record.billing, `${workflow.key} record is missing a section`);
+        assert.ok(record.artifact?.taskId);
+        assert.ok(record.artifact?.providerTaskId);
+        assert.match(record.artifact?.sha256 ?? '', /^[a-f0-9]{64}$/);
+        assert.ok(record.evidenceRef);
+      }
+    } else {
+      assert.equal(workflow.state.implementation, 'incomplete');
+      assert.equal(workflow.state.validation.status, 'not_run');
+      assert.deepEqual(workflow.state.validation.records, []);
+    }
     assert.ok(workflow.evidence.length > 0);
     for (const evidenceId of workflow.evidence) {
       assert.ok(contract.evidence[evidenceId], `${workflow.key} references unknown evidence ${evidenceId}`);

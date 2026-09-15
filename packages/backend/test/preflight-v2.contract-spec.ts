@@ -43,8 +43,8 @@ test('authenticated v2 Preview creates only an independent preflight record and 
       productionAdmission: { canSubmit: false },
       quote: {
         status: 'estimated',
-        estimatedCny: '6.048000',
-        reserveCny: '6.048000',
+        estimatedCny: '6.111000',
+        reserveCny: '6.111000',
         pricingVersion: 'seedance-2.5-public-catalog-2026-09-15',
       },
       willUploadMedia: false,
@@ -52,8 +52,11 @@ test('authenticated v2 Preview creates only an independent preflight record and 
       effectiveRequest: intent,
       model: 'doubao-seedance-2-5-260628',
     });
+    // text-to-video 已验收完链路（implementation=ready），但 R8 收口后准入关闭，
+    // 所以这里只剩"未准入"而没有 WORKFLOW_NOT_READY；那条 blocker 由其余七类
+    // 仍处 incomplete 的工作流覆盖（见 PreflightService 单测）。
     expect(report.productionAdmission.blockers.map((item: { code: string }) => item.code)).toEqual(expect.arrayContaining([
-      'PRODUCTION_NOT_ALLOWED', 'WORKFLOW_NOT_READY', 'WORKFLOW_NOT_ENABLED', 'PRODUCTION_PAUSED',
+      'PRODUCTION_NOT_ALLOWED', 'WORKFLOW_NOT_ENABLED', 'PRODUCTION_PAUSED',
     ]));
     expect(await h.prisma.preflightRecord.count({ where: { actorId: h.actorId } })).toBe(1);
     expect(await h.prisma.task.count({ where: { actorId: h.actorId } })).toBe(before.tasks);
@@ -81,9 +84,11 @@ test('authenticated v2 Preview creates only an independent preflight record and 
     expect(catalog.contractDigest).toMatch(/^[a-f0-9]{64}$/);
     expect(catalog.model).toBe('doubao-seedance-2-5-260628');
     expect(catalog.workflows).toHaveLength(8);
+    // 目录里第一条是 text-to-video：链路已验收（validation 有记录），但 R8 第一轮
+    // 验收未走完 30 秒边界，所以准入仍然关闭。
     expect(catalog.workflows[0].state).toEqual(expect.objectContaining({
-      capability: 'confirmed', implementation: 'incomplete',
-      admission: { enabled: false, reason: 'V2_FULL_CHAIN_NOT_COMPLETE' },
+      capability: 'confirmed', implementation: 'ready',
+      admission: { enabled: false, reason: 'R8_ACCEPTANCE_INCOMPLETE' },
     }));
 
     const retired = await fetch(`${h.appUrl}/api/v1/tasks`, {
@@ -148,7 +153,7 @@ test('confirmed v2 text submission creates one frozen Task and one reservation w
     expect([task.deduplicated, concurrentTask.deduplicated].sort()).toEqual([false, true]);
     expect(task.executionPlan).toMatchObject({
       specVersion: 'workflow-production-v2', workflowKey: 'seedance.text-to-video.v1',
-      duration: 4, ratio: '16:9', resolution: '720p', reserveCny: '6.048000',
+      duration: 4, ratio: '16:9', resolution: '720p', reserveCny: '6.111000',
       quoteDigest: report.quote.quoteDigest,
     });
     expect(task.executionSlotId).toBe('slot-text-main');

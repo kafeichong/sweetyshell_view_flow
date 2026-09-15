@@ -78,7 +78,7 @@ describe('PreflightService', () => {
       'DAILY_LIMIT_EXCEEDED',
     ]));
     expect(report.quote).toMatchObject({
-      status: 'estimated', estimatedCny: '6.048000', reserveCny: '6.048000',
+      status: 'estimated', estimatedCny: '6.111000', reserveCny: '6.111000',
     });
     expect(report.willUploadMedia).toBe(false);
     expect(report.willCallProvider).toBe(false);
@@ -86,7 +86,31 @@ describe('PreflightService', () => {
     expect(prisma.task.create).not.toHaveBeenCalled();
     expect(prisma.executionAttempt.create).not.toHaveBeenCalled();
     expect(prisma.taskBudgetReservation.create).not.toHaveBeenCalled();
-    expect(budget.preflightAvailability).toHaveBeenCalledWith('creative-pilot', '6.048000');
+    expect(budget.preflightAvailability).toHaveBeenCalledWith('creative-pilot', '6.111000');
+  });
+
+  it('reports an incomplete workflow as both not ready and not admitted', async () => {
+    process.env.VIDEO_FLOW_PRODUCTION_ACTORS = 'creative-pilot';
+    const { prisma, budget } = dependencies({ canProceed: true, reason: undefined });
+    const service = new PreflightService(prisma as never, budget as never, new WorkflowCatalogService(), quotes());
+
+    const report = await service.preview('creative-pilot', {
+      ...intent(),
+      workflowKey: 'seedance.first-frame-to-video.v1',
+      generation: { ...intent().generation, ratio: 'adaptive' },
+      media: [{
+        slotId: 'first-frame', role: 'first_frame', sha256: 'd'.repeat(64), mimeType: 'image/png', sizeBytes: 10,
+        metadata: { kind: 'image', width: 900, height: 1600 },
+      }],
+    });
+
+    // 两道闸门互相独立：合同里仍是 incomplete 的工作流必须两个 blocker 都报，
+    // 只有 implementation=ready 才轮到 admission 单独决定是否放行。
+    expect(report.productionAdmission.canSubmit).toBe(false);
+    expect(report.productionAdmission.blockers.map((item) => item.code)).toEqual(expect.arrayContaining([
+      'WORKFLOW_NOT_READY',
+      'WORKFLOW_NOT_ENABLED',
+    ]));
   });
 
   it('stores semantic media failures as a failed request report instead of a production task', async () => {
@@ -195,7 +219,7 @@ describe('PreflightService', () => {
       actorId: 'creative-pilot',
       preflightId: created.preflightId,
       intentDigest: created.intentDigest,
-      quote: { quoteDigest: created.quote.quoteDigest, reserveCny: '6.048000' },
+      quote: { quoteDigest: created.quote.quoteDigest, reserveCny: '6.111000' },
       providerFields: {},
     });
     await expect(service.prepareSubmission('other', created.preflightId, {

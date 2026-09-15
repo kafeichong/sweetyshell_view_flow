@@ -133,7 +133,20 @@
       "outputFrameRate": 24,
       "inputVideoSecondsPolicy": "sum_all_reference_video_durations",
       "adaptiveRatioPolicy": "derive_from_locked_input_when_officially_locked_otherwise_use_a_documented_bound",
-      "automaticDurationPolicy": "use_a_documented_bound_or_mark_unavailable"
+      "automaticDurationPolicy": "use_a_documented_bound_or_mark_unavailable",
+      "reservationAdjustment": {
+        "addedFrames": 1,
+        "appliesTo": "the estimate term, including the formula term that is maxed against inputVideoMinimumTokens",
+        "reason": "Provider 按出片帧数结算，而实测出片帧数 = 输出时长 × 帧率 + 1（起始帧也计费）；官方那条公式按秒计，照它预占会系统性少算一帧，与项目『不得低估预占』冲突",
+        "verifiedOn": "2026-09-15",
+        "verifiedSamples": [
+          { "taskId": "3614cb63-dd7b-47d6-82ee-49ffbf7bf366", "request": "4s/720p/16:9/有声", "frames": 97, "width": 1280, "height": 720, "completionTokens": 87300 },
+          { "taskId": "d4d41580-f30c-4be1-96a7-6cce265451f1", "request": "5s/720p/16:9/有声", "frames": 121, "width": 1280, "height": 720, "completionTokens": 108900 },
+          { "taskId": "994e3fb6-6d63-4a16-ac64-c96dca9ed3d2", "request": "5s/720p/16:9（参考图）", "frames": 121, "width": 1280, "height": 720, "completionTokens": 108900 },
+          { "taskId": "3bb48246-b626-4c2b-beb8-5211f1665728", "request": "6s/480p/9:16（参考图）", "frames": 145, "width": 480, "height": 854, "completionTokens": 58045 }
+        ],
+        "note": "四条真实结算全部等于『(输出时长 × 帧率 + 1) 帧 × 宽 × 高 / 1024』再向下截断；本实现向上取整，因此最多比 Provider 多留 1 token（480p 9:16 一条即 58,046 对 58,045）。30 秒边界尚未实测，最低 token 口径不随本调整变动。"
+      }
     },
     "inputVideoMinimumTokens": {
       "applies": true,
@@ -182,12 +195,63 @@
         "capability": "confirmed",
         "implementation": "ready",
         "admission": {
-          "enabled": true,
-          "reason": null
+          "enabled": false,
+          "reason": "R8_ACCEPTANCE_INCOMPLETE"
         },
         "validation": {
-          "status": "not_run",
-          "records": []
+          "status": "passed",
+          "records": [
+            {
+              "workflowKey": "seedance.text-to-video.v1",
+              "model": "doubao-seedance-2-5-260628",
+              "acceptedAt": "2026-09-15",
+              "software": {
+                "contractRevision": "2026-09-15.4",
+                "contractDigest": "2e95034c85ad474935befa206d2b7721eb4c3748653a83c5f6a40fdf390e8ecc",
+                "specVersion": "workflow-production-v2"
+              },
+              "parameters": {
+                "duration": 4, "ratio": "16:9", "resolution": "720p",
+                "outputFormat": "mp4", "generateAudio": true, "watermark": false
+              },
+              "artifact": {
+                "taskId": "3614cb63-dd7b-47d6-82ee-49ffbf7bf366",
+                "providerTaskId": "cgt-20260915182806-2999s",
+                "sha256": "34a6c42f8a9ddcc203e48e2e742746d260c6c856e5a318d0c3bcb9e80d4142b0",
+                "bytes": 8409722, "width": 1280, "height": 720, "frames": 97, "durationSeconds": 4.041667
+              },
+              "billing": {
+                "reservedCny": "6.048000", "settledCny": "6.111000",
+                "completionTokens": 87300, "status": "usage_calculated"
+              },
+              "evidenceRef": "/private/tmp/video-flow-comfy-acceptance/evidence/r8/r8-text-4s-evidence.json"
+            },
+            {
+              "workflowKey": "seedance.text-to-video.v1",
+              "model": "doubao-seedance-2-5-260628",
+              "acceptedAt": "2026-09-15",
+              "software": {
+                "contractRevision": "2026-09-15.4",
+                "contractDigest": "2e95034c85ad474935befa206d2b7721eb4c3748653a83c5f6a40fdf390e8ecc",
+                "specVersion": "workflow-production-v2"
+              },
+              "parameters": {
+                "duration": 5, "ratio": "16:9", "resolution": "720p",
+                "outputFormat": "mp4", "generateAudio": true, "watermark": false
+              },
+              "artifact": {
+                "taskId": "d4d41580-f30c-4be1-96a7-6cce265451f1",
+                "providerTaskId": "cgt-20260915183853-isazs",
+                "sha256": "65d04429683a1041ccb9922e20073b73f98652ec9a061cb581e22f1ce21a75d5",
+                "bytes": 8023991, "width": 1280, "height": 720, "frames": 121, "durationSeconds": 5.056
+              },
+              "billing": {
+                "reservedCny": "7.560000", "settledCny": "7.623000",
+                "completionTokens": 108900, "status": "usage_calculated"
+              },
+              "evidenceRef": "/private/tmp/video-flow-comfy-acceptance/evidence/r8/r8-text-5s-evidence.json"
+            }
+          ]
         }
       },
       "media": {

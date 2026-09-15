@@ -96,13 +96,13 @@ describe('T02: Budget reservation and admission', () => {
 
   it('rejects when daily budget exceeded', async () => {
     const assetIds = (global as any).testAssetIds || [];
-    // test quote reserve is 7.560000; set a limit that allows exactly one task
+    // test quote reserve is 7.623000; set a limit that allows exactly one task
     await harness.prisma.actorCredential.update({
       where: { actorId },
-      data: { dailyLimitCny: new Prisma.Decimal('7.560000') },
+      data: { dailyLimitCny: new Prisma.Decimal('7.623000') },
     });
 
-    // First task should succeed (7.56 CNY estimate)
+    // First task should succeed (7.623 CNY estimate)
     const response1 = await fetch(`${harness.appUrl}/api/v1/tasks`, {
       method: 'POST',
       headers: {
@@ -287,10 +287,10 @@ describe('T02: Budget reservation and admission', () => {
 
   it('admits only one of two different idempotency keys racing for the last budget slot', async () => {
     const assetIds = (global as any).testAssetIds || [];
-    // test quote reserve is 7.560000; a 7.560000 daily limit allows exactly one task.
+    // test quote reserve is 7.623000; a 7.623000 daily limit allows exactly one task.
     await harness.prisma.actorCredential.update({
       where: { actorId },
-      data: { dailyLimitCny: new Prisma.Decimal('7.560000') },
+      data: { dailyLimitCny: new Prisma.Decimal('7.623000') },
     });
 
     const makeRequest = async (key: string, assetId: string) =>
