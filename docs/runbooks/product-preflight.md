@@ -143,7 +143,7 @@ POST /api/v1/tasks/:taskId/client-delivery
 Authorization: Bearer <个人 Token>
 ```
 
-当前 8 类工作流全部保持 `implementation=incomplete / admission=false`，Preview 会明确返回 `WORKFLOW_NOT_READY` 和 `WORKFLOW_NOT_ENABLED`。生产源码没有“测试环境打开工作流”的配置；R4 服务测试通过测试专用 Catalog fixture 或依赖替换构造 ready workflow，真实 Nest 合同仅在 `test/contract-backend.cjs` 中替换 Provider。当前 ComfyUI 客户端仍是旧一次性确认协议，必须完成 R5 后才能提交上述请求。
+当前 8 类工作流的付费入口**全部关闭**（`admission=false`）。其中 `seedance.text-to-video.v1` 经 R8 第一轮真实付费验收后为 `implementation=ready`（带 `validation.records`），因此对它 Preview 只返回 `WORKFLOW_NOT_ENABLED`；其余七类仍是 `implementation=incomplete`，两个 blocker 都会返回。生产源码没有“测试环境打开工作流”的配置；R4 服务测试通过测试专用 Catalog fixture 或依赖替换构造 ready workflow，真实 Nest 合同仅在 `test/contract-backend.cjs` 中替换 Provider。当前 ComfyUI 客户端仍是旧一次性确认协议，必须完成 R5 后才能提交上述请求。
 
 ## Migration 与回滚
 

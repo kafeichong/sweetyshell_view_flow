@@ -22,9 +22,10 @@
 （`scripts/tests/workflow_contract_v2.test.mjs`、`workflow-catalog.service.spec.ts`）
 同步改为断言"**恰好**声明列表里的工作流是开启的"，任何未声明的开启仍会被抓住。
 
-**收口要求**：跑完后把该工作流改回 `enabled=false`、`reason` 恢复，清空测试里的声明列表，
+**收口要求**：跑完后把该工作流改回 `enabled=false` 并写明 `reason`，清空测试里的声明列表，
 并把本次的验证记录写进 `validation.records`（工作流 / 模型 / 参数组合 / 软件版本 / 证据引用），
-再部署一次。
+再部署一次。**第一轮收口已于 2026-09-15 执行**，结果见第 6.5 节；该轮未部署，因此生产
+在收口后仍需一次部署才真正关闭。
 
 ## 2. 前置动作（按顺序，缺一不可）
 
@@ -36,6 +37,8 @@
 ## 3. 验收矩阵与预估费用
 
 预估按已取证的官方口径计算：`token = (输入视频时长 + 输出视频时长) × 长边 × 短边 × 帧率 / 1024`，含输入视频时取与最低用量 `ceil(输出时长 × 5/3) × 像素 × 帧率 / 1024` 的较大者；720p 无视频 70 元/百万 token、含视频 42 元/百万 token。**公开刊例价，非账号成交价**；实际以 Provider 返回的 `usage.completion_tokens` 为准。
+
+> **2026-09-15 收口轮起，上表的 4 秒档已整体上移约 0.04–0.06 元/项**：实测真实结算按出片帧数（`输出时长 × 帧率 + 1`）计，预占公式已补上这一帧（见 [PROJECT_STATUS](../PROJECT_STATUS.md) 顶部）。含输入视频的 30 秒档由官方最低用量决定，不受影响；合计随之约 +0.49 元（全部最短）。
 
 | # | 工作流 | 素材 | 输出 | 720p 预估 |
 | --- | --- | --- | --- | --- |
@@ -127,7 +130,7 @@ packages/comfyui-video-flow-client/workflows/<工作流>-preflight-v1.comfy.json
 
 验收后若要回到隔离环境，按 [local-manual-test.md](./local-manual-test.md) §3 重新注入并重启即可（§7 有清除步骤）。
 
-**人工操作时同样要留意**：Preview 不产生费用；切到 Production 后再次 Queue 才正式提交；客户端显示的是服务端报价，**实际结算可能略高于报价**（见 PROJECT_STATUS 中"预占少算一帧"的实测记录）。
+**人工操作时同样要留意**：Preview 不产生费用；切到 Production 后再次 Queue 才正式提交；客户端显示的是服务端报价。**2026-09-15 收口轮起报价与结算应当一致**（预占已按实测补上出片多出的那一帧，只在 480p 这类非整数像素上多留 1 token）；此前"结算比报价高一帧"的记录见 [PROJECT_STATUS](../PROJECT_STATUS.md)。
 
 ## 5. 每项必须记录的证据
 
@@ -151,6 +154,17 @@ packages/comfyui-video-flow-client/workflows/<工作流>-preflight-v1.comfy.json
 2. **收回归纳放行**：把本次为验收打开的工作流改回 `admission.enabled=false`，`validation` 写入本次具体的验证记录（工作流 / 模型 / 参数组合 / 软件版本 / 证据引用），**不允许用一个 `production_verified` 概括整个模型和所有规格**。改动单独提交并记录。
 3. **对账**：把每项的实际 `completion_tokens` 与预估值对照，差异写入 PROJECT_STATUS；这正是验证计费口径的机会。
 4. **清理**：确认没有残留的进行中任务与未结案预占。
+
+### 6.5 第一轮收口记录（2026-09-15）
+
+| 收口项 | 结果 |
+| --- | --- |
+| 放行回归 | `seedance.text-to-video.v1` → `admission={enabled:false, reason:"R8_ACCEPTANCE_INCOMPLETE"}`；`implementation` 保持 `ready`（链路已实测打通，不退回 `incomplete`） |
+| 验证记录 | `validation.status=passed`，两条：**4s/720p**（`3614cb63…`）与 **5s/720p**（`d4d41580…`），含模型、参数组合、合同版本与 digest、taskId / providerTaskId / SHA-256 / 帧数 / 预占与结算 / 证据文件路径 |
+| 不变量测试 | 两处声明列表清空，并改为断言"**implementation=ready 必须有 validation 记录支撑**"；关闭原因不再钉死单串但必须非空 |
+| 计费对账 | 四条真实结算（含 9/14 两条历史付费任务）全部等于 `(输出时长 × 帧率 + 1) × 宽 × 高 / 1024`，预占公式据此修正；旧公式系统性少算一帧 |
+| 部署 | **未执行**——仓库已收口，生产仍处放行状态，需再部署一次才生效 |
+| 未完成 | 矩阵第 1 行的 **30 秒边界**（本轮未跑）、其余七类工作流未验收 |
 
 ## 7. 明确不做的事
 
