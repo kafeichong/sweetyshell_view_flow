@@ -31,8 +31,15 @@ test('v2 contract freezes the official Seedance 2.5 API and all eight workflows'
 
   for (const workflow of contract.workflows) {
     assert.equal(workflow.state.capability, 'confirmed');
-    assert.equal(workflow.state.implementation, 'incomplete');
-    assert.equal(workflow.state.admission.enabled, false);
+    if (workflow.key === 'seedance.reference-image-to-video.v1') {
+      assert.equal(workflow.state.implementation, 'ready');
+      assert.equal(workflow.state.admission.enabled, true);
+      assert.equal(workflow.state.admission.reason, null);
+    } else {
+      assert.equal(workflow.state.implementation, 'incomplete');
+      assert.equal(workflow.state.admission.enabled, false);
+      assert.equal(workflow.state.admission.reason, 'V2_FULL_CHAIN_NOT_COMPLETE');
+    }
     assert.equal(workflow.state.validation.status, 'not_run');
     assert.ok(workflow.evidence.length > 0);
     for (const evidenceId of workflow.evidence) {
@@ -110,8 +117,8 @@ test('v2 pricing contract distinguishes an estimate, reservation blocker, and fi
   assert.equal(pricing.estimate.outputFrameRate, 24);
   assert.equal(pricing.estimate.formula, '(inputVideoSeconds + outputVideoSeconds) * width * height * outputFrameRate / 1024');
   assert.equal(pricing.finalUsage.field, 'usage.completion_tokens');
-  assert.equal(pricing.inputVideoMinimumTokens.status, 'external_reference_required');
-  assert.equal(pricing.inputVideoMinimumTokens.productionQuotePolicy, 'unavailable_until_rule_resolved');
+  assert.equal(pricing.inputVideoMinimumTokens.status, 'resolved');
+  assert.equal(pricing.inputVideoMinimumTokens.productionQuotePolicy, 'reserve_the_max_of_formula_and_minimum');
 
   const base = new Map(pricing.catalogRates.map((item) => [`${item.resolutionGroup}:${item.hasInputVideo}`, item.cnyPerMillionTokens]));
   assert.equal(base.get('480p_or_720p:false'), '70.00');

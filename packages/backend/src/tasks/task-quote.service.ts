@@ -52,6 +52,16 @@ function formulaTokens(seconds: Prisma.Decimal, width: number, height: number, f
   return value;
 }
 
+/**
+ * 官方对「输入包含视频」的请求设有最低计费用量：公式值低于最低值时按最低值计费。
+ * 最低值等价于把计费总秒数按 ceil(输出时长 × 5/3) 代入同一个 token 公式，因此它随
+ * 分辨率、宽高比和输出时长变化，与官方说明的三个自变量一致。
+ * 见 contract.pricing.inputVideoMinimumTokens 的验证证据。
+ */
+function minimumTotalSeconds(outputSeconds: Prisma.Decimal): Prisma.Decimal {
+  return outputSeconds.mul(5).div(3).toDecimalPlaces(0, Prisma.Decimal.ROUND_CEIL);
+}
+
 @Injectable()
 export class TaskQuoteService {
   constructor(private readonly catalog: PricingCatalog) {}
@@ -99,16 +109,21 @@ export class TaskQuoteService {
     const [width, height] = dimensions;
     const frameRate = contract.model.outputFrameRate;
     const tokens = formulaTokens(inputSeconds.add(outputSeconds), width, height, frameRate);
+    const minimumTokens = hasInputVideo
+      ? formulaTokens(minimumTotalSeconds(outputSeconds), width, height, frameRate)
+      : null;
+    const billedTokens = minimumTokens === null ? tokens : Math.max(tokens, minimumTokens);
     const output: OutputBasis = { durationSeconds: outputDuration, width, height, frameRate };
     const basis: Record<string, unknown> = {
       output,
       inputVideoSeconds: inputSeconds.toFixed(6),
       formulaTokens: tokens,
-      billedTokens: tokens,
+      minimumTokens,
+      billedTokens,
       ratePerMillion: pricing.ratePerMillion,
       rateSource: pricing.rateSource,
       promotionId: pricing.promotionId,
-      minimumTokensApplied: hasInputVideo ? null : false,
+      minimumTokensApplied: minimumTokens !== null && minimumTokens > tokens,
       pricingSnapshot: pricing,
       ...(adaptiveBasis ? { adaptiveBasis } : {}),
       ...(outputDurationBasis ? { outputDurationBasis } : {}),
@@ -119,11 +134,7 @@ export class TaskQuoteService {
         outputFormat: intent.generation.outputFormat,
       },
     };
-    if (hasInputVideo) {
-      return this.unavailable(now, ['INPUT_VIDEO_MINIMUM_TOKENS_UNRESOLVED'], basis);
-    }
-
-    const amount = tokenCostCny(tokens, pricing.ratePerMillion);
+    const amount = tokenCostCny(billedTokens, pricing.ratePerMillion);
     const value = {
       status: bounded ? 'bounded' as const : 'estimated' as const,
       currency: 'CNY' as const,

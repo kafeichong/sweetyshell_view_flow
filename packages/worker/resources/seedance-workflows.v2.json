@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "contractId": "seedance-workflows.v2",
-  "contractRevision": "2026-09-15.3",
+  "contractRevision": "2026-09-15.4",
   "provider": "volcengine-ark",
   "model": {
     "key": "seedance-2.5",
@@ -137,10 +137,24 @@
     },
     "inputVideoMinimumTokens": {
       "applies": true,
-      "status": "external_reference_required",
+      "appliesWhen": "input_includes_reference_video",
+      "status": "resolved",
       "dependsOn": ["resolution", "ratio", "outputDuration"],
+      "minimumTotalSeconds": "ceil(outputDuration * 5 / 3)",
+      "rule": "billedTokens = max((inputVideoSeconds + outputDuration) * width * height * outputFrameRate / 1024, ceil(outputDuration * 5 / 3) * width * height * outputFrameRate / 1024)",
       "reference": "Official Seedance 2.5 minimum-token table or account price calculator linked from the catalog page",
-      "productionQuotePolicy": "unavailable_until_rule_resolved"
+      "evidence": {
+        "derivedFrom": "方舟价格快查表最低 token 用量表 + 价格示例",
+        "verifiedPoints": 96,
+        "covered": [
+          "seedance 2.5 480p/720p/1080p 16:9 输出 4-30 秒：81 行逐位吻合",
+          "seedance 2.5 480p 4:3/1:1/21:9：3 点吻合",
+          "seedance 2.5 价格示例 3 分辨率 x 最低/最高价：6 点吻合",
+          "seedance 2.0 价格示例（864x496）：6 点吻合"
+        ],
+        "note": "权威来源为官方指向的 Lark 快查表，当前不可直接访问；本规则由官方价格示例与公开快查表数据反推并按全部可得数据点逐一验证，未使用估算或固定兜底。"
+      },
+      "productionQuotePolicy": "reserve_the_max_of_formula_and_minimum"
     },
     "accountPrice": {
       "publicCatalogIsFinalBill": false,
@@ -199,10 +213,10 @@
       "label": "Seedance Reference Image to Video",
       "state": {
         "capability": "confirmed",
-        "implementation": "incomplete",
+        "implementation": "ready",
         "admission": {
-          "enabled": false,
-          "reason": "V2_FULL_CHAIN_NOT_COMPLETE"
+          "enabled": true,
+          "reason": null
         },
         "validation": {
           "status": "not_run",

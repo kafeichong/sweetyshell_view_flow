@@ -34,16 +34,18 @@ describe('WorkflowCatalogService', () => {
     const workflows = catalog.list();
     expect(workflows).toHaveLength(8);
     expect(workflows.every((item) => item.state.capability === 'confirmed')).toBe(true);
-    expect(workflows.every((item) => item.state.implementation === 'incomplete')).toBe(true);
-    expect(workflows.every((item) => item.state.admission.enabled === false)).toBe(true);
-    expect(workflows.every((item) => item.state.admission.reason === 'V2_FULL_CHAIN_NOT_COMPLETE')).toBe(true);
+    const reference = workflows.find((item) => item.key === 'seedance.reference-image-to-video.v1');
+    expect(reference?.state).toMatchObject({ implementation: 'ready', admission: { enabled: true, reason: null } });
+    expect(workflows.filter((item) => item.key !== 'seedance.reference-image-to-video.v1').every((item) => item.state.implementation === 'incomplete')).toBe(true);
+    expect(workflows.filter((item) => item.key !== 'seedance.reference-image-to-video.v1').every((item) => item.state.admission.enabled === false)).toBe(true);
+    expect(workflows.filter((item) => item.key !== 'seedance.reference-image-to-video.v1').every((item) => item.state.admission.reason === 'V2_FULL_CHAIN_NOT_COMPLETE')).toBe(true);
     expect(workflows.every((item) => item.state.validation.status === 'not_run')).toBe(true);
   });
 
   it('publishes the exact contract revision, digest and server-selected model with the directory', () => {
     expect(catalog.directory()).toMatchObject({
       contractVersion: 2,
-      contractRevision: '2026-09-15.3',
+      contractRevision: '2026-09-15.4',
       model: 'doubao-seedance-2-5-260628',
       workflows: expect.any(Array),
     });

@@ -140,12 +140,16 @@ describe('TaskQuoteService', () => {
     }));
   });
 
-  it('uses actual 2s, 30s and multi-video totals but refuses to under-reserve without the minimum-token table', () => {
+  it('bills the official input-video minimum below the floor and the formula above it', () => {
     const service = new TaskQuoteService(new PricingCatalog());
 
     const twoSeconds = service.quote(intent({
       workflowKey: 'seedance.omni-reference.v1',
       media: [video('v1', 2)],
+    }), MODEL, new Date('2026-09-15T00:00:00.000Z'));
+    const fourSeconds = service.quote(intent({
+      workflowKey: 'seedance.omni-reference.v1',
+      media: [video('v1', 4)],
     }), MODEL, new Date('2026-09-15T00:00:00.000Z'));
     const thirtySeconds = service.quote(intent({
       workflowKey: 'seedance.omni-reference.v1',
@@ -156,21 +160,53 @@ describe('TaskQuoteService', () => {
       media: [video('v1', 2), video('v2', 28)],
     }), MODEL, new Date('2026-09-15T00:00:00.000Z'));
 
+    // 720p 16:9 每秒 21,600 token；输出 5 秒时最低计费总秒数为 ceil(5×5/3)=9。
+    // 公式值 7×21600=151,200 低于最低值 9×21600=194,400，按最低值计费。
     expect(twoSeconds).toMatchObject({
-      status: 'unavailable',
-      estimatedCny: null,
-      reserveCny: null,
-      pricingVersion: null,
+      status: 'estimated',
+      pricingVersion: 'seedance-2.5-public-catalog-2026-09-15',
+      reserveCny: '8.164800',
+      missing: [],
       basis: {
         inputVideoSeconds: '2.000000',
         formulaTokens: 151200,
+        minimumTokens: 194400,
+        billedTokens: 194400,
+        minimumTokensApplied: true,
         ratePerMillion: '42.00',
-        minimumTokensApplied: null,
       },
-      missing: ['INPUT_VIDEO_MINIMUM_TOKENS_UNRESOLVED'],
     });
-    expect(thirtySeconds.basis).toEqual(expect.objectContaining({ inputVideoSeconds: '30.000000', formulaTokens: 756000 }));
+    // 输入到 4 秒时公式值恰好追平最低值，两种口径同价。
+    expect(fourSeconds).toMatchObject({ reserveCny: '8.164800' });
+    expect(fourSeconds.basis).toEqual(expect.objectContaining({
+      formulaTokens: 194400, billedTokens: 194400, minimumTokensApplied: false,
+    }));
+    // 公式值 35×21600=756,000 高于最低值，按公式值计费。
+    expect(thirtySeconds).toMatchObject({ reserveCny: '31.752000', missing: [] });
+    expect(thirtySeconds.basis).toEqual(expect.objectContaining({
+      inputVideoSeconds: '30.000000', formulaTokens: 756000, billedTokens: 756000, minimumTokensApplied: false,
+    }));
+    expect(multiple).toMatchObject({ reserveCny: '31.752000' });
     expect(multiple.basis).toEqual(expect.objectContaining({ inputVideoSeconds: '30.000000', formulaTokens: 756000 }));
+  });
+
+  it('derives the input-video minimum from output duration alone, not from the resolution group', () => {
+    const service = new TaskQuoteService(new PricingCatalog());
+
+    // 480p 16:9 为 854×480，每秒 9,607.5 token。输出 4 秒 → 最低总秒数 ceil(20/3)=7
+    // → 7×9607.5=67,252.5，向上取整 67,253（与方舟快查表 480p/4 秒行一致）。
+    const quote = service.quote(intent({
+      workflowKey: 'seedance.omni-reference.v1',
+      generation: { ...intent().generation, duration: 4, resolution: '480p' },
+      media: [video('v1', 2)],
+    }), MODEL, new Date('2026-09-15T00:00:00.000Z'));
+
+    expect(quote.basis).toEqual(expect.objectContaining({
+      formulaTokens: 57645,
+      minimumTokens: 67253,
+      billedTokens: 67253,
+      minimumTokensApplied: true,
+    }));
   });
 
   it('derives video-edit automatic output duration from the only selected input video', () => {
@@ -182,10 +218,16 @@ describe('TaskQuoteService', () => {
       media: [video('edit-source', 12)],
     }), MODEL, new Date('2026-09-15T00:00:00.000Z'));
 
-    expect(quote.missing).toEqual(['INPUT_VIDEO_MINIMUM_TOKENS_UNRESOLVED']);
+    // 输出 12 秒 → 最低计费总秒数 ceil(60/3)=20 → 20×21600=432,000；
+    // 公式值 24×21600=518,400 更高，因此按公式值计费且不触发最低值。
+    expect(quote).toMatchObject({ status: 'estimated', reserveCny: '21.772800', missing: [] });
     expect(quote.basis).toEqual(expect.objectContaining({
       inputVideoSeconds: '12.000000',
       outputDurationBasis: 'single_reference_video',
+      formulaTokens: 518400,
+      minimumTokens: 432000,
+      billedTokens: 518400,
+      minimumTokensApplied: false,
       output: expect.objectContaining({ durationSeconds: 12 }),
     }));
   });
