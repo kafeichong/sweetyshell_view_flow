@@ -77,7 +77,7 @@ test('authenticated v2 Preview creates only an independent preflight record and 
     const catalog = await directory.json();
     expect(directory.status).toBe(200);
     expect(catalog.contractVersion).toBe(2);
-    expect(catalog.contractRevision).toBe('2026-09-15.3');
+    expect(catalog.contractRevision).toBe('2026-09-15.4');
     expect(catalog.contractDigest).toMatch(/^[a-f0-9]{64}$/);
     expect(catalog.model).toBe('doubao-seedance-2-5-260628');
     expect(catalog.workflows).toHaveLength(8);

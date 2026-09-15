@@ -34,11 +34,11 @@ describe('WorkflowCatalogService', () => {
     const workflows = catalog.list();
     expect(workflows).toHaveLength(8);
     expect(workflows.every((item) => item.state.capability === 'confirmed')).toBe(true);
-    const reference = workflows.find((item) => item.key === 'seedance.reference-image-to-video.v1');
-    expect(reference?.state).toMatchObject({ implementation: 'ready', admission: { enabled: true, reason: null } });
-    expect(workflows.filter((item) => item.key !== 'seedance.reference-image-to-video.v1').every((item) => item.state.implementation === 'incomplete')).toBe(true);
-    expect(workflows.filter((item) => item.key !== 'seedance.reference-image-to-video.v1').every((item) => item.state.admission.enabled === false)).toBe(true);
-    expect(workflows.filter((item) => item.key !== 'seedance.reference-image-to-video.v1').every((item) => item.state.admission.reason === 'V2_FULL_CHAIN_NOT_COMPLETE')).toBe(true);
+    // 发货源合同必须保持八类全部关闭。临时开放只能发生在 loopback 测试 Backend 的
+    // 依赖替身里；把 admission 写进源合同等于在没有真实验收记录的情况下打开付费入口。
+    expect(workflows.every((item) => item.state.implementation === 'incomplete')).toBe(true);
+    expect(workflows.every((item) => item.state.admission.enabled === false)).toBe(true);
+    expect(workflows.every((item) => item.state.admission.reason === 'V2_FULL_CHAIN_NOT_COMPLETE')).toBe(true);
     expect(workflows.every((item) => item.state.validation.status === 'not_run')).toBe(true);
   });
 

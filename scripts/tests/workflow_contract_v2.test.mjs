@@ -31,15 +31,10 @@ test('v2 contract freezes the official Seedance 2.5 API and all eight workflows'
 
   for (const workflow of contract.workflows) {
     assert.equal(workflow.state.capability, 'confirmed');
-    if (workflow.key === 'seedance.reference-image-to-video.v1') {
-      assert.equal(workflow.state.implementation, 'ready');
-      assert.equal(workflow.state.admission.enabled, true);
-      assert.equal(workflow.state.admission.reason, null);
-    } else {
-      assert.equal(workflow.state.implementation, 'incomplete');
-      assert.equal(workflow.state.admission.enabled, false);
-      assert.equal(workflow.state.admission.reason, 'V2_FULL_CHAIN_NOT_COMPLETE');
-    }
+    // 发货源合同必须保持八类全部关闭；临时开放只能存在于 loopback 测试 Backend 的依赖替身。
+    assert.equal(workflow.state.implementation, 'incomplete');
+    assert.equal(workflow.state.admission.enabled, false);
+    assert.equal(workflow.state.admission.reason, 'V2_FULL_CHAIN_NOT_COMPLETE');
     assert.equal(workflow.state.validation.status, 'not_run');
     assert.ok(workflow.evidence.length > 0);
     for (const evidenceId of workflow.evidence) {

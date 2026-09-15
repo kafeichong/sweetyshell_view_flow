@@ -213,10 +213,10 @@
       "label": "Seedance Reference Image to Video",
       "state": {
         "capability": "confirmed",
-        "implementation": "ready",
+        "implementation": "incomplete",
         "admission": {
-          "enabled": true,
-          "reason": null
+          "enabled": false,
+          "reason": "V2_FULL_CHAIN_NOT_COMPLETE"
         },
         "validation": {
           "status": "not_run",
