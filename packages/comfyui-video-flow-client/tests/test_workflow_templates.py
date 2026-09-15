@@ -29,12 +29,18 @@ def test_all_preflight_templates_have_bidirectional_type_safe_links():
             assert target.get("link") == link_id, (path.name, link_id, "target backlink")
 
         for node in nodes.values():
-            for output in node.get("outputs", []):
+            for output_slot, output in enumerate(node.get("outputs", [])):
                 for link_id in output.get("links") or []:
                     assert link_id in links, (path.name, node["id"], link_id)
-            for node_input in node.get("inputs", []):
+                    assert links[link_id][1:3] == [node["id"], output_slot], (
+                        path.name, node["id"], output_slot, link_id, "wrong source backlink",
+                    )
+            for input_slot, node_input in enumerate(node.get("inputs", [])):
                 if node_input.get("link") is not None:
                     assert node_input["link"] in links, (path.name, node["id"], node_input["link"])
+                    assert links[node_input["link"]][3:5] == [node["id"], input_slot], (
+                        path.name, node["id"], input_slot, node_input["link"], "wrong target backlink",
+                    )
 
 
 def test_all_preflight_templates_default_to_preview_and_reach_an_output_node():

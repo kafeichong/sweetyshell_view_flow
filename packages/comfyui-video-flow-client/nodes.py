@@ -35,11 +35,14 @@ class VideoFlowConfigNode:
     CATEGORY = "Video Flow"
 
     def configure(self, backend_url, protocol_version):
+        environment = VideoFlowConfig.from_env()
         return (
             VideoFlowConfig(
                 backend_url.rstrip("/"),
-                VideoFlowConfig.from_env().token,
+                environment.token,
                 protocol_version,
+                receipt_dir=environment.receipt_dir,
+                spec_version=environment.spec_version,
             ),
         )
 

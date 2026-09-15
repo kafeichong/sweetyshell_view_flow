@@ -263,3 +263,29 @@ def test_fake_provider_serves_a_decodable_contract_clip():
     )
     assert probe.returncode == 0, probe.stderr.decode()
     assert b"h264" in probe.stdout
+
+
+def test_fake_oss_round_trip_preserves_upload_metadata():
+    state = FakeProviderState()
+    local_app = create_app(state)
+    body = b"contract-image-bytes"
+
+    with TestClient(local_app) as client:
+        uploaded = client.put(
+            "/acceptance/input/reference.png",
+            content=body,
+            headers={
+                "Content-Type": "image/png",
+                "x-oss-meta-sha256": "a" * 64,
+            },
+        )
+        inspected = client.head("/acceptance/input/reference.png")
+        downloaded = client.get("/acceptance/input/reference.png")
+
+    assert uploaded.status_code == 200
+    assert inspected.status_code == 200
+    assert inspected.headers["content-length"] == str(len(body))
+    assert inspected.headers["content-type"] == "image/png"
+    assert inspected.headers["x-oss-meta-sha256"] == "a" * 64
+    assert downloaded.content == body
+    assert downloaded.headers["content-type"] == "image/png"

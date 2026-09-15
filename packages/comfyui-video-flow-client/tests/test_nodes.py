@@ -22,6 +22,21 @@ def test_config_node_defaults_to_company_backend(monkeypatch):
     assert defaults["backend_url"][1]["default"] == "https://ai.sweetyshell.com"
 
 
+def test_config_node_preserves_environment_receipt_and_spec_settings(monkeypatch, tmp_path):
+    token_file = tmp_path / "actor.token"
+    token_file.write_text("acceptance-token\n", encoding="utf-8")
+    receipt_dir = tmp_path / "receipts"
+    monkeypatch.setenv("VIDEO_FLOW_TOKEN_FILE", str(token_file))
+    monkeypatch.setenv("VIDEO_FLOW_RECEIPT_DIR", str(receipt_dir))
+    monkeypatch.setenv("VIDEO_FLOW_SPEC_VERSION", "acceptance-spec-v1")
+
+    config = nodes.VideoFlowConfigNode().configure("http://127.0.0.1:3400", "1")[0]
+
+    assert config.token == "acceptance-token"
+    assert config.receipt_dir == str(receipt_dir)
+    assert config.spec_version == "acceptance-spec-v1"
+
+
 def test_registered_nodes_exclude_retired_upload_and_fixed_spec_entrypoints():
     retired = {
         "VideoFlowSeedancePreview",

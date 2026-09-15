@@ -41,6 +41,7 @@ class FakeProviderState:
     create_counts_by_key: dict[str, int] = field(default_factory=dict)
     last_create_payload: dict[str, Any] | None = None
     objects: dict[str, bytes] = field(default_factory=dict)
+    object_headers: dict[str, dict[str, str]] = field(default_factory=dict)
     tasks: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def _next_usage(self) -> dict[str, Any] | None:
@@ -99,6 +100,7 @@ class FakeProviderState:
         self.create_counts_by_key = {}
         self.last_create_payload = None
         self.objects.clear()
+        self.object_headers.clear()
         self.tasks.clear()
         self.create_status = 200
         self.create_mode = "normal"
@@ -187,6 +189,10 @@ def create_app(state: FakeProviderState | None = None) -> FastAPI:
         放在所有具体路由之后，只兜住没人认领的 PUT/HEAD/GET。
         """
         provider.objects[key] = await request.body()
+        provider.object_headers[key] = {
+            "content-type": request.headers.get("content-type", "application/octet-stream"),
+            "x-oss-meta-sha256": request.headers.get("x-oss-meta-sha256", ""),
+        }
         return Response(status_code=200)
 
     @app.head("/{key:path}")
@@ -194,9 +200,16 @@ def create_app(state: FakeProviderState | None = None) -> FastAPI:
         body = provider.objects.get(key)
         if body is None:
             raise HTTPException(status_code=404, detail="object not found")
+        metadata = provider.object_headers.get(key, {})
+        headers = {
+            "Content-Length": str(len(body)),
+            "Content-Type": metadata.get("content-type", "application/octet-stream"),
+        }
+        if metadata.get("x-oss-meta-sha256"):
+            headers["x-oss-meta-sha256"] = metadata["x-oss-meta-sha256"]
         return Response(
             status_code=200,
-            headers={"Content-Length": str(len(body)), "Content-Type": "video/mp4"},
+            headers=headers,
         )
 
     @app.get("/{key:path}")
@@ -204,7 +217,11 @@ def create_app(state: FakeProviderState | None = None) -> FastAPI:
         body = provider.objects.get(key)
         if body is None:
             raise HTTPException(status_code=404, detail="object not found")
-        return Response(content=body, media_type="video/mp4")
+        metadata = provider.object_headers.get(key, {})
+        return Response(
+            content=body,
+            media_type=metadata.get("content-type", "application/octet-stream"),
+        )
 
     return app
 

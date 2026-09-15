@@ -80,7 +80,7 @@
 | [runbooks/deploy-and-rollback.md](./runbooks/deploy-and-rollback.md) | 上线前检查、上线步骤、Smoke Test、回滚动作与记录模板 |
 | [runbooks/preview-acceptance.md](./runbooks/preview-acceptance.md) | Preview 零付费验收清单与 2026-09-11 实测记录 |
 | [runbooks/creative-user-guide.md](./runbooks/creative-user-guide.md) | v2 重构期间的创意同事安全边界：凭证保护、已有任务查询/取片、当前禁止的新建任务操作 |
-| [runbooks/local-manual-test.md](./runbooks/local-manual-test.md) | 本地手动测试指南：全程 Fake Provider，逐步说明每步做什么、怎么验证，不构成生产验收证据 |
+| [runbooks/local-manual-test.md](./runbooks/local-manual-test.md) | ComfyUI 本地隔离验收：一键启动测试 Backend/PostgreSQL/Worker/Fake Provider/Fake OSS，执行真实 Queue、落盘和播放；不构成 Ark 正式验收证据 |
 | [runbooks/creative-one-click-script.md](./runbooks/creative-one-click-script.md) | 旧一键脚本的停用状态与恢复条件；当前不得用于创建新任务 |
 | [runbooks/domain-and-https.md](./runbooks/domain-and-https.md) | `ai.sweetyshell.com` 域名、Nginx 与证书配置 |
 
