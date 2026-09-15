@@ -348,7 +348,7 @@ expect(unknownQuote.status).toBe('unavailable');
 **修改：** `scripts/seedance_production_acceptance.py`、相关测试、`docs/runbooks/deploy-and-rollback.md`、`creative-user-guide.md`；证据只更新PROJECT_STATUS。
 **前提：** R7具备交付证据；正式环境和付费任务在明确的账号、素材、规格与金额范围内执行。本轮规划不自动创建这些任务。
 
-- [ ] 先备齐只读查询/按槽恢复/下一版创建/预算校验/证据导出的验收脚本，默认查询已有任务，不默认新建。
+- [x] 先备齐只读查询/按槽恢复/下一版创建/预算校验/证据导出的验收脚本，默认查询已有任务，不默认新建。`scripts/seedance_production_acceptance.py` 提供 `query` / `slot` / `budget` / `verify` / `evidence` 五个只读子命令与一个会付费的 `next`；判定要求产物真的下载并 `ffprobe` 解码通过，且扩展名/MIME 与冻结的 `outputFormat` 一致，不看单一状态字段。`next` 需同时具备 `--confirm-spend`、操作者自备的稳定幂等键和素材 slot 绑定，槽内还有未交付任务时拒绝执行。用法见 `docs/runbooks/deploy-and-rollback.md` §6.3。
 - [ ] 配套升级Backend、Worker、客户端和合同版本；记录数据库备份、迁移、健康、鉴权和资源打包情况。
 - [ ] 按R6八行逐项执行正式接口验收：真实taskId/attemptId/providerTaskId、冻结参数、原始usage、费用状态、产物、媒体探测和实际播放。
 - [ ] 对适用4–30秒的工作流，4秒和30秒边界有自动化证据；真实验收明确记录实际测试时长、比例和分辨率，不能把一次5秒样片宣称为全规格已验证。

@@ -227,6 +227,35 @@ curl -s -X PATCH -H "X-Admin-Token: $ADMIN" -H 'Content-Type: application/json' 
 - 备份：数据库每日备份并定期恢复到隔离库验证；审计目录与未结案 journal 单独保留，
   清理策略必须先保护未归档产物与未结案证据。
 
+## 6.3 R8 受控验收取证（默认只读）
+
+R8 要在正式环境逐项验收，而**每次 Queue 都可能产生火山引擎费用**。`scripts/seedance_production_acceptance.py` 把验收拆成显式子命令，默认动作是"查询已有任务"：
+
+```bash
+export VIDEO_FLOW_BACKEND_URL=https://ai.sweetyshell.com
+export VIDEO_FLOW_TOKEN_FILE=~/.video-flow/token
+
+# 只读：查询已有任务 / 按执行槽恢复 / 校验预算 / 下载产物并解码 / 导出证据
+python3 scripts/seedance_production_acceptance.py query    --task-id <TASK_ID>
+python3 scripts/seedance_production_acceptance.py slot     --slot-id <SLOT_ID>
+python3 scripts/seedance_production_acceptance.py budget   --task-id <TASK_ID>
+python3 scripts/seedance_production_acceptance.py verify   --task-id <TASK_ID>
+python3 scripts/seedance_production_acceptance.py evidence --task-id <TASK_ID> --out acceptance-<TASK_ID>.json
+
+# 唯一会付费的命令：在同一执行槽创建下一版。三道闸门缺一不可。
+python3 scripts/seedance_production_acceptance.py next \
+  --slot-id <SLOT_ID> --preflight-id <PREFLIGHT_ID> \
+  --media <SLOT_ID>=<ASSET_ID> [--media ...] \
+  --idempotency-key <操作者自备的稳定键> --confirm-spend
+```
+
+- 判定不看单一状态字段：`execution.status` 与 `delivery.status` 只是必要条件，产物必须**真的下载下来并通过 `ffprobe` 解码**才算通过；扩展名与 MIME 还必须与冻结的 `executionPlan.outputFormat` 一致——MOV 工作流被归档成 MP4 会判失败。
+- 费用未核实**不算失败**（已生成的片不该被扣住），但会在证据里记为待核查。
+- `next` 会拒绝三种情况：没有 `--confirm-spend`、没有操作者自备的幂等键、槽内仍有未完成本地交付的任务（此时正确动作是恢复原任务，不是新建下一版）。
+- 幂等键必须由操作者提供并在重试时沿用**同一个键**。工具不会自动生成时间戳键，否则一次"结果不确定"的重试就会变成第二次付费。
+- 退出码：`0` 通过、`1` 失败、`2` 用法或环境不完整、`3` 主动拒绝执行。
+- 产物与证据默认落在系统临时目录（可用 `VIDEO_FLOW_ACCEPTANCE_WORKDIR` 覆盖），不会写进仓库。
+
 ---
 
 ## 7. 风险与跟进
