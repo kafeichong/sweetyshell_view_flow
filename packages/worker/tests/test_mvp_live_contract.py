@@ -568,94 +568,102 @@ class LiveMVPContractTests(unittest.TestCase):
             self.assertEqual(result["costSummary"]["reservationState"], "settled")
             self.assertIsNotNone(result["costSummary"]["usageCalculatedCny"])
 
-    def test_omni_input_video_reaches_delivery_with_the_official_minimum_tokens(self):
-        slot_id = "slot-r6-omni-input-video-minimum"
-        prompt = "live omni input video minimum tokens"
-        payload = {
-            "mode": "production",
-            "workflowKey": "seedance.omni-reference.v1",
-            "prompt": {"positive": prompt},
-            "generation": {
-                "duration": 15,
-                "ratio": "16:9",
-                "resolution": "720p",
-                "generateAudio": True,
-                "watermark": False,
-                "outputFormat": "mp4",
-            },
-            "media": [
-                {"assetId": required_env("VIDEO_FLOW_LIVE_ASSET_ID"), "role": "reference_image"},
-                {"assetId": required_env("VIDEO_FLOW_LIVE_VIDEO_ASSET_ID"), "role": "reference_video"},
-                {"assetId": required_env("VIDEO_FLOW_LIVE_AUDIO_ASSET_ID"), "role": "reference_audio"},
-            ],
-        }
-        with self._api() as client:
-            intent = _workflow_intent(payload)
-            preview = client.post(
-                "/api/v1/tasks/preflight",
-                headers={"Authorization": f"Bearer {self.actor_token}"},
-                json=intent,
-            )
-            preview.raise_for_status()
-            report = preview.json()
-            self.assertEqual(report["requestCheck"]["status"], "passed")
-            self.assertTrue(report["productionAdmission"]["canSubmit"])
+    def test_omni_input_video_reaches_delivery_at_four_and_thirty_seconds(self):
+        """含输入视频的 4 秒与 30 秒边界。
 
-            # 含输入视频的请求按「公式值与官方最低用量的较大者」计费。
-            basis = report["quote"]["basis"]
-            self.assertEqual(report["quote"]["status"], "estimated")
-            self.assertEqual(report["quote"]["missing"], [])
-            output = basis["output"]
-            minimum_total_seconds = -(-output["durationSeconds"] * 5 // 3)
-            expected_minimum = -(-minimum_total_seconds * output["width"] * output["height"] * output["frameRate"] // 1024)
-            self.assertEqual(basis["minimumTokens"], expected_minimum)
-            self.assertEqual(basis["billedTokens"], max(basis["formulaTokens"], expected_minimum))
-            self.assertEqual(basis["minimumTokensApplied"], expected_minimum > basis["formulaTokens"])
-
-            created = client.post(
-                "/api/v1/tasks",
-                headers={
-                    "Authorization": f"Bearer {self.actor_token}",
-                    "Idempotency-Key": "r6-omni-input-video-minimum",
+        4 秒是最低用量规则真正可能压过公式值的地方（最低总秒数 ceil(4×5/3)=7），
+        所以两条边界都要走一遍实际交付，而不是只做单元断言。
+        """
+        for duration in (4, 30):
+            prompt = f"live omni input video minimum {duration}s"
+            slot_id = f"slot-r6-omni-input-video-{duration}s"
+            payload = {
+                "mode": "production",
+                "workflowKey": "seedance.omni-reference.v1",
+                "prompt": {"positive": prompt},
+                "generation": {
+                    "duration": duration,
+                    "ratio": "16:9",
+                    "resolution": "720p",
+                    "generateAudio": True,
+                    "watermark": False,
+                    "outputFormat": "mp4",
                 },
-                json={
-                    "mode": "production",
-                    "preflightId": report["preflightId"],
-                    "executionSlotId": slot_id,
-                    "media": [
-                        {"slotId": descriptor["slotId"], "assetId": item["assetId"]}
-                        for descriptor, item in zip(intent["media"], payload["media"])
-                    ],
-                },
-            )
-        created.raise_for_status()
-        task = created.json()
-        self.assertEqual(
-            [item["role"] for item in task["executionPlan"]["media"]],
-            ["reference_image", "reference_video", "reference_audio"],
-        )
-        self.assertEqual(task["executionPlan"]["reserveCny"], report["quote"]["reserveCny"])
+                "media": [
+                    {"assetId": required_env("VIDEO_FLOW_LIVE_ASSET_ID"), "role": "reference_image"},
+                    {"assetId": required_env("VIDEO_FLOW_LIVE_VIDEO_ASSET_ID"), "role": "reference_video"},
+                    {"assetId": required_env("VIDEO_FLOW_LIVE_AUDIO_ASSET_ID"), "role": "reference_audio"},
+                ],
+            }
+            with self._api() as client:
+                intent = _workflow_intent(payload)
+                preview = client.post(
+                    "/api/v1/tasks/preflight",
+                    headers={"Authorization": f"Bearer {self.actor_token}"},
+                    json=intent,
+                )
+                preview.raise_for_status()
+                report = preview.json()
+                self.assertEqual(report["requestCheck"]["status"], "passed")
+                self.assertTrue(report["productionAdmission"]["canSubmit"])
 
-        before = provider_stats(self.provider_url)["createCountsByKey"].get(prompt, 0)
-        self._run_one_cycle()
-        stats = provider_stats(self.provider_url)
-        self.assertEqual(stats["createCountsByKey"].get(prompt, 0), before + 1)
-        self.assertEqual(
-            [(item["type"], item.get("role")) for item in stats["lastCreatePayload"]["content"][1:]],
-            [("image_url", "reference_image"), ("video_url", "reference_video"), ("audio_url", "reference_audio")],
-        )
+                # 含输入视频的请求按「公式值与官方最低用量的较大者」计费。
+                basis = report["quote"]["basis"]
+                self.assertEqual(report["quote"]["status"], "estimated")
+                self.assertEqual(report["quote"]["missing"], [])
+                output = basis["output"]
+                self.assertEqual(output["durationSeconds"], duration)
+                minimum_total_seconds = -(-output["durationSeconds"] * 5 // 3)
+                expected_minimum = -(-minimum_total_seconds * output["width"] * output["height"] * output["frameRate"] // 1024)
+                self.assertEqual(basis["minimumTokens"], expected_minimum)
+                self.assertEqual(basis["billedTokens"], max(basis["formulaTokens"], expected_minimum))
+                self.assertEqual(basis["minimumTokensApplied"], expected_minimum > basis["formulaTokens"])
 
-        with self._api() as client:
-            summary = client.get(
-                f"/api/v1/tasks/{task['id']}",
-                headers={"Authorization": f"Bearer {self.actor_token}"},
+                created = client.post(
+                    "/api/v1/tasks",
+                    headers={
+                        "Authorization": f"Bearer {self.actor_token}",
+                        "Idempotency-Key": f"r6-omni-input-video-{duration}s",
+                    },
+                    json={
+                        "mode": "production",
+                        "preflightId": report["preflightId"],
+                        "executionSlotId": slot_id,
+                        "media": [
+                            {"slotId": descriptor["slotId"], "assetId": item["assetId"]}
+                            for descriptor, item in zip(intent["media"], payload["media"])
+                        ],
+                    },
+                )
+            created.raise_for_status()
+            task = created.json()
+            self.assertEqual(
+                [item["role"] for item in task["executionPlan"]["media"]],
+                ["reference_image", "reference_video", "reference_audio"],
             )
-        summary.raise_for_status()
-        result = summary.json()
-        self.assertEqual(result["execution"]["status"], "completed")
-        self.assertEqual(result["delivery"]["status"], "ready")
-        self.assertEqual(result["costSummary"]["reservationState"], "settled")
-        self.assertIsNotNone(result["costSummary"]["usageCalculatedCny"])
+            self.assertEqual(task["executionPlan"]["reserveCny"], report["quote"]["reserveCny"])
+
+            before = provider_stats(self.provider_url)["createCountsByKey"].get(prompt, 0)
+            self._run_one_cycle()
+            stats = provider_stats(self.provider_url)
+            self.assertEqual(stats["createCountsByKey"].get(prompt, 0), before + 1)
+            self.assertEqual(
+                [(item["type"], item.get("role")) for item in stats["lastCreatePayload"]["content"][1:]],
+                [("image_url", "reference_image"), ("video_url", "reference_video"), ("audio_url", "reference_audio")],
+            )
+            self.assertEqual(stats["lastCreatePayload"]["duration"], duration)
+
+            with self._api() as client:
+                summary = client.get(
+                    f"/api/v1/tasks/{task['id']}",
+                    headers={"Authorization": f"Bearer {self.actor_token}"},
+                )
+            summary.raise_for_status()
+            result = summary.json()
+            self.assertEqual(result["execution"]["status"], "completed")
+            self.assertEqual(result["delivery"]["status"], "ready")
+            self.assertEqual(result["costSummary"]["reservationState"], "settled")
+            self.assertIsNotNone(result["costSummary"]["usageCalculatedCny"])
 
     def test_video_edit_freezes_special_fields_and_reaches_mov_delivery(self):
         slot_id = "slot-r6-video-edit"
@@ -742,14 +750,18 @@ class LiveMVPContractTests(unittest.TestCase):
         self.assertIsNotNone(result["costSummary"]["usageCalculatedCny"])
 
     def test_video_extend_freezes_special_fields_and_reaches_mov_delivery(self):
-        slot_id = "slot-r6-video-extend"
-        prompt = "extend @video1 backward by 11 seconds"
+        for duration in (4, 30):
+            self._assert_video_extend_at_duration(duration)
+
+    def _assert_video_extend_at_duration(self, duration: int):
+        slot_id = f"slot-r6-video-extend-{duration}s"
+        prompt = f"extend @video1 backward by {duration} seconds"
         payload = {
             "mode": "production",
             "workflowKey": "seedance.video-extend.v1",
             "prompt": {"positive": prompt},
             "generation": {
-                "duration": 11,
+                "duration": duration,
                 "ratio": "adaptive",
                 "resolution": "720p",
                 "generateAudio": True,
@@ -777,14 +789,14 @@ class LiveMVPContractTests(unittest.TestCase):
             self.assertEqual(report["quote"]["status"], "estimated")
             self.assertEqual(report["quote"]["missing"], [])
             basis = report["quote"]["basis"]
-            self.assertEqual(basis["output"]["durationSeconds"], 11)
+            self.assertEqual(basis["output"]["durationSeconds"], duration)
             self.assertEqual(basis["billedTokens"], max(basis["formulaTokens"], basis["minimumTokens"]))
 
             created = client.post(
                 "/api/v1/tasks",
                 headers={
                     "Authorization": f"Bearer {self.actor_token}",
-                    "Idempotency-Key": "r6-video-extend",
+                    "Idempotency-Key": f"r6-video-extend-{duration}s",
                 },
                 json={
                     "mode": "production",
@@ -798,14 +810,14 @@ class LiveMVPContractTests(unittest.TestCase):
             )
         created.raise_for_status()
         task = created.json()
-        self.assertEqual(task["executionPlan"]["duration"], 11)
+        self.assertEqual(task["executionPlan"]["duration"], duration)
         self.assertEqual(task["executionPlan"]["outputFormat"], "mov")
 
         before = provider_stats(self.provider_url)["createCountsByKey"].get(prompt, 0)
         self._run_one_cycle()
         stats = provider_stats(self.provider_url)
         self.assertEqual(stats["createCountsByKey"].get(prompt, 0), before + 1)
-        self.assertEqual(stats["lastCreatePayload"]["duration"], 11)
+        self.assertEqual(stats["lastCreatePayload"]["duration"], duration)
         self.assertEqual(stats["lastCreatePayload"]["output_format"], "mov")
         self.assertEqual(stats["lastCreatePayload"]["ratio"], "adaptive")
 
