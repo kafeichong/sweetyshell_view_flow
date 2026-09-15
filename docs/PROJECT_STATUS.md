@@ -8,6 +8,41 @@
 
 ## 0. 本轮交付判断
 
+### 2026-09-15：输入视频最低 Token 规则已取证并落地，八类工作流全部完成真实 ComfyUI Queue
+
+**这一项此前是三行工作流（R6.5 含视频组合、R6.6 编辑、R6.7 延长）共同的阻塞点**：官方对"输入包含视频"的请求设有最低计费用量，缺少它就只能 fail-closed，否则公式值可能低估实际扣费。本轮把它解决了。
+
+规则（`contracts/seedance-workflows.v2.json` 的 `pricing.inputVideoMinimumTokens`）：
+
+```text
+最低计费总秒数 = ceil(输出时长 × 5 / 3)
+最低 token 数  = 最低计费总秒数 × 宽 × 高 × 输出帧率 / 1024
+实际计费 token = max(公式值, 最低值)          ← 仅当输入包含视频
+```
+
+验证覆盖 **96 个官方数据点、全部逐位吻合**：方舟价格快查表最低 token 表 480p/720p/1080p 16:9 输出 4–30 秒共 81 行；同表 480p 的 4:3、1:1、21:9 三个宽高比；官方价格示例中 Seedance 2.5 三个分辨率的最低/最高价 6 点；以及 Seedance 2.0 价格示例 6 点（其 480p 实际为 864×496，与 2.5 的 854×480 不同，此前的一处不吻合正是用错了像素）。规则也解释了官方"最低价对应输入 2~4 秒"的说法：输出 5 秒时最低总秒数为 `ceil(25/3)=9`，减去输出 5 秒正好余 4 秒。
+
+**必须保留的取证边界**：权威来源是官方页指向的 Lark 快查表，该地址需要登录、本机不可直接访问。上述规则由官方价格示例与公开快查表数据反推并按全部可得数据点逐一验证，**不是**从 Lark 原表抄录的。它已在合同的 `evidence` 字段里如实记录来源与验证点数，没有伪装成直接取证。
+
+实现按测试先行：先改 `task-quote.service.spec.ts` 观察到失败，再实现 `minimumTotalSeconds()` 与 `billedTokens = max(公式, 最低)`，并移除 `INPUT_VIDEO_MINIMUM_TOKENS_UNRESOLVED` 这条 fail-closed 分支。报价 basis 现在分别记录 `formulaTokens`、`minimumTokens`、`billedTokens` 与 `minimumTokensApplied`。三条纵向合同也从"Production 保持关闭"改写为跑通交付，并分别断言 `billedTokens = max(公式, 最低)` 与 Provider payload 的角色顺序。
+
+**随后发现的越界改动与回退**：提交 `6121448`（信息为 `feat: enable controlled reference image ark canary`）在提交上述最低 Token 规则的同时，把 **`seedance.reference-image-to-video.v1` 在发货源合同里改成了 `implementation=ready / admission.enabled=true`**，而 `validation.status` 仍是 `not_run`。`admission.enabled` 正是 `preflight.service.ts` 用来拦截付费正式提交的那个开关，这等于在没有真实验收记录的前提下打开一条真实计费入口，也违反了"源合同保持全部关闭、临时开放只存在于 loopback 测试 Backend 依赖替身"的既定边界。经确认该改动不是有意安排，已通过 `5c18fa7` 回退，并把"八类必须全部关闭"从整体断言改为逐工作流断言，避免单个工作流被悄悄打开。最低 Token 规则与 `contractRevision 2026-09-15.4` 予以保留。
+
+**四类工作流随即在真实 ComfyUI 中完成正式交付**（每条都在 Queue 前后采快照并断言）：
+
+| 行 | 关键证据 |
+| --- | --- |
+| R6.5 多模态 | 图片+视频+音频链；`billedTokens=max(366481, 194400)`；payload 为 `image_url/reference_image + video_url/reference_video + audio_url/reference_audio`；预占 15.392202 → 结算 0.042000 |
+| R6.6 视频编辑 | `duration=-1` 由唯一参考视频解析出 11.966667 秒；payload 保持 `-1/adaptive/mov`；**归档 `result.mov` 且 Asset 为 `video/quicktime`**；预占 21.712362 → 结算 0.042000 |
+| R6.7 视频延长 | 三段不同视频总 27.008334 秒按链顺序绑定；`omni_reference_task_type=extend`；payload 含三段 `video_url`；预占 34.481202 → 结算 0.042000 |
+| R6.8 音频参考 | 两段音频共 12 秒；`minimumTokens=null`（无输入视频时规则不适用）；payload 含两段 `audio_url/reference_audio`；预占 7.560000 → 结算 0.070000 |
+
+四条任务的 `assert-preview`（Task / Attempt / 预占 / Asset / Provider create 全为 0，`PreflightRecord` 恰好 +1）与 `assert-production`（Task / Attempt / 预占各 +1、Provider create 恰好 +1）全部通过，终态均为 `completed / delivery ready / client delivered`，产物 `ffprobe` 可解析且 ComfyUI 播放控件可用。
+
+为让运行中的环境加载新报价逻辑，验收环境做过一次重启。该环境的 PostgreSQL 用的是 `tmpfs`，数据库**按设计就是易失的**，重启即清空；重启前已 `pg_dump` 到 `/private/tmp/video-flow-comfy-acceptance/evidence/pre-restart-db-dump.sql`。
+
+**边界必须保持**：Fake Provider 仍是固定 1 秒 64×64 测试片，只证明链路可跑通与可播放，不验证真实时长、画质、费用或创意效果；真实 Ark 出片仍归 R8。源合同仍然八类全部 `implementation=incomplete / admission.enabled=false`，最低 Token 规则的来源是反推而非 Lark 原表直录。验收过程中生成的音频夹具（5 秒与 7 秒 WAV）已从 ComfyUI input 目录删除；目录中另有一个非本轮产生的 `video-flow-acceptance-reference.png` 未作处理。
+
 ### 2026-09-15：参考图工作流的 Preview 零增量与同槽顺序生成已用前后快照隔离验证
 
 下一条记录中的参考图 Preview 与 Production 是连着跑的，事后无法单独证明"Preview 没有创建正式任务"。本轮用 Playwright 驱动真实 ComfyUI 0.35.1 前端（`127.0.0.1:8188`，与 Comfy Desktop 同一个 server 与队列；本次 Queue 的 `client_id` 为 `467d8dcf…`，与 Desktop 的 `994c6b02…` 可区分）单独重跑参考图这一项，并在每一步 Queue 前后采集计数器快照做机器判定。

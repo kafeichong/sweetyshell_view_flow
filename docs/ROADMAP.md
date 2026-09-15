@@ -312,11 +312,11 @@ expect(unknownQuote.status).toBe('unavailable');
 - [x] R6.1 参考图片。已在真实 Comfy Desktop 中完成本地 WebP 的零上传 Preview、再次 Queue 的 Production、Fake OSS 实际内容复验、Fake Provider 单次 `reference_image` create、归档、客户端落盘与实际播放；真实 Ark 出片仍归 R8。补测：用 `scripts/comfyui_acceptance_evidence.py` 在每次 Queue 前后采集计数器快照，**隔离证明** Preview 对 Task / Attempt / 预算预占 / Asset / Provider create 的增量全为 0（`PreflightRecord` 恰好 +1，是报告与 Production 的凭据），并在同一执行槽中已交付的序号 1 之上实际创建了序号 2。
 - [x] R6.2 文本生视频。已在真实 Comfy Desktop 中完成默认 Preview、再次 Queue 的 Production、Fake Provider 单次 create、Fake OSS 归档、客户端落盘与实际播放；真实 Ark 出片仍归 R8。
 - [x] R6.3 首帧。已在真实 Comfy Desktop 中完成本机 WebP 的零上传 Preview、再次 Queue 的 Production、Fake OSS 实际内容复验、Fake Provider 单次 `first_frame` create、归档、客户端落盘与实际播放；请求保持 `ratio=adaptive`，真实 Ark 出片仍归 R8。
-- [ ] R6.4 首尾帧。
-- [ ] R6.5 多模态参考。
-- [ ] R6.6 视频编辑。
-- [ ] R6.7 视频延长。
-- [ ] R6.8 音频参考。
+- [x] R6.4 首尾帧。真实 ComfyUI 导入并 Queue：Preview 用两张内容与哈希均不同的图片（`003bottle-rotate.webp` 769×1163 与 `bottle-press.webp` 710×1065）生成 `first_frame`/`last_frame` 两个角色，Q1 隔离证明零增量。Production 的 Provider payload 保持两个**不同 URL**、同样的角色顺序，预占 7.607670 结算 0.070000，产物落盘且 `ffprobe` 可解析。真实 Ark 出片仍归 R8。
+- [x] R6.5 多模态参考。此前因输入视频最低 Token 未取证而只能 fail-closed；取得并验证规则后（见 PROJECT_STATUS）真实 ComfyUI 的图片+视频+音频链已跑通：Preview `canSubmit=true`、报价 `estimated 15.392202`（`billedTokens=max(366481, 194400)`），Production 的 payload 为 `image_url/reference_image + video_url/reference_video + audio_url/reference_audio`，预占 15.392202 结算 0.042000，交付 ready 且落盘可播放。
+- [x] R6.6 视频编辑。真实 ComfyUI 导入并 Queue：Preview 完整保留 `duration=-1 / adaptive / mov`，输出时长由唯一参考视频解析为 11.966667 秒，报价 `estimated 21.712362`。Production 的 Provider payload 保持 `-1/adaptive/mov`，**归档为 `result.mov` 且 Asset 登记 `video/quicktime`**（不再一律写成 MP4），预占 21.712362 结算 0.042000，交付 ready。
+- [x] R6.7 视频延长。真实 ComfyUI 导入并 Queue：三段内容、哈希均不同且总时长 27.008334 秒（≤30）的参考视频按链顺序绑定到 `reference-video-1/2/3`，Preview 报价 `estimated 34.481202`。Production 冻结 `duration=11 / adaptive / mov / omni_reference_task_type=extend`，payload 含三段 `video_url`，归档 MOV 并登记 `video/quicktime`，交付 ready。
+- [x] R6.8 音频参考。真实 ComfyUI 导入并 Queue：两段不同音频（5 秒与 7 秒，总 12 秒）链式输入，Preview 报价 `estimated 7.560000` 且 `minimumTokens` 为 null（无输入视频时最低用量规则不适用，`billedTokens` 等于公式值 108000）。Production 冻结 `omni_reference_task_type=reference`，payload 含两段 `audio_url/reference_audio`，预占 7.560000 结算 0.070000，交付 ready 且可在 ComfyUI 播放。
 
 每一行依次执行：
 
@@ -341,7 +341,7 @@ expect(unknownQuote.status).toBe('unavailable');
 - [x] 三包完整回归、隔离跨包和实际ComfyUI假服务验证通过；更新runbook中的协议升级与恢复说明。真实 ComfyUI 操作验收当前覆盖文生视频、参考图和首帧，其余 5 类由 R6 逐项完成。
 - [x] 验收：F01–F15各有关闭证据；外部依赖skip与未执行的验收明确列出，不能计为已完成。
 
-当前操作验收进度：已建立 `scripts/comfyui_acceptance_env.py` 的 loopback-only 持久环境，并完成文生视频、参考图、首帧三项真实 ComfyUI Queue；其余 5 类仍需逐项操作验收。其中参考图一项另有每次 Queue 前后的计数器快照断言（`scripts/comfyui_acceptance_evidence.py`），文生视频与首帧的 Preview 零增量尚未以同样方式隔离复现。测试固定夹只能证明链路可播放，不能替代 R8 的 Ark 真实时长、画质、费用和创意验收。
+当前操作验收进度：`scripts/comfyui_acceptance_env.py` 的 loopback-only 持久环境已完成**全部 8 类工作流**的真实 ComfyUI Queue，其中 R6.1、R6.4、R6.5、R6.6、R6.7、R6.8 六项另有 `scripts/comfyui_acceptance_evidence.py` 的每次 Queue 前后计数器快照断言（Preview 零增量、Production 恰好一次）。文生视频与首帧两项的 Preview 零增量尚未以同样方式隔离复现。测试固定夹只能证明链路可播放，不能替代 R8 的 Ark 真实时长、画质、费用和创意验收；源合同仍保持八类 `implementation=incomplete / admission.enabled=false`。
 
 ### R8：受控正式验收与发布
 
