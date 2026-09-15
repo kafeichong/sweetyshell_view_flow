@@ -219,4 +219,12 @@ packages/comfyui-video-flow-client/workflows/<工作流>-preflight-v1.comfy.json
 3. **准入仍是工作流级**：打开即意味着上表全部参数组合都能提交，而这一条连"已验证的那一档"都还没有。
 4. 费用状态仍是推算（`cost.status=usage_calculated`、`billedCny=null`）。
 
-**跑完之后要做的**：把首帧的真实 `taskId` / `providerTaskId` / 产物 SHA-256 / 帧数 / 预占与结算写进该工作流的 `validation.records`（`status` 相应改 `passed`），并顺带核对"+1 帧"口径在 adaptive 锁定的尺寸下是否同样成立。要关闭时按 §8 的同一套动作（改回 `admission.enabled=false` 并写明理由、清空测试里的声明项、再部署）。
+**首轮真实验收已完成（2026-09-15）**：任务 `f6b3732f-d314-4263-81a6-8a96e8218876`（4 秒 / adaptive / 480p / 有声 / 无水印，首帧为本机 769×1163 webp），Provider 任务 `cgt-20260915194409-mw10a`。产物 **528×798 / 97 帧 / 4.064 秒 / 2,677,725 字节**，SHA-256 `e6dd5028…`（OSS 下载件 = 本机成片 = 客户端收据**三方一致**），`verify` 12 项全过、退出码 0。预占 2.841650（`bounded`）→ 结算 **2.793840**（39,912 tokens），**多预留 0.048 元**，安全方向。已写入该工作流的 `validation.records` 并把 `status` 改为 `passed`。
+
+同时记下两条与计费模型有关的观察（写进合同 `pricing.estimate.adaptiveOutputBound`）：
+
+- **锁不住画幅时，Provider 不吸附到我们的像素表**：本例输出 528×798 是首帧自身画幅的等比缩放，**不是表内任何一种尺寸**；`bounded` 的上界（480p 表内最大 21:9 = 428,544 px）这次刚好兜住实际值 421,344 px。
+- **未证实的风险**：首帧画幅比 21:9 更宽（>2.33）时，表内最大像素是否仍是上界，**没有验证过**；若否，`bounded` 预占会低估。
+- "+1 帧"口径在 adaptive 输出上同样成立（97 帧 = `4×24+1`；`97 × 528×798/1024 = 39,912.47` → Provider 截断记 39,912），这已是第五条真实样本。
+
+要关闭时按 §8 的同一套动作（改回 `admission.enabled=false` 并写明理由、清空测试里的声明项、再部署）。
