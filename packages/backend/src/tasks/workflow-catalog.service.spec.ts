@@ -10,10 +10,15 @@ import { WorkflowContractCatalog } from './workflow-contract';
 
 const rawContract = require('./resources/seedance-workflows.v2.json') as WorkflowContractCatalog;
 
-function textIntent() {
+// 受控验收期间**允许**处于开启状态的工作流。没列在这里却被打开 = 回归。
+// 依据：docs/runbooks/r8-production-acceptance-scope.md（2026-09-15 授权的 R8 验收）。
+// 验收收口时必须把这里清空，并把该工作流改回关闭。
+const DECLARED_OPEN_WORKFLOWS: string[] = ['seedance.text-to-video.v1'];
+
+function textIntent(workflowKey = 'seedance.text-to-video.v1') {
   return {
     contractVersion: 2,
-    workflowKey: 'seedance.text-to-video.v1',
+    workflowKey,
     prompt: { positive: '雨后的街道，镜头缓慢推进' },
     generation: {
       duration: 4,
@@ -34,11 +39,17 @@ describe('WorkflowCatalogService', () => {
     const workflows = catalog.list();
     expect(workflows).toHaveLength(8);
     expect(workflows.every((item) => item.state.capability === 'confirmed')).toBe(true);
-    // 发货源合同必须保持八类全部关闭。临时开放只能发生在 loopback 测试 Backend 的
-    // 依赖替身里；把 admission 写进源合同等于在没有真实验收记录的情况下打开付费入口。
-    expect(workflows.every((item) => item.state.implementation === 'incomplete')).toBe(true);
-    expect(workflows.every((item) => item.state.admission.enabled === false)).toBe(true);
-    expect(workflows.every((item) => item.state.admission.reason === 'V2_FULL_CHAIN_NOT_COMPLETE')).toBe(true);
+    // 只有明确声明受控验收的工作流可以开启；其余必须全部关闭。任何没列在
+    // DECLARED_OPEN_WORKFLOWS 里却被打开的工作流都会被下面两条断言抓住。
+    const open = workflows
+      .filter((item) => item.state.admission.enabled)
+      .map((item) => item.key)
+      .sort();
+    expect(open).toEqual([...DECLARED_OPEN_WORKFLOWS].sort());
+    const closed = workflows.filter((item) => !DECLARED_OPEN_WORKFLOWS.includes(item.key));
+    expect(closed.every((item) => item.state.implementation === 'incomplete')).toBe(true);
+    expect(closed.every((item) => item.state.admission.enabled === false)).toBe(true);
+    expect(closed.every((item) => item.state.admission.reason === 'V2_FULL_CHAIN_NOT_COMPLETE')).toBe(true);
     expect(workflows.every((item) => item.state.validation.status === 'not_run')).toBe(true);
   });
 
@@ -72,9 +83,11 @@ describe('WorkflowCatalogService', () => {
     const originalMode = process.env.VIDEO_FLOW_TEST_MODE;
     const originalReady = process.env.VIDEO_FLOW_TEST_READY_WORKFLOWS;
     process.env.VIDEO_FLOW_TEST_MODE = '1';
-    process.env.VIDEO_FLOW_TEST_READY_WORKFLOWS = 'seedance.text-to-video.v1';
+    // 刻意挑一条合同里仍处于关闭的工作流：受控验收期间被声明开放的那些
+    // 无法用于验证"环境变量越不过合同"。
+    process.env.VIDEO_FLOW_TEST_READY_WORKFLOWS = 'seedance.first-frame-to-video.v1';
     try {
-      const evaluated = new WorkflowCatalogService().evaluate(textIntent());
+      const evaluated = new WorkflowCatalogService().evaluate(textIntent('seedance.first-frame-to-video.v1'));
       expect(evaluated.workflow.state).toMatchObject({
         implementation: 'incomplete',
         admission: { enabled: false, reason: 'V2_FULL_CHAIN_NOT_COMPLETE' },

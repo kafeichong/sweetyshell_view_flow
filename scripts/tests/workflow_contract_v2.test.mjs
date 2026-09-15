@@ -4,6 +4,11 @@ import test from 'node:test';
 
 const contractUrl = new URL('../../contracts/seedance-workflows.v2.json', import.meta.url);
 
+// 受控验收期间**允许**处于开启状态的工作流。没列在这里却被打开 = 回归。
+// 依据：docs/runbooks/r8-production-acceptance-scope.md（2026-09-15 授权的 R8 验收）。
+// 验收收口时必须把这里清空，并把该工作流改回关闭。
+const DECLARED_OPEN_WORKFLOWS = ['seedance.text-to-video.v1'];
+
 async function loadContract() {
   return JSON.parse(await readFile(contractUrl, 'utf8'));
 }
@@ -31,10 +36,15 @@ test('v2 contract freezes the official Seedance 2.5 API and all eight workflows'
 
   for (const workflow of contract.workflows) {
     assert.equal(workflow.state.capability, 'confirmed');
-    // 发货源合同必须保持八类全部关闭；临时开放只能存在于 loopback 测试 Backend 的依赖替身。
-    assert.equal(workflow.state.implementation, 'incomplete');
-    assert.equal(workflow.state.admission.enabled, false);
-    assert.equal(workflow.state.admission.reason, 'V2_FULL_CHAIN_NOT_COMPLETE');
+    if (DECLARED_OPEN_WORKFLOWS.includes(workflow.key)) {
+      assert.equal(workflow.state.implementation, 'ready');
+      assert.equal(workflow.state.admission.enabled, true);
+      assert.equal(workflow.state.admission.reason, null);
+    } else {
+      assert.equal(workflow.state.implementation, 'incomplete');
+      assert.equal(workflow.state.admission.enabled, false);
+      assert.equal(workflow.state.admission.reason, 'V2_FULL_CHAIN_NOT_COMPLETE');
+    }
     assert.equal(workflow.state.validation.status, 'not_run');
     assert.ok(workflow.evidence.length > 0);
     for (const evidenceId of workflow.evidence) {
@@ -102,6 +112,17 @@ test('v2 contract captures mixed reference media and official per-kind limits', 
   assert.equal(contract.media.audio.maximumSizeBytesExclusive, undefined);
   assert.equal(contract.media.audio.maximumTotalDurationSeconds, 30);
   assert.equal(contract.media.maximumReferenceCount, 50);
+});
+
+test('only the workflows declared for controlled acceptance are open', async () => {
+  const contract = await loadContract();
+
+  const open = contract.workflows
+    .filter((workflow) => workflow.state.admission.enabled)
+    .map((workflow) => workflow.key)
+    .sort();
+
+  assert.deepEqual(open, [...DECLARED_OPEN_WORKFLOWS].sort());
 });
 
 test('v2 pricing contract distinguishes an estimate, reservation blocker, and final usage', async () => {

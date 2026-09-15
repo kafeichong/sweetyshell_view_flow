@@ -8,14 +8,23 @@
 
 | 项 | 值 |
 | --- | --- |
-| 授权人 / 日期 | |
-| 执行账号（火山方舟） | |
-| 使用的 Actor ID | |
-| Production 白名单确认方式 | |
-| **本次金额上限** | |
-| 允许的时间窗（起止） | |
-| 允许的分辨率 | |
-| 是否允许 1080p（约 720p 的 2.3 倍价） | |
+| 授权人 / 日期 | kafeichong / 2026-09-15 |
+| 执行账号（火山方舟） | 生产服务器 `8.140.49.56` 上 Worker 所用的账号（账号名未单独记录） |
+| 使用的 Actor ID | `creative-pilot` |
+| Production 白名单确认方式 | `VIDEO_FLOW_PRODUCTION_ACTORS=creative-pilot`（部署时已确认生效） |
+| **本次金额上限** | **100 元/日**（= `creative-pilot` 的 `dailyLimitCny`，由服务端强制，客户端改不了） |
+| 允许的时间窗 | 2026-09-15 当天 |
+| 允许的分辨率 | 720p |
+| 是否允许 1080p | 否 |
+
+**本次范围：只开第 1 行（文生视频）。** 合同里 `seedance.text-to-video.v1` 被置为
+`implementation=ready` / `admission.enabled=true`，其余七类保持关闭；两处不变量测试
+（`scripts/tests/workflow_contract_v2.test.mjs`、`workflow-catalog.service.spec.ts`）
+同步改为断言"**恰好**声明列表里的工作流是开启的"，任何未声明的开启仍会被抓住。
+
+**收口要求**：跑完后把该工作流改回 `enabled=false`、`reason` 恢复，清空测试里的声明列表，
+并把本次的验证记录写进 `validation.records`（工作流 / 模型 / 参数组合 / 软件版本 / 证据引用），
+再部署一次。
 
 ## 2. 前置动作（按顺序，缺一不可）
 
