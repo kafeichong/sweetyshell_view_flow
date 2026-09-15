@@ -403,8 +403,9 @@ git diff --check
 
 旧计划中仍必要的运行事项保留：
 
-- [ ] 核实持久journal、日志轮换与容器重建后证据可恢复；不删除未归档产物或未结案资金记录。
-- [ ] 验证隔离数据库备份恢复；监测巡检/备份自身失效和整机不可用。
+- [x] 核实持久journal、日志轮换与容器重建后证据可恢复；不删除未归档产物或未结案资金记录。`scripts/run_container_evidence_recovery.sh` 用真实 worker 镜像跨**不同容器**（每次 `docker run` 都是新容器）写入再读回：命名卷里的审计事件、submission journal 与产物均可恢复且内容一致；`AuditLog.rotate()` 只清理过期的 `events-*.jsonl`，`submissions.jsonl` 与 `SUBMISSIONS_BLOCKED` 保留。E12 的跨包用例（已解除 skip 并实跑通过）同时证明 Worker 重启后恢复**不会**产生第二次 Provider create。**未在本机核实**：`json-file` 日志驱动配置了 `max-size=10m / max-file=3`，但 Docker Desktop 的日志落在虚拟机内部，实际轮转是否发生无法在宿主机观察；该项留待真实宿主核实。
+- [x] 验证隔离数据库备份恢复。`scripts/run_db_backup_restore.sh` 将源库 `pg_dump` 后恢复到全新隔离库，逐表比对**行数与内容指纹**（金额按 `::text` 精确比对以捕捉 Decimal 精度变化，jsonb 取 `md5`，并含 `_prisma_migrations`）；已用"只改一个任务的 `cost` 加 1e-6"的负向实验确认该指纹能抓住单纯比对行数会漏掉的差异。
+- [ ] 监测巡检与备份自身失效、整机不可用（需要真实宿主、告警渠道与持续运行时间，本机无法验证）。
 - [ ] 告警责任人与渠道具备真实接收回执；覆盖requires_review、费用未知、交付失败、磁盘压力和进程失活。
 - [ ] 暂停只停止新生成；已有Provider任务查询和归档继续。应用回滚不是撤销Provider任务。
 - [ ] 破坏性协议切换采用配套升级；保留上一可用客户端/镜像与数据库备份，不通过回退到绕过预检/预算的版本恢复新提交。

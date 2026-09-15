@@ -226,6 +226,24 @@ curl -s -X PATCH -H "X-Admin-Token: $ADMIN" -H 'Content-Type: application/json' 
   再回滚应用镜像；**保留新增表与资金记录**，不要用 `migrate reset` 抹掉预占与结算。
 - 备份：数据库每日备份并定期恢复到隔离库验证；审计目录与未结案 journal 单独保留，
   清理策略必须先保护未归档产物与未结案证据。
+- 备份恢复验证（发布前跑一次；默认源库是本机验收库，发布时用
+  `VIDEO_FLOW_BACKUP_SOURCE_URL` 指向真实备份）：
+
+  ```bash
+  bash scripts/run_db_backup_restore.sh
+  ```
+
+  它把源库 `pg_dump` 后恢复到全新隔离库，再比对**行数与内容指纹**——金额按
+  `::text` 精确比对（恢复后被静默取整会被抓住）、jsonb 取 `md5`、并含
+  `_prisma_migrations`。只比行数是不够的：实测"某个任务金额改 1e-6"时行数不变而指纹已变。
+- 容器重建后证据可恢复验证：
+
+  ```bash
+  bash scripts/run_container_evidence_recovery.sh
+  ```
+
+  用真实 worker 镜像跨不同容器写入再读回审计事件、submission journal 与产物，
+  并确认 `AuditLog.rotate()` 不会删掉未结案的 `submissions.jsonl` 与 `SUBMISSIONS_BLOCKED`。
 
 ## 6.3 R8 受控验收取证（默认只读）
 
