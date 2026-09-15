@@ -262,6 +262,40 @@ def test_reference_media_inputs_chain_arbitrary_mixed_items_with_stable_role_slo
     ]
 
 
+def test_unused_reference_slot_passes_the_upstream_list_through_untouched(monkeypatch):
+    monkeypatch.setattr(n, 'inspect_product', lambda filename, role, slot_id: {
+        'filename': filename,
+        'descriptor': {'slotId': slot_id, 'role': role, 'metadata': {}},
+    })
+
+    # 槽位留在"（不使用）"时既不该读文件、也不该改动上游列表——创意不需要为了留下
+    # 空槽去右键旁路节点或删连线。
+    first = n.ReferenceImageInput().inspect('image-1.png')[0]
+    skipped_image = n.ReferenceImageInput().inspect(n.UNUSED_MEDIA_CHOICE, first)[0]
+    skipped_video = n.ReferenceVideoInput().inspect(n.UNUSED_MEDIA_CHOICE, skipped_image)[0]
+    media = n.ReferenceAudioInput().inspect('sound.wav', skipped_video)[0]
+
+    assert skipped_image == first
+    assert skipped_video == first
+    assert [item['descriptor']['role'] for item in media] == ['reference_image', 'reference_audio']
+    assert [item['descriptor']['slotId'] for item in media] == ['reference-image-1', 'reference-audio-1']
+
+
+def test_unused_choice_is_offered_last_and_never_on_fixed_count_image_nodes(tmp_path, monkeypatch):
+    (tmp_path / 'image-1.png').write_bytes(b'x')
+    monkeypatch.setitem(__import__('sys').modules, 'folder_paths', SimpleNamespace(get_input_directory=lambda: str(tmp_path)))
+
+    # 放末尾：槽位里存的占位符在文件存在时不在列表里，ComfyUI 会回落到第一个真实文件。
+    choices = n.ReferenceImageInput.INPUT_TYPES()['required']['image'][0]
+    assert choices == ['image-1.png', n.UNUSED_MEDIA_CHOICE]
+
+    # 首帧与首尾帧的图片数量是官方规定的（1 张 / 2 张），不能提供"（不使用）"，
+    # 否则用户会以为可以少给一张。
+    for cls in (n.FirstFrameInput, n.FirstLastFrameInput):
+        for spec in cls.INPUT_TYPES()['required'].values():
+            assert n.UNUSED_MEDIA_CHOICE not in spec[0]
+
+
 def test_reference_media_inputs_enforce_official_item_limits(monkeypatch):
     monkeypatch.setattr(n, 'inspect_product', lambda filename, role, slot_id: {
         'filename': filename,

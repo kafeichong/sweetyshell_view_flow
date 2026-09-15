@@ -196,6 +196,26 @@ def _file_choices(suffixes, empty_label):
     return sorted(str(p.relative_to(root)) for p in root.rglob('*') if p.is_file() and p.suffix.lower() in suffixes) or [empty_label]
 
 
+UNUSED_MEDIA_CHOICE = "（不使用）"
+
+
+def _reference_choices(suffixes):
+    """参考素材下拉：先列实际文件，**末尾**追加"（不使用）"。
+
+    放末尾是为了让默认值更好用——槽位里存的是占位符（比如"请选择图片"）时，文件一旦
+    存在该值就不在列表里，ComfyUI 会回落到第一个真实文件；而选中的"（不使用）"因为
+    本身就在列表里，会原样保留。
+
+    选中"（不使用）"的节点不读文件、不追加，只把上游列表原样传下去：创意的多余槽位
+    晾着即可，不需要右键旁路节点，也不需要自己删连线。上限仍由
+    _append_reference_media 按官方口径拦截。
+    """
+    import folder_paths
+    root = Path(folder_paths.get_input_directory())
+    files = sorted(str(p.relative_to(root)) for p in root.rglob('*') if p.is_file() and p.suffix.lower() in suffixes)
+    return files + [UNUSED_MEDIA_CHOICE]
+
+
 REFERENCE_MEDIA_LIMITS = {
     "reference_image": (30, "参考图片最多 30 张"),
     "reference_video": (10, "参考视频最多 10 段"),
@@ -233,7 +253,7 @@ class ReferenceImageInput:
     @classmethod
     def INPUT_TYPES(cls):
         return {
-            "required": {"image": (_image_choices(), {"image_upload": True})},
+            "required": {"image": (_reference_choices(('.png', '.jpg', '.jpeg', '.webp')), {"image_upload": True})},
             "optional": {"reference_media": ("VIDEO_FLOW_LOCAL_MEDIA_LIST",)},
         }
     RETURN_TYPES = ("VIDEO_FLOW_LOCAL_MEDIA_LIST",)
@@ -243,6 +263,8 @@ class ReferenceImageInput:
     @classmethod
     def IS_CHANGED(cls, **kwargs): return float('nan')
     def inspect(self, image, reference_media=None):
+        if image == UNUSED_MEDIA_CHOICE:
+            return (_validated_reference_media(reference_media),)
         return (_append_reference_media(reference_media, image, "reference_image"),)
 
 
@@ -250,7 +272,7 @@ class ReferenceVideoInput:
     @classmethod
     def INPUT_TYPES(cls):
         return {
-            "required": {"video": (_file_choices(('.mp4', '.mov'), "请选择视频"),)},
+            "required": {"video": (_reference_choices(('.mp4', '.mov')),)},
             "optional": {"reference_media": ("VIDEO_FLOW_LOCAL_MEDIA_LIST",)},
         }
     RETURN_TYPES = ("VIDEO_FLOW_LOCAL_MEDIA_LIST",)
@@ -260,6 +282,8 @@ class ReferenceVideoInput:
     @classmethod
     def IS_CHANGED(cls, **kwargs): return float('nan')
     def inspect(self, video, reference_media=None):
+        if video == UNUSED_MEDIA_CHOICE:
+            return (_validated_reference_media(reference_media),)
         return (_append_reference_media(reference_media, video, "reference_video"),)
 
 
@@ -267,7 +291,7 @@ class ReferenceAudioInput:
     @classmethod
     def INPUT_TYPES(cls):
         return {
-            "required": {"audio": (_file_choices(('.wav', '.mp3'), "请选择音频"),)},
+            "required": {"audio": (_reference_choices(('.wav', '.mp3')),)},
             "optional": {"reference_media": ("VIDEO_FLOW_LOCAL_MEDIA_LIST",)},
         }
     RETURN_TYPES = ("VIDEO_FLOW_LOCAL_MEDIA_LIST",)
@@ -277,6 +301,8 @@ class ReferenceAudioInput:
     @classmethod
     def IS_CHANGED(cls, **kwargs): return float('nan')
     def inspect(self, audio, reference_media=None):
+        if audio == UNUSED_MEDIA_CHOICE:
+            return (_validated_reference_media(reference_media),)
         return (_append_reference_media(reference_media, audio, "reference_audio"),)
 
 
