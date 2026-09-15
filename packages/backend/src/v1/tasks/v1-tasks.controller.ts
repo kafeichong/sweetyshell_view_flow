@@ -11,6 +11,7 @@ import {
   NotFoundException,
   Param,
   Post,
+  Query,
   ServiceUnavailableException,
   UseGuards,
 } from '@nestjs/common';
@@ -22,6 +23,7 @@ import { ProductionSubmissionError, ProductionSubmissionService } from '../../ta
 import { TasksService } from '../../tasks/tasks.service';
 import { WorkflowCatalogService, WorkflowContractError } from '../../tasks/workflow-catalog.service';
 import { CreateTaskDto } from './dto/create-task.dto';
+import { TaskListService } from './task-list.service';
 
 @ApiTags('tasks')
 @ApiBearerAuth('actor-token')
@@ -33,11 +35,35 @@ export class V1TasksController {
     private readonly preflightService: PreflightService,
     private readonly workflowCatalog: WorkflowCatalogService,
     private readonly productionSubmission: ProductionSubmissionService,
+    private readonly taskListService: TaskListService,
   ) {}
 
   @Get('/workflows')
   workflows() {
     return this.workflowCatalog.directory();
+  }
+
+  @Get()
+  async listTasks(
+    @CurrentActor() actor: { actorId: string },
+    @Query('page') page = '1',
+    @Query('limit') limit = '20',
+    @Query('status') status?: string,
+    @Query('workflowKey') workflowKey?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    const pageNum = Math.max(parseInt(page, 10) || 1, 1);
+    const limitNum = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 100);
+
+    return this.taskListService.listTasks(actor.actorId, {
+      page: pageNum,
+      limit: limitNum,
+      status,
+      workflowKey,
+      startDate,
+      endDate,
+    });
   }
 
   @Post('preflight')
@@ -113,6 +139,11 @@ export class V1TasksController {
     @Param('id') id: string,
   ) {
     return this.tasks.confirmClientDelivery(id, actor.actorId);
+  }
+
+  @Get(':id/detail')
+  async getTaskDetail(@CurrentActor() actor: { actorId: string }, @Param('id') id: string) {
+    return this.taskListService.getTaskDetail(actor.actorId, id);
   }
 
   @Get(':id')
