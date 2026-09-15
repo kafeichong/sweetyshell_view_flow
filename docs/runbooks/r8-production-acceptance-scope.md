@@ -258,3 +258,34 @@ packages/comfyui-video-flow-client/workflows/<工作流>-preflight-v1.comfy.json
 1. **"+1 帧"口径成立**（第 6、7 条样本）：`121 = 5×24+1`，`floor(121 × 786×1180/1024) = 109,594`，与 Provider 返回逐位吻合。
 2. **输出画幅跟随首帧**：首帧 0.6663、尾帧 0.6822、产物 **0.6661** —— 尾帧不参与定画幅（按官方说明会被拉伸，画面是否失真需肉眼确认）。
 3. **⚠️ `bounded` 的"表内最大像素即上界"被推翻**：产物 786×1180 = **927,480 px 超过**表内最大 927,408，按旧口径预占少了 7 tokens。合同 `adaptiveOutputBound` 已由 `assumed_sufficient` 改成 `falsified_needs_margin`，代码改为按「表内最大像素 × 1.01」预留（`ADAPTIVE_BOUND_MARGIN`），并把这两条样本钉成回归用例。改后 5s/720p 的 `bounded` 预占为 **`7.747810`**（比实测多留约 1.1%，安全方向）。
+
+## 11. 第四条工作流的长期开放：多模态参考（2026-09-15）
+
+授权人按 §8–§10 的同一口径开放 `seedance.omni-reference.v1`（客户端模板 `seedance-multi-reference-preflight-v1.comfy.json`）。
+
+| 项 | 值 |
+| --- | --- |
+| 授权人 / 日期 | kafeichong / 2026-09-15 |
+| 工作流 | `seedance.omni-reference.v1`（其余四类保持 `enabled=false`） |
+| 可用 Actor | `creative-pilot`（生产白名单内） |
+| **允许的参数范围** | 该工作流合同允许的全部组合：480p / 720p / 1080p × 21:9、16:9、4:3、1:1、3:4、9:16、adaptive × 4–30 秒 × mp4 / mov × 有声 / 无声 × 水印可有可无 |
+| 素材要求 | 参考**至少 1 个**：`reference_image` ≤30、`reference_video` ≤10、`reference_audio` ≤10，合计 ≤50 |
+| 金额上限 | 沿用 `creative-pilot` 自身的 `dailyLimitCny` = 100 元/日（服务端强制） |
+| 时间窗 | **长期有效，另行通知** |
+| 放行时的状态 | `implementation=ready`、`admission.enabled=true`、`validation=not_run`（真实出片记录等跑完再补） |
+
+**这条与前三条最大的不同：单价随「是否含输入视频」切换，且这套算法里的最低用量规则至今没有被任何真实结算验证过。**
+
+| 5 秒 / 720p 的组合 | 预占 | 口径 |
+| --- | --- | --- |
+| 无输入视频（图 / 图+音） | `7.623000` | 70 元/百万，公式值 |
+| 含 2 秒输入视频 | `8.164800` | 42 元/百万，**最低值生效**（`ceil(5×5/3)=9` 秒） |
+| 含 5 秒输入视频 | `9.109800` | 42 元/百万，公式值 `(5+5+1/24)` 秒 |
+| 30 秒输出 + 5 秒输入视频 | `45.360000` | 42 元/百万，最低值 `ceil(30×5/3)=50` 秒 |
+
+1. **"最低 token 规则"是外推的、尚未实测**：`billedTokens = max(公式值, ceil(输出时长×5/3) 秒 × 像素 × 帧率 / 1024)` 是对着官方快查表 96 个数据点逐位核对出来的（见合同 `pricing.inputVideoMinimumTokens`），但**没有一条真实结算验证过它**。本轮含视频的那几条就是它的第一次真实验证。
+2. **这条工作流的真实验收也还没开始**（R8 矩阵第 5、6 行）。跑通的是隔离环境的 R6.5：无视频的图+音组合走完 4 秒与 30 秒两条纵向合同；含视频组合当时因最低用量规则未落地只允许 Preview——该阻塞已解除，报价现在可用。
+3. **准入仍是工作流级**，打开即意味着上表全部组合都能提交，包括单价更高、规则未实测的含视频路径。
+4. 费用状态仍是推算（`cost.status=usage_calculated`、`billedCny=null`）。
+
+**跑完之后要做的**：把真实 `taskId` / `providerTaskId` / SHA-256 / 帧数 / 预占与结算写进 `validation.records`（`status` 改 `passed`）；含视频的样本要**单独核对最低用量是否真的生效**（对比 `billedTokens`、`minimumTokens` 与 Provider 返回的 `completion_tokens`）。
