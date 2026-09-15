@@ -228,3 +228,27 @@ packages/comfyui-video-flow-client/workflows/<工作流>-preflight-v1.comfy.json
 - "+1 帧"口径在 adaptive 输出上同样成立（97 帧 = `4×24+1`；`97 × 528×798/1024 = 39,912.47` → Provider 截断记 39,912），这已是第五条真实样本。
 
 要关闭时按 §8 的同一套动作（改回 `admission.enabled=false` 并写明理由、清空测试里的声明项、再部署）。
+
+## 10. 第三条工作流的长期开放：首尾帧（2026-09-15）
+
+授权人按 §8/§9 的同一口径（同一 Actor、同样 100 元/日 上限、全部参数、长期有效）开放 `seedance.first-last-frame-to-video.v1`。
+
+| 项 | 值 |
+| --- | --- |
+| 授权人 / 日期 | kafeichong / 2026-09-15 |
+| 工作流 | `seedance.first-last-frame-to-video.v1`（其余五类保持 `enabled=false`） |
+| 可用 Actor | `creative-pilot`（生产白名单内） |
+| **允许的参数范围** | 该工作流合同允许的全部组合：480p / 720p / 1080p × adaptive × 4–30 秒 × mp4 / mov × 有声 / 无声 × 水印可有可无 |
+| 素材要求 | **恰好两张图**：`first_frame` + `last_frame`，顺序固定 |
+| 金额上限 | 沿用 `creative-pilot` 自身的 `dailyLimitCny` = 100 元/日（服务端强制） |
+| 时间窗 | **长期有效，另行通知** |
+| 放行时的状态 | `implementation=ready`、`admission.enabled=true`、`validation=not_run`（**真实出片记录等这轮跑完再补**） |
+
+**必须同时记下的差距**：
+
+1. **这条工作流的真实验收还没开始**（R8 矩阵第 4 行，4s / 30s）。跑通的是隔离环境里的 R6.4：两张内容与哈希都不同的图（769×1163 与 710×1065）生成两个角色，Provider payload 保持两个不同 URL 与角色顺序，产物落盘可解析——但没有真实 Ark 出片。
+2. **输出比例只按首帧锁定**：官方说明首尾帧只锁首帧，**尾帧画幅不一致时会被拉伸**。报价与预占同样只看首帧——首帧命中合同比例表（16:9 / 9:16 / 1:1 / 4:3 / 3:4 / 21:9，容差 0.005）就锁定尺寸（5 秒 720p 预占 `7.623000`），不命中则退化为该分辨率的像素上界（5 秒 720p 为 `7.671090`）。**选图时首帧比例比尾帧重要**。
+3. **准入仍是工作流级**：打开即意味着上表全部参数组合都能提交。
+4. 费用状态仍是推算（`cost.status=usage_calculated`、`billedCny=null`）。
+
+**跑完之后要做的**：把真实 `taskId` / `providerTaskId` / 产物 SHA-256 / 帧数 / 预占与结算写进 `validation.records`（`status` 改 `passed`），并核对两件事——"+1 帧"口径是否成立；**尾帧与首帧画幅不一致时，实际出片是否被拉伸**（这是官方说法，尚未实测）。

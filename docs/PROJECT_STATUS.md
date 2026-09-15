@@ -8,6 +8,17 @@
 
 ## 0. 本轮交付判断
 
+### 2026-09-15：第三条工作流（首尾帧）按 §10 长期开放
+
+授权人按 [R8 授权清单 §10](./runbooks/r8-production-acceptance-scope.md) 开放 `seedance.first-last-frame-to-video.v1`，口径与前两条一致（同一 Actor `creative-pilot`、100 元/日 服务端强制、全部参数、长期有效）。合同改为 `implementation=ready` / `admission={enabled:true, reason:null}`，`validation` 保持 **`not_run` / 空**——这条**同样一次真实出片都没有**（跑通的是隔离环境的 R6.4）。
+
+**用这条工作流前必须知道的两点**：
+
+1. **素材恰好两张图**（`first_frame` + `last_frame`，顺序固定）。
+2. **输出比例只按首帧锁定**：官方说明首尾帧只锁首帧，**尾帧画幅不一致时会被拉伸**；报价与预占同样只看首帧——首帧命中合同比例表（16:9 / 9:16 / 1:1 / 4:3 / 3:4 / 21:9，容差 0.005）即锁定尺寸（5 秒 720p 预占 `7.623000`），否则退化为像素上界（5 秒 720p 为 `7.671090`）。选图时**首帧的比例比尾帧重要**。
+
+两处不变量测试的声明列表同步加入该工作流；原先用来演示"环境变量越不过合同"的样本换成仍处 `incomplete` 的 `seedance.video-edit.v1`。
+
 ### 2026-09-15：第二条工作流（首帧）按 §9 长期开放，并完成首次真实验收
 
 授权人按 [R8 授权清单 §9](./runbooks/r8-production-acceptance-scope.md) 开放 `seedance.first-frame-to-video.v1`，口径与 §8 的文生视频一致：同一 Actor `creative-pilot`、同样 100 元/日（服务端强制）、**全部参数**、**长期有效**。合同相应改为 `implementation=ready` / `admission={enabled:true, reason:null}`；`validation` 保持 **`not_run` / 空**——这条工作流**一次真实出片都还没有**（跑通的是隔离环境的 R6.3：真实 ComfyUI Queue + Fake Provider），照实写而不是先填上。
