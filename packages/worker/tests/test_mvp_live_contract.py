@@ -1519,8 +1519,14 @@ class AdditionalCrossPackageScenariosTests(unittest.TestCase):
             )
         self.assertIn(mismatch.status_code, (401, 403))
 
-    @unittest.skip("E12 的外部告警通道和容器重建验收属于 T10/T12，当前本地合同环境无可验证替身")
-    def test_e12_rebuild_keeps_journal_and_alert_truthful(self):
+    @unittest.skip("E12 的外部告警通道需要真实接收方与渠道回执；本地合同环境无法伪造一个真的收件人")
+    def test_e12_external_alert_channel_delivers_a_real_receipt(self):
+        """告警"送达回执"只能在真实渠道上验证，本地没有可验证替身。
+
+        刻意保留在报告里（`pytest -rs` 会列出），避免这条缺口被当成已通过。
+        """
+
+    def test_e12_rebuild_keeps_the_journal_and_never_creates_a_second_provider_task(self):
         self._reset_provider()
         output_dir = mkdtemp(prefix="video-flow-rebuild-output-")
         audit_dir = mkdtemp(prefix="video-flow-rebuild-audit-")
