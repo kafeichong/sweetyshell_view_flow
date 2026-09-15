@@ -8,6 +8,18 @@
 
 ## 0. 本轮交付判断
 
+### 2026-09-15：修复 ComfyUI 状态提示从未生效的缺陷（UI 第 0 期）
+
+`web/js/video_flow_status.js` 想在任务提交、等待和下载后提示"任务 id / 存到哪了 / 费用是否核实"，但在 v2 链路上**一次都没出现过**。根因是同一个 bug 的两面：**ComfyUI 只在节点返回 `ui` 键时才发 `executed` 事件**（源码 `execution.py:563`），而 `CreateTask` 的生产成功路径返回**裸 tuple**（`preflight_nodes.py:580-585`），事件根本不发；同时前端读的 `output.task_id` / `local_path` / `cost_status` 三个键，**这些节点从来没有发出过**。后果是用户在整个链路里看不到 taskId——而报障、查询和重新取片都要用它。附带症状：下载节点的本地路径错位地显示进了"检查报告"框（该节点在报告框的监听集合里）。
+
+实现过程中由测试抓出**恢复路径（沿用槽内已有任务）有完全相同的缺口**，同样不发事件。
+
+已修（提交 `854cfda`）：两条提交路径都改回 `ui.text`，与 `RequestPreview` / `DownloadResult` 既有一致；前端改读 `ui.text`，取数逻辑抽成可直测的 `web/video_flow_status_state.mjs`；下载节点移出报告框的监听集合。摘要遵守 `video_flow_task_report.py` 的**默认脱敏**原则，只含 taskId、执行槽与预占金额。客户端回归 120 passed，新增两条测试分别固定"提交结果带 `ui.text` 且不含提示词/URL"与 toast 取数契约。
+
+**仍存在的已知限制**：`VideoFlowPolicyWait` 返回裸 tuple，**默认 1200 秒等待期间依旧没有提示**；补 `ui.text` 也要等结束才显示、毫无帮助，真正的修法是长任务进度上报，留待后续。
+
+配套调研与后续分期方案（含三个待补的 actor 自助接口、两处须避免的既有隐患、以及动工前必须确认的产品决策）见 [UI 调研与分期方案](./2026-09-15/UI调研与分期方案.md)。该方案的界面范围变更**尚未**写入 `PRODUCT.md`，按 `PRODUCT.md:234` 在动工前必须先完成那一步。
+
 ### 2026-09-15：R8 第二条真实付费验收（文生视频 5 秒，走 ComfyUI 客户端人工路径），"少算一帧"第二个样本复现
 
 这一条走的是创意同事真实使用的路径：ComfyUI 里 Preview → 切 Production → 再次 Queue（[R8 授权范围清单](./runbooks/r8-production-acceptance-scope.md) §4.2）。按该节列的三个陷阱看本次配置是对的：任务以 `mode=production` 记在生产后端、收据写进 `~/.video-flow/receipts`（生产回执目录），没有落到隔离环境。
