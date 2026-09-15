@@ -26,7 +26,9 @@
 
 **三、验证**。Backend：`npm run build` + `npx jest`，26 suites / 275 passed。合同层：`VIDEO_FLOW_CONTRACT_DB_PORT=55435 bash scripts/run_mvp_contract.sh`，jest 合同 8 suites / 51 passed、跨包 live contract 21 passed / 2 skipped，退出码 0（默认端口 55432 被另一个项目的库占着，不是残留）。Worker `-q -rs`：214 passed / 26 个预期 skip / 23 deselected。Client：120 passed。`node --test scripts/tests/workflow_contract_v2.test.mjs scripts/tests/workflow_contract_sync.test.mjs`：7 passed；`sync_workflow_contracts.mjs --check` 三份合同资源字节一致。
 
-**四、未完成（重要）**：① **尚未部署**——本轮的公式修正与合同改动只在仓库里，生产跑的还是验收期间那一版（旧公式 + 目前已开放的同一状态），需部署一次才生效；② R8 矩阵第 1 行的 **30 秒边界仍空缺**（本轮决定暂不花这笔钱，720p 约 45.42 元），其余七类工作流未验收，且 §8 授权开放的参数面中只有 720p/16:9/4–5 秒有真实出片；③ 再开放任何其他工作流之前，必须先有一条对应授权并同步两处不变量测试的声明列表。
+**四、已部署（2026-09-15）**。`main` 推到 GitHub（`2f5c3e8`）后在生产 `8.140.49.56:/data/video-flow` 执行 `git pull --ff-only` → `docker compose build video-backend video-worker` → `up -d`，**零 migration**。上线后按 runbook §5（按当前 v2 接口口径）smoke：无凭证的 `POST /v1/tasks/preflight` 与 `POST /v1/tasks` 均 **401**；生产目录里 text-to-video 由 `validation=not_run` 变为 **`passed`（2 条记录）**，同时 `admission.enabled=true`；一次**免费**预检（5s / 720p / 16:9）返回 `reserve=7.623000`、`billedTokens=108,900`（= 121 帧 × 900）——新公式在生产生效；数据不变量 `tasks 21 / attempts 9 / reservations 6` 全部不变、`preflight_records +1`、未结案预占 0、无在途任务（`completed 11 / failed 3 / preview 7`）；Worker `/health` = `alive`，两个容器启动日志无 error/exception。
+
+**五、未完成（重要）**：① R8 矩阵第 1 行的 **30 秒边界仍空缺**（本轮决定暂不花这笔钱，720p 约 45.42 元），其余七类工作流未验收，且 §8 授权开放的参数面中只有 720p/16:9/4–5 秒有真实出片；② 再开放任何其他工作流之前，必须先有一条对应授权并同步两处不变量测试的声明列表；③ 费用状态仍是推算（`billedCny` 恒为 null），不等于账单确认。
 
 ### 2026-09-15：修复 ComfyUI 状态提示从未生效的缺陷（UI 第 0 期）
 

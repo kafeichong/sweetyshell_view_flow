@@ -195,3 +195,5 @@ packages/comfyui-video-flow-client/workflows/<工作流>-preflight-v1.comfy.json
 4. **费用状态仍是推算**：`cost.status = usage_calculated`、`billedCny = null`——"按冻结价格推算的 usage"不等于 Provider 账单确认。
 
 **维持本条授权的条件**：后续验收应把 30 秒边界与常用参数补齐并写进 `validation.records`。要关闭时，把 `admission.enabled` 改回 `false` 并写明理由、同步清空两处测试里的声明列表，再部署一次。
+
+**本条授权已在 2026-09-15 生效**：`main`（`2f5c3e8`）推送后，生产 `8.140.49.56:/data/video-flow` 执行 `git pull --ff-only` + `docker compose build/up video-backend video-worker`（零 migration）。上线 smoke：无凭证入口 401；生产目录 text-to-video = `implementation=ready / admission.enabled=true / validation=passed`（2 条记录）；免费预检 5s/720p 返回 `reserve=7.623000`（补帧后的新公式）；数据不变量 tasks/attempts/reservations 无增量、未结案预占 0；Worker `/health` 正常。
