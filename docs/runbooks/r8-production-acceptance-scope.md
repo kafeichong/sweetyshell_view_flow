@@ -251,4 +251,10 @@ packages/comfyui-video-flow-client/workflows/<工作流>-preflight-v1.comfy.json
 3. **准入仍是工作流级**：打开即意味着上表全部参数组合都能提交。
 4. 费用状态仍是推算（`cost.status=usage_calculated`、`billedCny=null`）。
 
-**跑完之后要做的**：把真实 `taskId` / `providerTaskId` / 产物 SHA-256 / 帧数 / 预占与结算写进 `validation.records`（`status` 改 `passed`），并核对两件事——"+1 帧"口径是否成立；**尾帧与首帧画幅不一致时，实际出片是否被拉伸**（这是官方说法，尚未实测）。
+**首轮真实验收已完成（2026-09-15，两条独立任务）**：`1614cd62-…`（20:03）与 `141babe3-…`（20:05），同一 intent（intentDigest 相同，两次独立出片），5 秒 / 720p / adaptive，首帧 611×917 + 尾帧 717×1051。两条产物均为 **786×1180 / 121 帧 / 5.056 秒**，SHA-256 `f2a6dba7…`、`79007caf…` 各自三方一致，`verify` 均 12 项全过。预占 `7.671090` → 结算 **`7.671580`**（109,594 tokens），两条合计 **15.343160 元**。已写入 `validation.records`，`status=passed`。
+
+三条实测结论：
+
+1. **"+1 帧"口径成立**（第 6、7 条样本）：`121 = 5×24+1`，`floor(121 × 786×1180/1024) = 109,594`，与 Provider 返回逐位吻合。
+2. **输出画幅跟随首帧**：首帧 0.6663、尾帧 0.6822、产物 **0.6661** —— 尾帧不参与定画幅（按官方说明会被拉伸，画面是否失真需肉眼确认）。
+3. **⚠️ `bounded` 的"表内最大像素即上界"被推翻**：产物 786×1180 = **927,480 px 超过**表内最大 927,408，按旧口径预占少了 7 tokens。合同 `adaptiveOutputBound` 已由 `assumed_sufficient` 改成 `falsified_needs_margin`，代码改为按「表内最大像素 × 1.01」预留（`ADAPTIVE_BOUND_MARGIN`），并把这两条样本钉成回归用例。改后 5s/720p 的 `bounded` 预占为 **`7.747810`**（比实测多留约 1.1%，安全方向）。
