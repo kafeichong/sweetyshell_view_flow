@@ -348,7 +348,7 @@ expect(unknownQuote.status).toBe('unavailable');
 **修改：** `scripts/seedance_production_acceptance.py`、相关测试、`docs/runbooks/deploy-and-rollback.md`、`creative-user-guide.md`；证据只更新PROJECT_STATUS。
 **前提：** R7具备交付证据；正式环境和付费任务在明确的账号、素材、规格与金额范围内执行。本轮规划不自动创建这些任务。
 
-- [x] 先备齐只读查询/按槽恢复/下一版创建/预算校验/证据导出的验收脚本，默认查询已有任务，不默认新建。`scripts/seedance_production_acceptance.py` 提供 `query` / `slot` / `budget` / `verify` / `evidence` 五个只读子命令与一个会付费的 `next`；判定要求产物真的下载并 `ffprobe` 解码通过，且扩展名/MIME 与冻结的 `outputFormat` 一致，不看单一状态字段。`next` 需同时具备 `--confirm-spend`、操作者自备的稳定幂等键和素材 slot 绑定，槽内还有未交付任务时拒绝执行。用法见 `docs/runbooks/deploy-and-rollback.md` §6.3。
+- [x] 先备齐只读查询/按槽恢复/下一版创建/预算校验/证据导出的验收脚本，默认查询已有任务，不默认新建。`scripts/seedance_production_acceptance.py` 提供 `query` / `slot` / `budget` / `verify` / `evidence` 五个只读子命令与一个会付费的 `next`；判定要求产物真的下载并 `ffprobe` 解码通过，且扩展名/MIME 与冻结的 `outputFormat` 一致，不看单一状态字段。`next` 需同时具备 `--confirm-spend`、操作者自备的稳定幂等键和素材 slot 绑定，槽内还有未交付任务时拒绝执行。用法见 `docs/runbooks/deploy-and-rollback.md` §6.3。执行前的填写模板另见 [R8 授权范围清单](./runbooks/r8-production-acceptance-scope.md)：限定账号/素材/参数/金额上限，逐项列出按已验证官方口径算出的预估费用（全部最短时长 720p 约 61.69 元）、必须记录的证据字段，以及验收结束后的收口动作（恢复暂停、把为验收打开的工作流改回关闭并写入具体验证记录）。**清单未填写、未授权前不执行真实付费任务。**
 - [ ] 配套升级Backend、Worker、客户端和合同版本；记录数据库备份、迁移、健康、鉴权和资源打包情况。
 - [ ] 按R6八行逐项执行正式接口验收：真实taskId/attemptId/providerTaskId、冻结参数、原始usage、费用状态、产物、媒体探测和实际播放。
 - [x] 对适用4–30秒的工作流，4秒和30秒边界有自动化证据。`packages/worker/tests/test_mvp_live_contract.py` 里七条纵向合同均以 `for duration in (4, 30)` 跑完整交付：文生视频、参考图、首帧、首尾帧、多模态参考（图片+音频、以及含输入视频两组）、视频延长、音频参考；视频编辑按官方合同固定 `duration=-1`，不适用该边界。含输入视频的两组还各自断言 4 秒与 30 秒下的最低用量规则（4 秒正是最低值可能压过公式值的位置）。本轮补齐了此前只测 15 秒的多模态含视频组合与只测 11 秒的视频延长。
