@@ -1599,41 +1599,43 @@ class AdditionalCrossPackageScenariosTests(unittest.TestCase):
         """
         self._reset_provider()
         prompt = "live e13b pause in flight"
-        # 先让 Provider 停在"已受理未完成"，制造一个真实的在途窗口。
+        output_dir = mkdtemp(prefix="video-flow-pause-output-")
+        audit_dir = mkdtemp(prefix="video-flow-pause-audit-")
+        # Provider 先停在"已受理未完成"。注意不能用进程内的 _run_one_cycle()：
+        # execute_job 会在内部一直轮询到终态才返回，观察不到"在途"这个中间态。
         self._set_provider_mode(task_status="running")
+        worker = self._spawn_worker(output_dir=output_dir, audit_dir=audit_dir)
         try:
             response = self._post_task(prompt=prompt, idempotency_key="e13b-pause-in-flight")
             self.assertIn(response.status_code, (200, 201), response.text)
             task_id = response.json()["id"]
-
             before = provider_stats(self.provider_url)["createCountsByKey"].get(prompt, 0)
-            self._run_one_cycle()
-            self.assertEqual(
-                provider_stats(self.provider_url)["createCountsByKey"].get(prompt, 0),
-                before + 1,
-                "在途任务本应已经被提交到 Provider",
+
+            # 等 Worker 真的把它提交给 Provider：此刻任务在途，闸门还没暂停。
+            self._wait_until(
+                lambda: provider_stats(self.provider_url)["createCountsByKey"].get(prompt, 0) == before + 1,
+                timeout=60.0,
+                description="task submitted to provider",
             )
 
             paused = self._set_gate(True, "contract: in-flight continues under pause")
             self.assertEqual(paused.status_code, 200)
-
-            self._set_provider_mode(task_status="succeeded")
-            deadline = time.monotonic() + 60.0
-            while time.monotonic() < deadline:
-                self._run_one_cycle()
-                if self._task_summary(task_id).get("delivery", {}).get("status") == "ready":
-                    break
-                time.sleep(0.5)
-            else:
-                self.fail("暂停期间在途任务没有完成归档，产物被卡住了")
-
-            self.assertEqual(
-                provider_stats(self.provider_url)["createCountsByKey"].get(prompt, 0),
-                before + 1,
-                "暂停下恢复在途任务不应产生第二次 Provider create",
-            )
+            try:
+                self._set_provider_mode(task_status="succeeded")
+                self._wait_until(
+                    lambda: self._task_summary(task_id).get("delivery", {}).get("status") == "ready",
+                    timeout=90.0,
+                    description="in-flight task archived while the gate is paused",
+                )
+                self.assertEqual(
+                    provider_stats(self.provider_url)["createCountsByKey"].get(prompt, 0),
+                    before + 1,
+                    "暂停下恢复在途任务不应产生第二次 Provider create",
+                )
+            finally:
+                self._set_gate(False, "contract: restore after in-flight check")
         finally:
-            self._set_gate(False, "contract: restore after in-flight check")
+            self._stop_worker(worker)
             self._set_provider_mode(task_status="succeeded")
 
 

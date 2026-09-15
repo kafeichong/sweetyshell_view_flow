@@ -407,7 +407,8 @@ git diff --check
 - [x] 验证隔离数据库备份恢复。`scripts/run_db_backup_restore.sh` 将源库 `pg_dump` 后恢复到全新隔离库，逐表比对**行数与内容指纹**（金额按 `::text` 精确比对以捕捉 Decimal 精度变化，jsonb 取 `md5`，并含 `_prisma_migrations`）；已用"只改一个任务的 `cost` 加 1e-6"的负向实验确认该指纹能抓住单纯比对行数会漏掉的差异。
 - [ ] 监测巡检与备份自身失效、整机不可用（需要真实宿主、告警渠道与持续运行时间，本机无法验证）。
 - [ ] 告警责任人与渠道具备真实接收回执；覆盖requires_review、费用未知、交付失败、磁盘压力和进程失活。
-- [ ] 暂停只停止新生成；已有Provider任务查询和归档继续。应用回滚不是撤销Provider任务。
+- [x] 暂停只停止新生成；已有Provider任务查询和归档继续。两个方向都有跨包用例：`test_pausing_the_gate_blocks_new_admission_only` 断言暂停下正式提交返回 **503**（与额度类的 429 可区分）、Provider create 不变，且 Preview 仍走独立预检入口；新增的 `test_pausing_the_gate_does_not_strand_an_in_flight_provider_task` 让 Provider 先停在"已受理未完成"制造真实在途窗口，暂停闸门后再让它完成，断言 Worker 仍把在途任务轮询并归档到 `delivery ready`，且**不产生第二次 Provider create**——否则故障期间一暂停，已付费的在途任务就拿不回产物了。
+- [ ] 应用回滚不是撤销 Provider 任务（部署语义，需要一次真实回滚演练，本机无可验证替身）。
 - [ ] 破坏性协议切换采用配套升级；保留上一可用客户端/镜像与数据库备份，不通过回退到绕过预检/预算的版本恢复新提交。
 
 每阶段记录：变更文件、移除的旧设计、测试命令/退出码、合同与实际验收范围、遗留项；发布状态分别记录为本地、提交、推送、部署、真实验收。不为提前存在的测试绿勾选本轮任务。
