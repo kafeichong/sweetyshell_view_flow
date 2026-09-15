@@ -3,7 +3,9 @@ import { api } from "../../scripts/api.js";
 import { ComfyWidgets } from "../../scripts/widgets.js";
 import { failedReport, pendingReport } from "./preflight_report_state.mjs";
 
-const watched = new Set(["VideoFlowRequestPreflight", "VideoFlowConfirmedCreate", "VideoFlowPolicyDownload"]);
+// 只放真正会输出"检查报告"的节点。VideoFlowPolicyDownload 不在其中：它的 ui.text
+// 是本地文件路径，塞进"检查报告"框会让人误以为那是服务端报告（路径改由状态 toast 展示）。
+const watched = new Set(["VideoFlowRequestPreflight", "VideoFlowConfirmedCreate"]);
 
 function setReport(node, value) {
   if (!node.preflightReport) {

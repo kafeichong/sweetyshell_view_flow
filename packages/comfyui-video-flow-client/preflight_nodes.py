@@ -97,6 +97,28 @@ def preflight_report(record, message):
     }
 
 
+def task_notice(task, result):
+    """一行给用户看的提交摘要。
+
+    ComfyUI 只在节点返回 `ui` 键时才发 `executed` 事件，所以这条摘要是用户看到
+    taskId 的唯一通道——而报障、查询和重新取片都要用到它。
+
+    默认脱敏：只给任务标识、执行槽和预占金额；不含提示词、签名 URL 或凭证。
+    金额明确写成"预占"，它是内部预算依据，不是 Provider 账单。
+    """
+    plan = task.get('executionPlan') or {}
+    parts = [f"正式任务 {result['task_id']}"]
+    if result.get('execution_slot_id'):
+        parts.append(f"执行槽 {result['execution_slot_id']}")
+    reserved = plan.get('reserveCny')
+    if reserved:
+        parts.append(f"预占 {reserved} 元（最终按实际用量结算，不是账单）")
+    if result.get('recovered'):
+        parts.append('沿用原任务')
+    parts.append('已提交，等待生成')
+    return '；'.join(parts)
+
+
 class ExecutionPolicy:
     @classmethod
     def INPUT_TYPES(cls):
@@ -506,7 +528,8 @@ class CreateTask:
         receipt_store = client.receipt_store(config.receipt_dir)
         recovered = recover_current(client, slot_id, receipt_store)
         if recovered is not None:
-            return (recovered,)
+            # 恢复路径同样要带 ui：否则"沿用原任务"时用户看不到 taskId。
+            return {'ui': {'text': [task_notice({}, recovered)]}, 'result': (recovered,)}
 
         if checked_request.get("mode") != mode: raise ValueError("预检与运行方式不一致")
         request = checked_request
@@ -577,12 +600,13 @@ class CreateTask:
             mode='production',
             receipt_store=receipt_store,
         )
-        return ({
+        result = {
             'mode': 'production',
             'task_id': str(task['id']),
             'execution_slot_id': slot_id,
             'recovered': False,
-        },)
+        }
+        return {'ui': {'text': [task_notice(task, result)]}, 'result': (result,)}
 
 
 class WaitTask:

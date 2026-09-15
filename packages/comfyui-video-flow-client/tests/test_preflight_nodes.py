@@ -438,8 +438,8 @@ def test_confirmed_submission_reuses_receipt_without_uploading_again(tmp_path, m
     n.RequestPreview().check(config, n.ExecutionPolicy().execute()[0], request)
     policy = n.ExecutionPolicy().execute('production')[0]
     checked = n.RequestPreview().check(config, policy, request)['result'][0]
-    first = n.CreateTask().submit(config, policy, checked, execution_slot_id='slot-1')[0]
-    second = n.CreateTask().submit(config, policy, checked, execution_slot_id='slot-1')[0]
+    first = n.CreateTask().submit(config, policy, checked, execution_slot_id='slot-1')['result'][0]
+    second = n.CreateTask().submit(config, policy, checked, execution_slot_id='slot-1')['result'][0]
     assert first['task_id'] == second['task_id'] == 't1'
     assert first['recovered'] is False
     assert second['recovered'] is True
@@ -447,6 +447,58 @@ def test_confirmed_submission_reuses_receipt_without_uploading_again(tmp_path, m
     assert calls.count(('POST', '/api/v1/tasks')) == 1
     assert calls.index(('GET', '/api/v1/tasks/slots/slot-1/current')) < calls.index(('GET', '/api/v1/tasks/preflight/p1/check'))
     assert calls.index(('GET', '/api/v1/tasks/preflight/p1/check')) < calls.index(('POST', '/api/v1/assets/upload-ticket'))
+
+
+def test_confirmed_create_reports_the_task_id_through_the_ui_channel(tmp_path, monkeypatch):
+    """成功提交必须带 ui 通道。
+
+    ComfyUI 只在节点返回 `ui` 键时才发 `executed` 事件（execution.py:563），
+    缺了它，用户在整个链路里看不到 taskId —— 而报障、查询和重新取片都要用它。
+    """
+    import httpx
+    from client import VideoFlowClient
+
+    request = inputs(tmp_path, monkeypatch)
+    config = VideoFlowConfig('https://test', 'token', receipt_dir=str(tmp_path / 'receipts'))
+    record = {
+        'preflightId': 'p1', 'expiresAt': (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat(),
+        'willCallProvider': False, 'willUploadMedia': False, 'effectiveRequest': request['intent'],
+        'requestCheck': {'status': 'passed', 'items': []},
+        'productionAdmission': {'canSubmit': True, 'blockers': []},
+        'intentDigest': 'intent-digest', 'quote': {'quoteDigest': 'quote-digest', 'status': 'estimated'},
+    }
+
+    def handle(req):
+        if req.url.path.endswith('/preflight'): return httpx.Response(201, json=record)
+        if '/slots/' in req.url.path:
+            return httpx.Response(200, json={'executionSlotId': 'slot-1', 'currentTask': None})
+        if req.url.path.endswith('/check'): return httpx.Response(200, json=record)
+        if req.url.path.endswith('/upload-ticket'):
+            return httpx.Response(201, json={'assetId': 'a1', 'alreadyUploaded': True})
+        if req.method == 'POST' and req.url.path.endswith('/tasks'):
+            return httpx.Response(201, json={'id': 't1', 'executionPlan': {'reserveCny': '7.560000'}})
+        raise AssertionError(str(req.url))
+
+    monkeypatch.setattr(
+        n, 'VideoFlowClient',
+        lambda cfg: VideoFlowClient(cfg, httpx.Client(transport=httpx.MockTransport(handle))),
+    )
+    n.RequestPreview().check(config, n.ExecutionPolicy().execute()[0], request)
+    policy = n.ExecutionPolicy().execute('production')[0]
+    checked = n.RequestPreview().check(config, policy, request)['result'][0]
+
+    submitted = n.CreateTask().submit(config, policy, checked, execution_slot_id='slot-1')
+
+    assert submitted['result'][0]['task_id'] == 't1'
+    assert 'ui' in submitted, '成功提交必须带 ui 通道，否则前端收不到 executed 事件'
+    lines = submitted['ui']['text']
+    assert len(lines) == 1
+    notice = lines[0]
+    assert 't1' in notice and 'slot-1' in notice and '7.560000' in notice
+    # 默认脱敏：不含凭证、URL，也不含提示词原文。
+    assert 'token' not in notice
+    assert 'http' not in notice
+    assert request['intent']['prompt']['positive'] not in notice
 
 
 def test_existing_slot_task_recovers_before_expired_preflight_or_current_admission(tmp_path, monkeypatch):
@@ -494,7 +546,7 @@ def test_existing_slot_task_recovers_before_expired_preflight_or_current_admissi
         checked,
         generation_version=1,
         execution_slot_id='slot-1',
-    )[0]
+    )['result'][0]
 
     assert result == {
         'mode': 'production',
@@ -681,7 +733,7 @@ def test_delivered_slot_starts_a_new_idempotent_round_with_the_same_preflight(tm
     policy = n.ExecutionPolicy().execute('production')[0]
     checked = n.RequestPreview().check(config, policy, request)['result'][0]
 
-    first = n.CreateTask().submit(config, policy, checked, execution_slot_id='slot-1')[0]
+    first = n.CreateTask().submit(config, policy, checked, execution_slot_id='slot-1')['result'][0]
     receipts = VideoFlowClient(config).receipt_store(config.receipt_dir)
     local = tmp_path / 'task-1.mp4'
     local.write_bytes(b'first-version')
@@ -694,7 +746,7 @@ def test_delivered_slot_starts_a_new_idempotent_round_with_the_same_preflight(tm
     })
     record_confirmed(receipts, 'slot-1', 'task-1')
 
-    second = n.CreateTask().submit(config, policy, checked, execution_slot_id='slot-1')[0]
+    second = n.CreateTask().submit(config, policy, checked, execution_slot_id='slot-1')['result'][0]
 
     assert first['task_id'] == 'task-1'
     assert second['task_id'] == 'task-2'

@@ -5,6 +5,7 @@
 
 import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
+import { toastLines } from "../video_flow_status_state.mjs";
 
 const WATCHED_NODES = new Set([
   "VideoFlowConfirmedCreate",
@@ -43,16 +44,10 @@ app.registerExtension({
         const node = app.graph?.getNodeById?.(detail?.node) ?? null;
         if (!node || !WATCHED_NODES.has(node.comfyClass)) return;
 
-        const output = detail?.output ?? {};
-        const taskId = output.task_id?.[0] ?? node.widgets?.find?.((w) => w.name === "task_id")?.value;
-        const localPath = output.local_path?.[0] ?? output.local_video_path?.[0];
-        const costStatus = output.cost_status?.[0];
-
-        const parts = [];
-        if (taskId) parts.push(`任务 ${taskId}`);
-        if (localPath) parts.push(`已保存到 ${localPath}`);
-        if (costStatus) parts.push(costStatus);
-        if (parts.length) notify(`${labelFor(node)}：${parts.join("；")}`);
+        // 节点统一把要展示的一行放在 `ui.text` 里；旧的 task_id/local_path/
+        // cost_status 三个键从来没有被发出过，读了只会静默不弹提示。
+        const lines = toastLines(detail?.output ?? {});
+        if (lines.length) notify(`${labelFor(node)}：${lines.join("；")}`);
       });
 
       api.addEventListener("execution_error", ({ detail }) => {
