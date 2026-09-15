@@ -1,12 +1,22 @@
 # Video Flow 项目现状（权威）
 
 > 最后核验：2026-09-15
-> 本轮核验方式：本地源码评审、三包回归、合同资源校验、隔离 PostgreSQL 全新/历史迁移、真实 Nest HTTP/数据库合同，以及 Comfy Desktop + Fake Provider/Fake OSS 的实际 Queue、下载、落盘和播放；未部署、未推送、未调用真实 Provider/OSS、未创建付费任务。
+> 本轮核验方式：本地源码评审、三包回归、合同资源校验、隔离 PostgreSQL 全新/历史迁移、真实 Nest HTTP/数据库合同，Comfy Desktop + Fake Provider/Fake OSS 的实际 Queue、下载、落盘和播放，以及 R8 在生产环境、真实火山账号上的受控付费验收（真实调用 Provider、真实产生费用，见下）。
 > 本文是**唯一**描述"系统现在是什么样"的文档。任何历史文档与本文冲突时，以本文为准；如果本文与代码冲突，以代码为准并立即更新本文。
 
 ---
 
 ## 0. 本轮交付判断
+
+### 2026-09-15：R8 第二条真实付费验收（文生视频 5 秒，走 ComfyUI 客户端人工路径），"少算一帧"第二个样本复现
+
+这一条走的是创意同事真实使用的路径：ComfyUI 里 Preview → 切 Production → 再次 Queue（[R8 授权范围清单](./runbooks/r8-production-acceptance-scope.md) §4.2）。按该节列的三个陷阱看本次配置是对的：任务以 `mode=production` 记在生产后端、收据写进 `~/.video-flow/receipts`（生产回执目录），没有落到隔离环境。
+
+任务 `d4d41580-f30c-4be1-96a7-6cce265451f1`（执行槽 `slot-template-text-v1`，Actor `creative-pilot`），Provider 任务 `cgt-20260915183853-isazs`，模型 `doubao-seedance-2-5-260628`，请求 5 秒 / 720p / 16:9 / 有声 / 无水印 / MP4；预检 `80af152a-a8ef-4569-bab8-fdbab3212c16` 报价 `7.560000`、`canSubmit=true`、无 blockers。产物是**真实视频**：8023991 字节、H.264+AAC、1280×720、24fps、5.056 秒、**121 帧**，SHA-256 `65d04429683a1041ccb9922e20073b73f98652ec9a061cb581e22f1ce21a75d5`。**三方哈希一致**：从 OSS 重新下载的产物、客户端落在本机的成片（`~/mylab/ComfyUI/output/video-flow/d4d41580-f30c-4be1-96a7-6cce265451f1-result.mp4`）与客户端收据记录的哈希相同；`verify` 12 项检查全过、退出码 0，证据导出 `/private/tmp/video-flow-comfy-acceptance/evidence/r8/r8-text-5s-evidence.json`。预占 `7.560000` 最终结算为 `7.623000`（108,900 tokens），reservation 为 `settled`；`cost.status` 仍为 `usage_calculated`、`billedCny` 仍为 null。
+
+**"少算一帧"复现（重要）**：结算比预占高 900 tokens，恰好等于一帧（1280×720/1024 = 900），而实测帧数为 **121 = `5 × 24 + 1`**。这是与 4 秒样本**不同时长的第二个独立样本**，结论逐位吻合，进一步指向真实口径为 **`帧数 × 宽 × 高 / 1024`**（帧数 = `输出秒数 × 帧率 + 1`）。**该偏差仍未修复**：两个样本仍不足以把"固定 +1 帧"确立为一般规律，下一步先用 30 秒边界复核，确认后再改公式并补回归。
+
+**边界**：本次时长 5 秒是模板默认值，**不是**验收矩阵第 1 行声明的 4 秒 / 30 秒，因此**不计入 R8 矩阵条目**——矩阵第 1 行的 4 秒条目仍以 4 秒那次为准，30 秒边界仍空缺；本条只作为（1）客户端人工路径的链路证据、（2）计费口径的第二个样本。收口动作（把 `seedance.text-to-video.v1` 的 `admission.enabled` 改回 `false` 并写 `validation.records`）**仍未执行**。
 
 ### 2026-09-15：R8 首条真实付费验收通过（文生视频 4 秒），并实测出预占少算一帧
 
