@@ -309,9 +309,9 @@ expect(unknownQuote.status).toBe('unavailable');
 
 逐项完成记录（每项都执行下方流程，不能因共用模块通过就批量勾选）：
 
-- [ ] R6.1 参考图片。
-- [ ] R6.2 文本生视频。
-- [ ] R6.3 首帧。
+- [x] R6.1 参考图片。已在真实 Comfy Desktop 中完成本地 WebP 的零上传 Preview、再次 Queue 的 Production、Fake OSS 实际内容复验、Fake Provider 单次 `reference_image` create、归档、客户端落盘与实际播放；真实 Ark 出片仍归 R8。补测：用 `scripts/comfyui_acceptance_evidence.py` 在每次 Queue 前后采集计数器快照，**隔离证明** Preview 对 Task / Attempt / 预算预占 / Asset / Provider create 的增量全为 0（`PreflightRecord` 恰好 +1，是报告与 Production 的凭据），并在同一执行槽中已交付的序号 1 之上实际创建了序号 2。
+- [x] R6.2 文本生视频。已在真实 Comfy Desktop 中完成默认 Preview、再次 Queue 的 Production、Fake Provider 单次 create、Fake OSS 归档、客户端落盘与实际播放；真实 Ark 出片仍归 R8。
+- [x] R6.3 首帧。已在真实 Comfy Desktop 中完成本机 WebP 的零上传 Preview、再次 Queue 的 Production、Fake OSS 实际内容复验、Fake Provider 单次 `first_frame` create、归档、客户端落盘与实际播放；请求保持 `ratio=adaptive`，真实 Ark 出片仍归 R8。
 - [ ] R6.4 首尾帧。
 - [ ] R6.5 多模态参考。
 - [ ] R6.6 视频编辑。
@@ -333,13 +333,15 @@ expect(unknownQuote.status).toBe('unavailable');
 **修改：** `scripts/run_mvp_contract.sh`、`scripts/tests/fake_provider.py`、`.github/workflows/ci.yml`、两端Docker构建文件、客户端 `install.sh` / `tests/test_delivery_scripts.py`、各包README和runbooks。
 **接口：** 隔离合同必须进入真实Controller/Guard、数据库、Worker实际编译器和Fake Provider；按意图记录create计数。
 
-- [ ] 将F01–F15全部纳入持久用例；测试名称和断言对应职责，不再为旧错误行为保绿。
-- [ ] 实现并运行第5节故障矩阵；Preview对Task/Attempt/Reservation/素材上传/Provider调用的增量全部为0。
+- [x] 将F01–F15全部纳入持久用例；测试名称和断言对应职责，不再为旧错误行为保绿。
+- [x] 实现并运行第5节故障矩阵；Preview对Task/Attempt/Reservation/素材上传/Provider调用的增量全部为0。
 - [x] 全新安装和升级已有测试库两条迁移测试通过；历史Task/Provider ID/产物/预算可查询并可恢复，未执行迁移不能伪报通过。
-- [ ] 打包合同资源、所有模板和素材探测依赖；清理本插件旧注册/旧文件时先备份，只操作经确认属于本插件的文件。
+- [x] 打包合同资源、所有模板和素材探测依赖；清理本插件旧注册/旧文件时先备份，只操作经确认属于本插件的文件。
 - [x] 对旧接口/配置/节点/编译器进行引用搜索，删除已被替代的执行分支与维护错误语义的测试；使用Git/归档保留历史，不运行两套新提交合同。
-- [ ] 三包完整回归、隔离跨包和实际ComfyUI假服务验证通过；更新runbook中的协议升级与恢复说明。
-- [ ] 验收：F01–F15各有关闭证据；外部依赖skip与未执行的验收明确列出，不能计为已完成。
+- [x] 三包完整回归、隔离跨包和实际ComfyUI假服务验证通过；更新runbook中的协议升级与恢复说明。真实 ComfyUI 操作验收当前覆盖文生视频、参考图和首帧，其余 5 类由 R6 逐项完成。
+- [x] 验收：F01–F15各有关闭证据；外部依赖skip与未执行的验收明确列出，不能计为已完成。
+
+当前操作验收进度：已建立 `scripts/comfyui_acceptance_env.py` 的 loopback-only 持久环境，并完成文生视频、参考图、首帧三项真实 ComfyUI Queue；其余 5 类仍需逐项操作验收。其中参考图一项另有每次 Queue 前后的计数器快照断言（`scripts/comfyui_acceptance_evidence.py`），文生视频与首帧的 Preview 零增量尚未以同样方式隔离复现。测试固定夹只能证明链路可播放，不能替代 R8 的 Ark 真实时长、画质、费用和创意验收。
 
 ### R8：受控正式验收与发布
 

@@ -1,14 +1,46 @@
 # Video Flow 项目现状（权威）
 
 > 最后核验：2026-09-15
-> 本轮核验方式：本地源码评审、三包回归、合同资源校验、隔离 PostgreSQL 全新/历史迁移和真实 Nest HTTP/数据库合同；未部署、未推送、未上传素材、未调用 Provider、未创建付费任务。
+> 本轮核验方式：本地源码评审、三包回归、合同资源校验、隔离 PostgreSQL 全新/历史迁移、真实 Nest HTTP/数据库合同，以及 Comfy Desktop + Fake Provider/Fake OSS 的实际 Queue、下载、落盘和播放；未部署、未推送、未调用真实 Provider/OSS、未创建付费任务。
 > 本文是**唯一**描述"系统现在是什么样"的文档。任何历史文档与本文冲突时，以本文为准；如果本文与代码冲突，以代码为准并立即更新本文。
 
 ---
 
 ## 0. 本轮交付判断
 
-### 2026-09-15：R7 代码清理与自动化总回归已完成，实际 ComfyUI 验收仍待执行
+### 2026-09-15：参考图工作流的 Preview 零增量与同槽顺序生成已用前后快照隔离验证
+
+下一条记录中的参考图 Preview 与 Production 是连着跑的，事后无法单独证明"Preview 没有创建正式任务"。本轮用 Playwright 驱动真实 ComfyUI 0.35.1 前端（`127.0.0.1:8188`，与 Comfy Desktop 同一个 server 与队列；本次 Queue 的 `client_id` 为 `467d8dcf…`，与 Desktop 的 `994c6b02…` 可区分）单独重跑参考图这一项，并在每一步 Queue 前后采集计数器快照做机器判定。
+
+Preview：报告 `requestCheck.status=passed`、`mediaTransfer.uploaded=false`、`willUploadDuringPreview=false`，`effectiveRequest` 为 `seedance.reference-image-to-video.v1` / 5s / 16:9 / 720p / mp4 / 有声无水印，媒体为 `reference_image`（sha256 `f441d055…`、769×1163、image/webp、52644 字节），报价 `estimated 7.560000 CNY`。增量为 `tasks` / `execution_attempts` / `task_budget_reservations` / `assets` / Fake Provider `createCount` **全部为 0**，`preflight_records` 恰好 +1 —— 该独立记录既是用户看到的报告，也是后续 Production 消费的凭据，属于 Preview 合法且必需的副作用。
+
+Production：同一画布切成 `production` 再次 Queue，创建任务 `27bf4fe8-640f-4b57-a4be-dbe0d93345bc`，槽 `slot-template-product-v1`、`slotSequence=2`，`preflightId=98372e7e…` 正是上一步 Preview 留下的那条记录。增量为 `tasks` / `execution_attempts` / `task_budget_reservations` 各 +1、Fake Provider `createCount` 恰好 +1 且归属本次 Prompt，`preflights` +0（复用了仍在有效期内的预检）。预占 `7.560000` 按 `usage.completion_tokens=1000` 结算为 `settled 0.070000`。Fake Provider 实际收到的 payload（`image_url` + `role=reference_image`、5s、16:9、720p、mp4、`generate_audio=true`、`watermark=false`）与冻结执行快照逐字段一致。任务终态 `completed / delivery ready / client delivered`，产物 `output/video-flow/27bf4fe8-…-result.mp4` 的 sha256 与客户端回执一致，`ffprobe` 为 H.264 64×64 1.0s，ComfyUI 成片预览节点出现可播放的视频控件（`0:00 / 0:01`）。
+
+同一执行槽此前已有一条**已交付**的序号 1（`ce730c9f…`），本轮序号 2 的创建证明"完成本地交付后的下一次 Queue 才顺序生成下一版"在真实环境成立，而不是只靠单测断言。
+
+新增 `scripts/comfyui_acceptance_evidence.py` 及其测试：对运行中的验收环境采集计数器与 Provider 统计的前后快照，并做 `assert-preview` / `assert-production` 增量子断言，使"Preview 必须零增量""Production 必须恰好一次"成为可机器复现的结论，而不是人工读日志。证据（快照 JSON、导入的模板副本、播放截图）保存在 `/private/tmp/video-flow-comfy-acceptance/evidence/`。
+
+实现该工具时先按测试先行写错了一次断言：初版把 `preflight_records` 也当成"不得移动"的计数器，在真实环境误报失败。改为"恰好 +1"后才与实际设计一致。这条错误不跑真实 Queue 不会暴露。
+
+**本轮发现并已修复的产品侧观测缺陷**：Worker 用 `print()` 输出运行日志，而 Python 的 stdout 在重定向到文件或管道时是块缓冲，`PYTHONUNBUFFERED` 在验收脚本与 Worker 镜像里都没有设置。实测 `worker.log` 停在 15:58（1218 字节），而 Worker 在 16:16 又完成了一个任务——审计 JSONL 与产物均按时更新，唯独 `tail worker.log`（手册第 6 节的排查步骤）与 `docker logs video-flow-worker` 看不到任何新内容；隔离复现显示，不设该变量时 `print()` 的内容要等进程退出才落盘，设置后立即落盘。已在 `packages/worker/Dockerfile` 增加 `ENV PYTHONUNBUFFERED=1`，把验收启动器的 Worker 环境抽成 `worker_environment()` 并同样设置该变量，`scripts/tests/test_worker_logging.py` 固定这两个断言。注意：**当前仍在运行的验收环境是修复前启动的，其 Worker 日志仍然滞后**，要重启该环境才会生效（重启会清空隔离数据库卷，本轮任务记录将无法再直接查询）。
+
+### 2026-09-15：文生视频、参考图与首帧已完成真实 ComfyUI 本地隔离验收，不能等同于 Ark 正式验收
+
+已在 Comfy Desktop `1.0.47` / ComfyUI `0.35.1` 中重新安装当前客户端，导入临时文生视频模板并实际 Queue。Preview 返回 `requestCheck.status=passed`、`canSubmit=true`、`willUploadMedia=false`、`willCallProvider=false`，且数据库 Task / Attempt / Reservation 与 Fake Provider create 增量均为 0。Production 再次 Queue 后，经真实客户端节点、Nest Controller/Guard、隔离 PostgreSQL、Worker 正式编译器、Fake Provider 和 Fake OSS 完成一条正式任务。
+
+验收任务 `bd5c5d7d-3683-436c-bb06-cbe403af820f` 最终为 `completed / delivery ready / client delivered`；Fake Provider `createCount=1`，收到 `doubao-seedance-2-5-260628`、5 秒、720p、16:9、MP4、有声、无水印 payload。预算按请求参数预占 `7.560000 CNY`；Fake usage 为 `completion_tokens=1000`，按冻结价格推算并结算 `0.070000 CNY`，reservation 为 `settled`。输出 Asset 为 `video/mp4`、2246 bytes，客户端落盘到 `/Users/steven/mylab/ComfyUI/output/video-flow/bd5c5d7d-3683-436c-bb06-cbe403af820f-result.mp4`；`ffprobe` 识别为 H.264、64×64、1 秒，ComfyUI 播放控件进入“暂停”状态，证明下载文件可实际播放。
+
+参考图工作流随后在同一 Comfy Desktop 中完成实际 Queue。对本机 `003bottle-rotate.webp` 的 Preview 生成有效 `reference_image` 描述（WebP、769×1163、52644 bytes、SHA-256），但没有上传素材或新增正式 Task / Attempt / Reservation，Fake Provider 计数仍为 1。再次 Queue 的 Production 创建任务 `ce730c9f-120e-47af-baf0-5b55302a298a`：本机 Fake OSS 的输入 Asset `a107af72-fa85-4cc9-b1c6-47be2d6ee2a3` 为 `verified`，MIME `image/webp`、大小 52644 bytes；Fake Provider 只新增一次 create，并收到带 `role=reference_image` 的 loopback Fake OSS URL 和冻结的 5 秒、720p、16:9、有声参数。任务最终 `completed / ready / delivered`，预占 `7.560000 CNY`、usage 结算 `0.070000 CNY`、reservation `settled`；产物为 2246 bytes H.264 MP4，落盘到 `/Users/steven/mylab/ComfyUI/output/video-flow/ce730c9f-120e-47af-baf0-5b55302a298a-result.mp4`，播放器实际进入“暂停”。
+
+首帧图生视频随后使用同一张本机 WebP 完成实际 Queue。Preview 生成有效 `first_frame` 描述而未上传素材，Task / Attempt / Reservation 与 Fake Provider `createCount=2` 均未增加。Production 创建任务 `28cfdfbc-378d-4400-8f47-78d21342eff0`，最终为 `completed / ready / delivered`；Fake Provider 只新增一次 create，并收到 `image_url` 的 `role=first_frame`、`ratio=adaptive`、5 秒、720p、有声、MP4 的冻结请求。任务预占 `7.560000 CNY`，Fake `completion_tokens=1000` 按冻结价格结算 `0.070000 CNY`，成本状态为 `usage_calculated`；输出 Asset 为 `video/mp4`、2246 bytes，客户端落盘 `/Users/steven/mylab/ComfyUI/output/video-flow/28cfdfbc-378d-4400-8f47-78d21342eff0-result.mp4`，`ffprobe` 为 H.264、64×64、1 秒，ComfyUI 播放器实际进入“暂停”。
+
+本轮同时修复了实测暴露的三处合同问题：文生视频模板错误复用 link ID；测试 Backend 中 V1 Asset 服务没有使用 loopback Fake OSS override；Fake OSS 没有回传上传对象的 Content-Type / SHA-256 metadata。客户端配置节点也改为保留环境注入的临时 token、receipt 目录和 spec version，避免验收数据写入用户默认目录。对应源码：`packages/comfyui-video-flow-client/workflows/seedance-text-to-video-preflight-v1.comfy.json`、`packages/backend/test/contract-backend.cjs`、`scripts/fake_provider.py`、`packages/comfyui-video-flow-client/nodes.py`、`scripts/comfyui_acceptance_env.py`。
+
+修复后完整验证：Backend build 通过、26 suites / 272 tests；Worker 214 passed / 26 个仓库外 workflow JSON 预期 skip / 21 deselected；客户端 118 passed；验收环境与 Fake Provider 定向 16 passed；合同资源同步检查通过；隔离跨包合同 Backend 51/51、Fake Provider 8/8、真实 Backend/DB/Worker/Fake Provider 19 passed / 2 个外部场景 skip；全新库与模拟历史库均应用 13 个 migration；`git diff --check` 通过。隔离跨包脚本使用 `55435/19094`，结束后已清理自身容器、网络和数据库卷，不影响仍在运行的 ComfyUI 验收环境。
+
+边界必须保持：固定测试视频只有 1 秒、64×64，它验证的是 Queue、正式提交、下载、归档、交付确认和播放，不验证 Seedance 真实 5 秒内容、画质或创意效果；另外 5 类模板尚未在目标 ComfyUI 中逐个实际 Queue。正式三份工作流合同仍为 `implementation=incomplete / admission.enabled=false`，8 类临时开放只存在于 loopback 测试 Backend。当前隔离环境仍在本机端口 `3400/8011/19093/55434` 运行，运行与清理步骤见 `docs/runbooks/local-manual-test.md`。
+
+### 2026-09-15：R7 代码清理与自动化总回归已完成，ComfyUI 验收已覆盖文生视频、参考图与首帧
 
 R7 已把 Backend 合同测试全部迁移到当前 v2 语义：Preview 只创建独立 `PreflightRecord`，对 Task、Attempt、预算预占和 Provider create 的增量均为 0；Production 测试先调用真实 `/api/v1/tasks/preflight`，再只提交 `preflightId + executionSlotId + media slot 绑定`。参考图 5 秒 720p 的预算边界按当前官方公式使用 7.560000 元；Provider usage 测试使用官方 `completion_tokens`，并按冻结的 `seedance-2.5-public-catalog-2026-09-15` 快照结算。源码：`packages/backend/test/workflow-fixtures.ts`、`preflight.contract-spec.ts`、`budget.contract-spec.ts`、`provider-outcome.contract-spec.ts`。
 
@@ -16,7 +48,7 @@ R7 已把 Backend 合同测试全部迁移到当前 v2 语义：Preview 只创�
 
 本轮实际验证：Backend `npm run build` 和 26 suites / 272 tests；HTTP smoke 通过；Worker 214 passed / 26 个仓库外 workflow JSON 预期 skip / 21 deselected；客户端 117 passed；合同同步检查通过；隔离合同中 Backend 51/51、Fake Provider 7/7、真实 Backend/DB/Worker/Fake Provider 19 passed / 2 个外部场景 skip；空库和模拟历史库均成功应用 13 个 migration，历史 Decimal 值核验通过；`git diff --check` 通过。合同脚本结束后清理容器、网络和测试卷。
 
-R7 尚未完成的边界：未在目标 ComfyUI 中重新安装当前插件、重启、导入 8 份模板并实际 Queue；两个跨包 skip 对应的外部/运行环境验收不能计为通过。未部署、未提交、未推送、未上传真实素材、未连接真实 OSS/Ark、未创建付费任务。
+R7 尚未完成的边界：目标 ComfyUI 已完成当前插件重装以及文生视频、参考图、首帧模板的 Preview/Production 实际 Queue，但其余 5 份模板尚未逐个导入和 Queue；两个跨包 skip 对应的外部/运行环境验收不能计为通过。未部署、未提交、未推送、未上传真实素材、未连接真实 OSS/Ark、未创建付费任务。
 
 ### 2026-09-15：R6 八类工作流均已形成自动化纵向证据，尚待真实 ComfyUI 与外部缺项
 
