@@ -24,7 +24,9 @@
 
 **取证过程与边界**：权威来源是官方页指向的[火山方舟视频生成模型价格快查表](https://bytedance.larkoffice.com/wiki/FXaYwxzJ5i5Zdik32ipcWzt7nxd)。最初 WebFetch 取不到该域名，只能由官方价格示例与公开镜像反推；随后改用本机浏览器（不受 claude.ai 域名策略限制）**直接打开并逐视图核对**，包括『最低token限制』的 480p/720p/1080p 三个子视图，以及『系列价格』视图里 720p 输入 2/3/4 秒同为下限 194,400、输入 5–30 秒逐个等于公式值、1080p 下限 437,400 且价格 20.12。合同的 `evidence` 字段已相应记为 `read_the_official_table_directly`。
 
-仍需保留的两条边界：官方表是一张按时长/比例/长边/短边列出的**查找表**，并没有用文字写出 `ceil(输出×5/3)` 这条公式——记录的是"公式逐位复现官方表"这一事实，不是官方条文原文；官方表的输入时长只列整数秒，**未覆盖非整数秒**，本实现按精确小数秒计算，这一点无官方依据。
+随后又从同一批官方链接里的 `seedance2.5价格计算器` 补上两块：该计算器把计算逻辑完整嵌在页面的 `window.formMetaContent` 中，其中价格公式原文为 `单价 × MAX(估算token用量, 最低token用量) / 1000000`（输入含视频时）——**`MAX(估算, 最低)` 这条口径来自官方自身的公式**；而官方最低 token 表除了数值还存了**输入时长**列，逐行读取后 140/140 行等于 `ceil(2 × 输出时长 / 3)`，由于 `ceil(2D/3) + D ≡ ceil(5D/3)`，我原先反推的 `ceil(输出×5/3)` 恰好就是官方表自己存的那条下限。至此计费口径、token 估算公式与最低用量取值三部分均有官方依据。
+
+仍需保留的一条边界：官方来源的**输入时长全部是整数秒**（表按整数列存、计算器是 2–30 下拉），**没有覆盖非整数秒**；本实现按精确小数秒计算，属于照公式连续外推，无官方依据。实际账单以 Provider 返回的 `usage.completion_tokens` 为准，该差异只影响预占金额。
 
 实现按测试先行：先改 `task-quote.service.spec.ts` 观察到失败，再实现 `minimumTotalSeconds()` 与 `billedTokens = max(公式, 最低)`，并移除 `INPUT_VIDEO_MINIMUM_TOKENS_UNRESOLVED` 这条 fail-closed 分支。报价 basis 现在分别记录 `formulaTokens`、`minimumTokens`、`billedTokens` 与 `minimumTokensApplied`。三条纵向合同也从"Production 保持关闭"改写为跑通交付，并分别断言 `billedTokens = max(公式, 最低)` 与 Provider payload 的角色顺序。
 
