@@ -48,22 +48,36 @@
 
 工具与退出码见 [deploy-and-rollback.md](./deploy-and-rollback.md) §6.3。逐项流程：
 
+**用客户端的解释器运行本工具**（`preflight` 的素材检查需要 Pillow/ffprobe，那是客户端包的依赖；用错解释器会明确报 `CLIENT_DEPENDENCY_MISSING`）：
+
 ```bash
+PY=packages/comfyui-video-flow-client/.venv/bin/python
 export VIDEO_FLOW_BACKEND_URL=https://ai.sweetyshell.com
-export VIDEO_FLOW_TOKEN_FILE=~/.video-flow/token
+export VIDEO_FLOW_TOKEN_FILE=~/.video-flow/acceptance.token
 
-# 1) 先 Preview 拿预检与报价（不花钱），确认 canSubmit=true 且金额与上表一致
-#    （用 ComfyUI 客户端或直接 POST /api/v1/tasks/preflight）
+# 1) 上传素材拿 assetId（不付费；同内容会复用已有 Asset）
+$PY scripts/seedance_production_acceptance.py upload \
+  --file /path/to/reference.webp --out r8-<工作流>-upload.json
 
-# 2) 放行生产后提交下一版（唯一会付费的命令，三道闸门）
-python3 scripts/seedance_production_acceptance.py next \
-  --slot-id <本行专用槽> --preflight-id <上一步的 preflightId> \
+# 2) 提交预检拿报价与 preflightId（不付费；只新增一条 PreflightRecord）
+#    确认 requestCheck=passed、canSubmit=true，且 reserve 与第 3 节预估一致
+$PY scripts/seedance_production_acceptance.py preflight \
+  --workflow-key seedance.reference-image-to-video.v1 \
+  --prompt "R8 验收：<工作流> <时长>s" \
+  --duration 4 --ratio 16:9 --resolution 720p \
+  --media reference_image:reference-image:/path/to/reference.webp \
+  --out r8-<工作流>-<时长>-preflight.json
+# 视频编辑用 --duration -1 --ratio adaptive --output-format mov
+
+# 3) 放行生产后提交下一版（唯一会付费的命令，三道闸门）
+$PY scripts/seedance_production_acceptance.py next \
+  --slot-id r8-<工作流>-<时长> --preflight-id <上一步的 preflightId> \
   --media <slotId>=<assetId> [--media ...] \
   --idempotency-key r8-<工作流>-<时长> --confirm-spend
 
-# 3) 等完成后取证（只读）
-python3 scripts/seedance_production_acceptance.py verify   --task-id <TASK_ID>
-python3 scripts/seedance_production_acceptance.py evidence --task-id <TASK_ID> --out r8-<工作流>-<时长>.json
+# 4) 等完成后取证（只读）
+$PY scripts/seedance_production_acceptance.py verify   --task-id <TASK_ID>
+$PY scripts/seedance_production_acceptance.py evidence --task-id <TASK_ID> --out r8-<工作流>-<时长>.json
 ```
 
 - 每个工作流用**各自的执行槽**，不要复用。

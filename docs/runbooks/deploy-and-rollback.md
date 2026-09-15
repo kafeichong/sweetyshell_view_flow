@@ -260,6 +260,13 @@ python3 scripts/seedance_production_acceptance.py budget   --task-id <TASK_ID>
 python3 scripts/seedance_production_acceptance.py verify   --task-id <TASK_ID>
 python3 scripts/seedance_production_acceptance.py evidence --task-id <TASK_ID> --out acceptance-<TASK_ID>.json
 
+# 会写状态但不花钱：上传素材拿 assetId、提交预检拿报价与 preflightId
+# 这两步要用**客户端的解释器**（素材检查依赖 Pillow/ffprobe）
+python3 scripts/seedance_production_acceptance.py upload    --file <本地素材>
+python3 scripts/seedance_production_acceptance.py preflight --workflow-key <KEY> --prompt <TEXT> \
+  --duration <秒> --ratio <比例> --resolution <分辨率> \
+  --media <角色>:<slotId>:<本地素材> [--media ...] --out preflight.json
+
 # 唯一会付费的命令：在同一执行槽创建下一版。三道闸门缺一不可。
 python3 scripts/seedance_production_acceptance.py next \
   --slot-id <SLOT_ID> --preflight-id <PREFLIGHT_ID> \

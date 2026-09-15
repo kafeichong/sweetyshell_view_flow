@@ -1,4 +1,6 @@
+import hashlib
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
@@ -58,11 +60,17 @@ def codes(findings):
 
 
 class FakeClient:
-    """只读命令一旦触碰到会改变状态的方法就立刻失败。"""
+    """只读命令一旦触碰到会改变状态的方法就立刻失败。
 
-    def __init__(self, *, task=None, slot_task=None, artifact=None):
+    strict=False 用于 upload / preflight 这类"会写状态但不花钱"的命令，
+    它们本来就要调用写接口。
+    """
+
+    def __init__(self, *, task=None, slot_task=None, artifact=None, strict=True, report=None):
         self.task = task if task is not None else summary()
         self.slot_task = slot_task
+        self.strict = strict
+        self.report = report
         self.artifact = artifact or {
             "localPath": "/tmp/out/task-1-result.mp4",
             "sizeBytes": 2246,
@@ -73,8 +81,26 @@ class FakeClient:
 
     def _record(self, name, *args):
         self.calls.append(name)
-        if name in MUTATING_METHODS:
+        if self.strict and name in MUTATING_METHODS:
             raise AssertionError(f"只读命令调用了会改变状态的方法: {name}")
+
+    def upload_media(self, media, *, filename, mime_type):
+        self._record("upload_media", filename)
+        return {"assetId": "asset-uploaded-1", "filename": filename, "mimeType": mime_type}
+
+    def preflight(self, intent):
+        self._record("preflight", intent)
+        self.last_intent = intent
+        if self.report is not None:
+            return self.report
+        return {
+            "preflightId": "preflight-1",
+            "requestCheck": {"status": "passed", "items": []},
+            "productionAdmission": {"canSubmit": True, "blockers": []},
+            "quote": {"status": "estimated", "reserveCny": "7.560000", "missing": []},
+            "willUploadMedia": False,
+            "willCallProvider": False,
+        }
 
     def get_task(self, task_id):
         self._record("get_task", task_id)
@@ -266,6 +292,123 @@ def test_next_refuses_without_media_slot_bindings(tmp_path):
 
     with pytest.raises(module.AcceptanceRefused, match="MEDIA_BINDINGS_REQUIRED"):
         module.run(args, client=FakeClient(), probe=decode_probe, workdir=tmp_path)
+
+
+def media_fixture(tmp_path, name="reference.webp", payload=b"media-bytes"):
+    path = tmp_path / name
+    path.write_bytes(payload)
+    return path
+
+
+def descriptor(path, role, slot_id):
+    return {
+        "path": str(path), "filename": path.name,
+        "descriptor": {
+            "slotId": slot_id, "role": role, "sha256": "b" * 64,
+            "mimeType": "image/webp", "sizeBytes": 11, "metadata": {"kind": "image", "width": 769, "height": 1163},
+        },
+    }
+
+
+def test_upload_records_the_asset_identity_without_spending(tmp_path):
+    module = load_module()
+    path = media_fixture(tmp_path)
+    out = tmp_path / "uploaded.json"
+    client = FakeClient(strict=False)
+    args = module.parse_args(["upload", "--file", str(path), "--out", str(out)])
+
+    exit_code = module.run(args, client=client, probe=decode_probe, workdir=tmp_path)
+
+    assert exit_code == 0
+    record = json.loads(out.read_text(encoding="utf-8"))
+    assert record["assetId"] == "asset-uploaded-1"
+    assert record["filename"] == "reference.webp"
+    assert record["sizeBytes"] == len(b"media-bytes")
+    assert record["sha256"] == hashlib.sha256(b"media-bytes").hexdigest()
+    assert client.calls == ["upload_media"], "上传不应当触发任何付费或建任务调用"
+
+
+def test_preflight_builds_one_descriptor_per_media_and_reports_the_quote(tmp_path):
+    module = load_module()
+    first = media_fixture(tmp_path, "a.webp")
+    second = media_fixture(tmp_path, "b.webp")
+    out = tmp_path / "preflight.json"
+    client = FakeClient(strict=False)
+    inspected = []
+
+    def inspector(path, role, slot_id):
+        inspected.append((path, role, slot_id))
+        return descriptor(Path(path), role, slot_id)
+
+    args = module.parse_args([
+        "preflight", "--workflow-key", "seedance.reference-image-to-video.v1",
+        "--prompt", "验收用参考图", "--duration", "4", "--ratio", "16:9", "--resolution", "720p",
+        "--media", f"reference_image:reference-image:{first}",
+        "--media", f"reference_image:reference-image-2:{second}",
+        "--out", str(out),
+    ])
+
+    exit_code = module.run(args, client=client, probe=decode_probe, inspector=inspector, workdir=tmp_path)
+
+    assert exit_code == 0
+    assert [item[1:] for item in inspected] == [
+        ("reference_image", "reference-image"),
+        ("reference_image", "reference-image-2"),
+    ]
+    intent = client.last_intent
+    assert intent["workflowKey"] == "seedance.reference-image-to-video.v1"
+    assert intent["generation"]["duration"] == 4
+    assert [item["slotId"] for item in intent["media"]] == ["reference-image", "reference-image-2"]
+    record = json.loads(out.read_text(encoding="utf-8"))
+    assert record["preflightId"] == "preflight-1"
+    assert record["quote"]["status"] == "estimated"
+    assert record["canSubmit"] is True
+    assert "create_task" not in client.calls, "预检不得创建任务"
+
+
+def test_preflight_refuses_a_report_that_would_upload_or_call_the_provider(tmp_path):
+    module = load_module()
+    path = media_fixture(tmp_path)
+    report = {
+        "preflightId": "preflight-1",
+        "requestCheck": {"status": "passed"},
+        "productionAdmission": {"canSubmit": True, "blockers": []},
+        "quote": {"status": "estimated"},
+        "willUploadMedia": True,
+        "willCallProvider": False,
+    }
+    args = module.parse_args([
+        "preflight", "--workflow-key", "seedance.reference-image-to-video.v1",
+        "--prompt", "x", "--duration", "4", "--ratio", "16:9", "--resolution", "720p",
+        "--media", f"reference_image:reference-image:{path}",
+    ])
+
+    with pytest.raises(module.AcceptanceRefused, match="PREFLIGHT_REPORT_INCOMPLETE"):
+        module.run(
+            args,
+            client=FakeClient(strict=False, report=report),
+            probe=decode_probe,
+            inspector=lambda p, r, s: descriptor(Path(p), r, s),
+            workdir=tmp_path,
+        )
+
+
+def test_preflight_rejects_a_malformed_media_spec(tmp_path):
+    module = load_module()
+    args = module.parse_args([
+        "preflight", "--workflow-key", "seedance.reference-image-to-video.v1",
+        "--prompt", "x", "--duration", "4", "--ratio", "16:9", "--resolution", "720p",
+        "--media", "reference_image:missing-path-part",
+    ])
+
+    with pytest.raises(module.AcceptanceUsageError, match="MEDIA_SPEC_MALFORMED"):
+        module.run(
+            args,
+            client=FakeClient(strict=False),
+            probe=decode_probe,
+            inspector=lambda p, r, s: descriptor(Path(p), r, s),
+            workdir=tmp_path,
+        )
 
 
 def test_evidence_export_records_the_r8_acceptance_fields(tmp_path):

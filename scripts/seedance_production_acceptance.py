@@ -23,7 +23,9 @@ R8 要在正式环境上逐项验收，但真实验收会**产生火山引擎费
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import mimetypes
 import os
 import subprocess
 import sys
@@ -141,6 +143,112 @@ def _parse_binding(value: str) -> tuple[str, str]:
     return slot_id.strip(), asset_id.strip()
 
 
+def _parse_media_spec(value: str) -> tuple[str, str, str]:
+    """解析 ROLE:SLOT_ID:PATH；路径本身可能含冒号，所以只切前两段。"""
+    role, slot_id, path = (value.split(":", 2) + ["", "", ""])[:3]
+    if not role.strip() or not slot_id.strip() or not path.strip():
+        raise AcceptanceUsageError(f"MEDIA_SPEC_MALFORMED:{value}")
+    return role.strip(), slot_id.strip(), path.strip()
+
+
+def default_inspector() -> Callable[[str, str, str], dict[str, Any]]:
+    try:
+        # 素材检查要用 Pillow / ffprobe，这些是客户端包自己的依赖。
+        from media_inspection import inspect_media  # noqa: PLC0415
+    except ImportError as error:
+        raise AcceptanceUsageError(
+            f"CLIENT_DEPENDENCY_MISSING:{error}；preflight 需要客户端依赖（Pillow/ffprobe），"
+            "请用 packages/comfyui-video-flow-client/.venv/bin/python 运行本工具"
+        ) from error
+
+    def inspect(path: str, role: str, slot_id: str) -> dict[str, Any]:
+        return inspect_media(path, role, slot_id)
+
+    return inspect
+
+
+def _run_upload(args: argparse.Namespace, client: Any) -> int:
+    path = Path(args.file).expanduser()
+    if not path.is_file():
+        raise AcceptanceUsageError(f"FILE_NOT_FOUND:{path}")
+    data = path.read_bytes()
+    mime_type = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+    uploaded = client.upload_media(data, filename=path.name, mime_type=mime_type)
+    record = {
+        "assetId": uploaded.get("assetId"),
+        "file": str(path),
+        "filename": path.name,
+        "sizeBytes": len(data),
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "mimeType": mime_type,
+    }
+    if getattr(args, "out", None):
+        Path(args.out).write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(f"assetId           {record['assetId']}")
+    print(f"file              {record['filename']} ({record['sizeBytes']} 字节, {mime_type})")
+    print(f"sha256            {record['sha256']}")
+    return 0
+
+
+def _run_preflight(args: argparse.Namespace, client: Any, inspector: Callable[[str, str, str], dict[str, Any]]) -> int:
+    media = []
+    for item in args.media:
+        role, slot_id, path = _parse_media_spec(item)
+        media.append(inspector(path, role, slot_id))
+
+    intent = {
+        "contractVersion": 2,
+        "workflowKey": args.workflow_key,
+        "prompt": {"positive": args.prompt},
+        "generation": {
+            "duration": args.duration,
+            "ratio": args.ratio,
+            "resolution": args.resolution,
+            "generateAudio": True,
+            "watermark": False,
+            "outputFormat": args.output_format,
+        },
+        "media": [item["descriptor"] for item in media],
+    }
+    report = client.preflight(intent)
+    # 预检必须明确声明零副作用，否则不得据此进入 Production。
+    if report.get("willUploadMedia") is not False or report.get("willCallProvider") is not False:
+        raise AcceptanceRefused(
+            "PREFLIGHT_REPORT_INCOMPLETE: 报告未明确声明不上传、不调用 Provider"
+            f"（willUploadMedia={report.get('willUploadMedia')}, willCallProvider={report.get('willCallProvider')}）"
+        )
+
+    admission = report.get("productionAdmission") or {}
+    quote = report.get("quote") or {}
+    record = {
+        "preflightId": report.get("preflightId"),
+        "workflowKey": args.workflow_key,
+        "generation": intent["generation"],
+        "requestCheck": report.get("requestCheck"),
+        "canSubmit": admission.get("canSubmit"),
+        "blockers": [
+            item.get("code") if isinstance(item, dict) else item
+            for item in (admission.get("blockers") or [])
+        ],
+        "quote": quote,
+        "mediaBindings": [
+            {"role": item["descriptor"]["role"], "slotId": item["descriptor"]["slotId"], "sha256": item["descriptor"]["sha256"]}
+            for item in media
+        ],
+    }
+    if getattr(args, "out", None):
+        Path(args.out).write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    print(f"preflightId       {record['preflightId']}")
+    print(f"requestCheck      {(report.get('requestCheck') or {}).get('status')}")
+    print(f"quote             status={quote.get('status')} reserve={quote.get('reserveCny')} missing={quote.get('missing')}")
+    print(f"canSubmit         {record['canSubmit']} blockers={record['blockers']}")
+    for binding in record["mediaBindings"]:
+        print(f"  media           {binding['role']} slot={binding['slotId']} sha={binding['sha256'][:12]}…")
+    print("预检不产生费用；正式提交需要 --confirm-spend")
+    return 0
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="seedance_production_acceptance.py",
@@ -162,6 +270,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     add("budget", "只读：校验预占与结算", task=True)
     add("verify", "只读：下载产物并解码校验", task=True)
     add("evidence", "只读：导出验收证据 JSON", task=True)
+
+    upload_parser = sub.add_parser("upload", help="上传素材取得 assetId（不付费）")
+    upload_parser.add_argument("--file", required=True)
+    upload_parser.add_argument("--out", type=Path)
+
+    preflight_parser = sub.add_parser("preflight", help="提交预检取得报价与 preflightId（不付费）")
+    preflight_parser.add_argument("--workflow-key", required=True)
+    preflight_parser.add_argument("--prompt", required=True)
+    preflight_parser.add_argument("--duration", type=int, required=True, help="视频编辑用 -1")
+    preflight_parser.add_argument("--ratio", required=True)
+    preflight_parser.add_argument("--resolution", required=True)
+    preflight_parser.add_argument("--output-format", default="mp4", choices=("mp4", "mov"))
+    preflight_parser.add_argument("--media", action="append", default=[], metavar="ROLE:SLOT_ID:PATH")
+    preflight_parser.add_argument("--out", type=Path)
 
     next_parser = sub.add_parser("next", help="创建下一版（会付费，需显式确认）")
     next_parser.add_argument("--slot-id", required=True)
@@ -295,10 +417,17 @@ def run(
     *,
     client: Any,
     probe: Callable[[str], dict[str, Any]] = probe_media,
+    inspector: Callable[[str, str, str], dict[str, Any]] | None = None,
     workdir: Path,
 ) -> int:
     workdir = Path(workdir)
     command = args.command
+
+    if command == "upload":
+        return _run_upload(args, client)
+
+    if command == "preflight":
+        return _run_preflight(args, client, inspector or default_inspector())
 
     if command == "query":
         summary = client.get_task(args.task_id)

@@ -378,6 +378,25 @@ class VideoFlowClient:
         response.raise_for_status()
         return response.json()
 
+    def preflight(self, intent: dict[str, Any]) -> dict[str, Any]:
+        """提交预检：不建任务、不预占、不上传素材。"""
+        response = self.client.post(
+            f"{self.config.backend_url}/api/v1/tasks/preflight",
+            headers=self._headers(),
+            json=intent,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def check_preflight(self, preflight_id: str) -> dict[str, Any]:
+        """复验已有预检，并返回当下的新任务准入。"""
+        response = self.client.get(
+            f"{self.config.backend_url}/api/v1/tasks/preflight/{preflight_id}/check",
+            headers=self._headers(),
+        )
+        response.raise_for_status()
+        return response.json()
+
     def get_current_task_for_slot(self, execution_slot_id: str) -> dict[str, Any]:
         encoded_slot_id = quote(execution_slot_id, safe="")
         response = self.client.get(
