@@ -18,13 +18,15 @@
 
 **后果（报价口径变化）**：所有报价/预占上移一帧——4s/720p `6.048000 → 6.111000`、5s/720p `7.560000 → 7.623000`、含输入视频 5s `8.164800 → 8.202600`、5s/480p 4:3 `3.454500 → 3.483340`、video-edit 12s `21.772800 → 21.810600`。因此报价现在会**略高于官方计算器**（720p 每次约 0.063 元）：这是有意的偏差，官方那条公式在页面上被明确标注为估算值，而项目规则是不得低估预占。合同里用 `pricing.estimate.reservationAdjustment` 显式记录了这个偏离、四条样本、以及"30 秒边界尚未实测"。**下文各日期条目里出现的 6.048000 / 7.560000 / 86,400 等预占值都是旧公式下的历史记录，不再是当前口径。**
 
-**二、R8 收口（合同更正）**。`seedance.text-to-video.v1` 按已确认的语义写回发货合同：`implementation=ready`（链路确实通了，不退回 incomplete）、`admission={enabled:false, reason:"R8_ACCEPTANCE_INCOMPLETE"}`、`validation.status=passed` 带**两条**记录（4s 与 5s；每条含工作流 / 模型 / 参数组合 / 软件版本（contractRevision + contractDigest + specVersion）/ taskId + providerTaskId / SHA-256 / 帧数 / 结算 / 证据路径）。按项目规则，没有用一个 `production_verified` 概括整个模型和所有规格。
+**二、R8 收口，随后按新授权重新开放（合同更正两次）**。`seedance.text-to-video.v1` 先按收口语义写回：`implementation=ready`（链路确实通了，不退回 incomplete）、`admission.enabled=false`（reason `R8_ACCEPTANCE_INCOMPLETE`）、`validation.status=passed` 带**两条**记录（4s 与 5s；每条含工作流 / 模型 / 参数组合 / 软件版本（contractRevision + contractDigest + specVersion）/ taskId + providerTaskId / SHA-256 / 帧数 / 结算 / 证据路径）。按项目规则，没有用一个 `production_verified` 概括整个模型和所有规格。
 
-两处不变量测试同步改写（`scripts/tests/workflow_contract_v2.test.mjs`、`packages/backend/src/tasks/workflow-catalog.service.spec.ts`）：声明列表清空；新增"**implementation=ready 必须由 validation 记录支撑**，未完成的工作流不允许留下记录"；关闭原因不再钉死单串，但必须非空（该原因会作为预检 blocker 详情回到客户端）。`WORKFLOW_NOT_READY` 的覆盖从合同测试移到单测：合同测试里 text-to-video 现在只剩 `WORKFLOW_NOT_ENABLED`（implementation 已是 ready），单测新增一条用仍处 incomplete 的 first-frame 同时断言两个 blocker。
+**收口完成后，授权人当天决定改把它作为正式产能开放**，于是合同再改一次：`admission={enabled:true, reason:null}`，`validation` 两条记录保留不动。这次开放是一份显式授权（[R8 授权清单 §8](./runbooks/r8-production-acceptance-scope.md)），授权范围是**该工作流合同允许的全部参数组合**（480p/720p/1080p × 7 种比例 × 4–30 秒 × mp4/mov × 有声/无声 × 水印/无水印）、**长期有效、另行通知**，金额护栏仍是 `creative-pilot` 自身的 100 元/日（服务端强制）。该清单同时写明两条必须随授权一起读的差距：**准入是工作流级的，系统管不住参数**（1080p 也在内）；**真实出片证据只覆盖 720p/16:9/4–5 秒这一面**，其余参数与 30 秒边界都是按公式外推、没有真实出片。
+
+两处不变量测试同步改写（`scripts/tests/workflow_contract_v2.test.mjs`、`packages/backend/src/tasks/workflow-catalog.service.spec.ts`）：声明列表以 §8 授权为准；新增"**implementation=ready 必须由 validation 记录支撑**，未完成的工作流不允许留下记录"；关闭原因不再钉死单串，但必须非空（该原因会作为预检 blocker 详情回到客户端）。`WORKFLOW_NOT_READY` / `WORKFLOW_NOT_ENABLED` 的覆盖从合同测试移到单测：合同测试里 text-to-video 已 ready 且开放，对它只剩账号与全局闸门类 blocker；单测新增一条用仍处 incomplete 的 first-frame 同时断言两个 blocker。
 
 **三、验证**。Backend：`npm run build` + `npx jest`，26 suites / 275 passed。合同层：`VIDEO_FLOW_CONTRACT_DB_PORT=55435 bash scripts/run_mvp_contract.sh`，jest 合同 8 suites / 51 passed、跨包 live contract 21 passed / 2 skipped，退出码 0（默认端口 55432 被另一个项目的库占着，不是残留）。Worker `-q -rs`：214 passed / 26 个预期 skip / 23 deselected。Client：120 passed。`node --test scripts/tests/workflow_contract_v2.test.mjs scripts/tests/workflow_contract_sync.test.mjs`：7 passed；`sync_workflow_contracts.mjs --check` 三份合同资源字节一致。
 
-**四、未完成（重要）**：① **尚未部署**——以上改动只在仓库里，生产仍是验收期间的 `admission.enabled=true` 加旧公式，付费入口**还开着**，必须再部署一次收口才生效；② R8 矩阵第 1 行的 30 秒边界仍空缺（本轮决定暂不花这笔钱，720p 约 45.42 元），其余七类工作流也未验收；③ 收口后任何真实付费验收都需要重新放行（合同改动 + 部署）。
+**四、未完成（重要）**：① **尚未部署**——本轮的公式修正与合同改动只在仓库里，生产跑的还是验收期间那一版（旧公式 + 目前已开放的同一状态），需部署一次才生效；② R8 矩阵第 1 行的 **30 秒边界仍空缺**（本轮决定暂不花这笔钱，720p 约 45.42 元），其余七类工作流未验收，且 §8 授权开放的参数面中只有 720p/16:9/4–5 秒有真实出片；③ 再开放任何其他工作流之前，必须先有一条对应授权并同步两处不变量测试的声明列表。
 
 ### 2026-09-15：修复 ComfyUI 状态提示从未生效的缺陷（UI 第 0 期）
 
