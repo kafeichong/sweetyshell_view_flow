@@ -96,11 +96,10 @@ describe('PreflightService', () => {
 
     const report = await service.preview('creative-pilot', {
       ...intent(),
-      workflowKey: 'seedance.first-frame-to-video.v1',
-      generation: { ...intent().generation, ratio: 'adaptive' },
+      workflowKey: 'seedance.reference-image-to-video.v1',
       media: [{
-        slotId: 'first-frame', role: 'first_frame', sha256: 'd'.repeat(64), mimeType: 'image/png', sizeBytes: 10,
-        metadata: { kind: 'image', width: 900, height: 1600 },
+        slotId: 'reference-1', role: 'reference_image', sha256: 'd'.repeat(64), mimeType: 'image/png', sizeBytes: 10,
+        metadata: { kind: 'image', width: 1280, height: 720 },
       }],
     });
 

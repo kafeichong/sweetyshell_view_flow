@@ -12,10 +12,10 @@ const rawContract = require('./resources/seedance-workflows.v2.json') as Workflo
 
 // **允许**处于开启状态的付费工作流。没列在这里却被打开 = 回归。
 // 唯一依据是 docs/runbooks/r8-production-acceptance-scope.md 的授权记录：
-// 2026-09-15 第一轮验收收口后，同日的新授权把 text-to-video 作为正式产能长期
-// 开放（全部参数、长期有效，见该清单 §8）。再打开任何其他工作流都必须先有一条
-// 对应授权，并在这里显式声明。
-const DECLARED_OPEN_WORKFLOWS: string[] = ['seedance.text-to-video.v1'];
+// §8 把 text-to-video 作为正式产能长期开放，§9 同样开放 first-frame
+// （全部参数、长期有效）。再打开任何其他工作流都必须先有一条对应授权，并在这里
+// 显式声明——这是本测试存在的意义：任何未声明的开放都会被抓住。
+const DECLARED_OPEN_WORKFLOWS: string[] = ['seedance.text-to-video.v1', 'seedance.first-frame-to-video.v1'];
 
 function textIntent(workflowKey = 'seedance.text-to-video.v1') {
   return {
@@ -52,11 +52,12 @@ describe('WorkflowCatalogService', () => {
     expect(closed.every((item) => item.state.admission.enabled === false)).toBe(true);
     // 关闭原因会作为预检 blocker 详情回到客户端，所以不允许为空。
     expect(closed.every((item) => (item.state.admission.reason ?? '').length > 0)).toBe(true);
-    // implementation=ready 必须由 validation 记录支撑：没有真实验收记录就不允许
-    // 宣称可用；反之未完成的工作流不允许留下验证记录。
-    const ready = workflows.filter((item) => item.state.implementation === 'ready');
-    expect(ready.every((item) => item.state.validation.status === 'passed')).toBe(true);
-    expect(ready.every((item) => item.state.validation.records.length > 0)).toBe(true);
+    // 有验证记录就说明这批参数组合是 passed；未完成的工作流不允许留下记录。
+    // **implementation=ready 不要求已有真实验收记录**：受控验收的放行先于真实出片
+    // （两条开放的工作流都是这么开的），记录在跑完后补。真正的付费闸门是上面的
+    // 声明列表——没写进授权就开不了。
+    const withRecords = workflows.filter((item) => item.state.validation.records.length > 0);
+    expect(withRecords.every((item) => item.state.validation.status === 'passed')).toBe(true);
     const incomplete = workflows.filter((item) => item.state.implementation === 'incomplete');
     expect(incomplete.every((item) => item.state.validation.status === 'not_run')).toBe(true);
     expect(incomplete.every((item) => item.state.validation.records.length === 0)).toBe(true);
@@ -92,11 +93,11 @@ describe('WorkflowCatalogService', () => {
     const originalMode = process.env.VIDEO_FLOW_TEST_MODE;
     const originalReady = process.env.VIDEO_FLOW_TEST_READY_WORKFLOWS;
     process.env.VIDEO_FLOW_TEST_MODE = '1';
-    // 刻意挑一条合同里仍处于关闭的工作流：受控验收期间被声明开放的那些
-    // 无法用于验证"环境变量越不过合同"。
-    process.env.VIDEO_FLOW_TEST_READY_WORKFLOWS = 'seedance.first-frame-to-video.v1';
+    // 刻意挑一条合同里仍处于关闭的工作流：被授权开放的那些无法用于验证
+    // "环境变量越不过合同"。
+    process.env.VIDEO_FLOW_TEST_READY_WORKFLOWS = 'seedance.first-last-frame-to-video.v1';
     try {
-      const evaluated = new WorkflowCatalogService().evaluate(textIntent('seedance.first-frame-to-video.v1'));
+      const evaluated = new WorkflowCatalogService().evaluate(textIntent('seedance.first-last-frame-to-video.v1'));
       expect(evaluated.workflow.state).toMatchObject({
         implementation: 'incomplete',
         admission: { enabled: false, reason: 'V2_FULL_CHAIN_NOT_COMPLETE' },

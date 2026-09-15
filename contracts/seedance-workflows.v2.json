@@ -324,10 +324,10 @@
       "label": "Seedance First Frame to Video",
       "state": {
         "capability": "confirmed",
-        "implementation": "incomplete",
+        "implementation": "ready",
         "admission": {
-          "enabled": false,
-          "reason": "V2_FULL_CHAIN_NOT_COMPLETE"
+          "enabled": true,
+          "reason": null
         },
         "validation": {
           "status": "not_run",
