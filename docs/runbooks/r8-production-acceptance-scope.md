@@ -197,3 +197,26 @@ packages/comfyui-video-flow-client/workflows/<工作流>-preflight-v1.comfy.json
 **维持本条授权的条件**：后续验收应把 30 秒边界与常用参数补齐并写进 `validation.records`。要关闭时，把 `admission.enabled` 改回 `false` 并写明理由、同步清空两处测试里的声明列表，再部署一次。
 
 **本条授权已在 2026-09-15 生效**：`main`（`2f5c3e8`）推送后，生产 `8.140.49.56:/data/video-flow` 执行 `git pull --ff-only` + `docker compose build/up video-backend video-worker`（零 migration）。上线 smoke：无凭证入口 401；生产目录 text-to-video = `implementation=ready / admission.enabled=true / validation=passed`（2 条记录）；免费预检 5s/720p 返回 `reserve=7.623000`（补帧后的新公式）；数据不变量 tasks/attempts/reservations 无增量、未结案预占 0；Worker `/health` 正常。
+
+## 9. 第二条工作流的长期开放：首帧（2026-09-15）
+
+授权人按 §8 的同一口径（同一 Actor、同样 100 元/日 上限、全部参数、长期有效）开放 `seedance.first-frame-to-video.v1`，供创意同事在生产里直接使用首帧工作流。
+
+| 项 | 值 |
+| --- | --- |
+| 授权人 / 日期 | kafeichong / 2026-09-15 |
+| 工作流 | `seedance.first-frame-to-video.v1`（其余六类保持 `enabled=false`） |
+| 可用 Actor | `creative-pilot`（生产白名单内） |
+| **允许的参数范围** | 该工作流合同允许的全部组合：480p / 720p / 1080p × adaptive（首帧锁定比例）× 4–30 秒 × mp4 / mov × 有声 / 无声 × 水印可有可无 |
+| 金额上限 | 沿用 `creative-pilot` 自身的 `dailyLimitCny` = 100 元/日（服务端强制） |
+| 时间窗 | **长期有效，另行通知** |
+| 放行时的状态 | `implementation=ready`、`admission.enabled=true`、`validation=not_run`（**真实出片记录要等这轮跑完再补**） |
+
+**必须同时记下的差距**：
+
+1. **这条工作流的真实验收还没开始。** R8 矩阵第 3 行（首帧，4s / 30s）仍然空缺；已跑通的是隔离环境里的 R6.3（真实 ComfyUI Queue + Fake Provider），它证明链路与客户端可用，但**没有任何真实 Ark 出片**。`validation` 保持 `not_run` 是照实写的，不是遗漏。
+2. **预占金额取决于首帧图的画幅。** 首帧工作流的输出比例是 `adaptive`，服务端拿首帧实际宽高到合同像素表里找匹配（容差 0.005）：命中 16:9 / 9:16 / 1:1 / 4:3 / 3:4 / 21:9 之一即可锁定尺寸，5 秒 720p 预占 **7.623000** 元；**不命中则退化为按该分辨率像素上界预占**（5 秒 720p 为 **7.671090** 元），偏高但在安全方向。用前建议把首帧裁成标准比例附近，既省预占也少一次拉伸。
+3. **准入仍是工作流级**：打开即意味着上表全部参数组合都能提交，而这一条连"已验证的那一档"都还没有。
+4. 费用状态仍是推算（`cost.status=usage_calculated`、`billedCny=null`）。
+
+**跑完之后要做的**：把首帧的真实 `taskId` / `providerTaskId` / 产物 SHA-256 / 帧数 / 预占与结算写进该工作流的 `validation.records`（`status` 相应改 `passed`），并顺带核对"+1 帧"口径在 adaptive 锁定的尺寸下是否同样成立。要关闭时按 §8 的同一套动作（改回 `admission.enabled=false` 并写明理由、清空测试里的声明项、再部署）。

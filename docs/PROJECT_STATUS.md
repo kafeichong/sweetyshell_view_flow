@@ -8,6 +8,14 @@
 
 ## 0. 本轮交付判断
 
+### 2026-09-15：第二条工作流（首帧）按 §9 长期开放
+
+授权人按 [R8 授权清单 §9](./runbooks/r8-production-acceptance-scope.md) 开放 `seedance.first-frame-to-video.v1`，口径与 §8 的文生视频一致：同一 Actor `creative-pilot`、同样 100 元/日（服务端强制）、**全部参数**、**长期有效**。合同相应改为 `implementation=ready` / `admission={enabled:true, reason:null}`；`validation` 保持 **`not_run` / 空**——这条工作流**一次真实出片都还没有**（跑通的是隔离环境的 R6.3：真实 ComfyUI Queue + Fake Provider），照实写而不是先填上。
+
+**不变量测试做了一处修正**。上一轮收口时加的"`implementation=ready` 必须有 validation 记录支撑"**过严，且与项目自己的放行流程矛盾**：受控放行本来就发生在真实出片之前（text-to-video 第一次开放时也是这样，`9ad08b1` 把 `implementation` 由 incomplete 改成 ready 时 `validation` 仍是 `not_run`）。现在改为：**有记录必须是 `passed` 且记录字段完整；未完成的工作流不允许留下记录**；付费闸门仍由声明列表把守——任何未声明的开放照样让两处测试失败。为了继续覆盖"环境变量越不过合同"与"未就绪即被拦"，测试里充当样本的工作流换成仍处 `incomplete` 的 first-last-frame 与 reference-image。
+
+**用这条工作流前值得知道的**：输出比例是 `adaptive`，服务端按首帧实际宽高到合同像素表里找匹配（容差 0.005）。命中 16:9 / 9:16 / 1:1 / 4:3 / 3:4 / 21:9 就能锁定尺寸，5 秒 720p 预占 `7.623000`；**不命中则退化为按该分辨率像素上界预占**（5 秒 720p 为 `7.671090`，偏高但在安全方向）。首帧裁成标准比例附近更省。
+
 ### 2026-09-15：R8 收口 + 预占公式按实测补一帧（两处更正，三包回归全绿）
 
 **一、预占公式补上实测多出的那一帧（代码更正）**。`packages/backend/src/tasks/task-quote.service.ts` 的输出 token 改为按**出片帧数**计：`帧数 = 输出时长 × 帧率 + 1`；分辨率像素、单价、`max(公式, 最低)` 的结论都不变。实现上把原 `formulaTokens` 拆成 `frameTokens(frames, width, height)`，输出部分加常数 `OUTPUT_EXTRA_FRAMES = 1`；**最低 token 口径不跟着动**——它是官方表逐行核对过的下限，且恒大于补帧后的公式项（`ceil(5D/3) ≥ D + 1/24`），所以 `max()` 在两种口径下都成立。
@@ -28,7 +36,7 @@
 
 **四、已部署（2026-09-15）**。`main` 推到 GitHub（`2f5c3e8`）后在生产 `8.140.49.56:/data/video-flow` 执行 `git pull --ff-only` → `docker compose build video-backend video-worker` → `up -d`，**零 migration**。上线后按 runbook §5（按当前 v2 接口口径）smoke：无凭证的 `POST /v1/tasks/preflight` 与 `POST /v1/tasks` 均 **401**；生产目录里 text-to-video 由 `validation=not_run` 变为 **`passed`（2 条记录）**，同时 `admission.enabled=true`；一次**免费**预检（5s / 720p / 16:9）返回 `reserve=7.623000`、`billedTokens=108,900`（= 121 帧 × 900）——新公式在生产生效；数据不变量 `tasks 21 / attempts 9 / reservations 6` 全部不变、`preflight_records +1`、未结案预占 0、无在途任务（`completed 11 / failed 3 / preview 7`）；Worker `/health` = `alive`，两个容器启动日志无 error/exception。
 
-**五、未完成（重要）**：① R8 矩阵第 1 行的 **30 秒边界仍空缺**（本轮决定暂不花这笔钱，720p 约 45.42 元），其余七类工作流未验收，且 §8 授权开放的参数面中只有 720p/16:9/4–5 秒有真实出片；② 再开放任何其他工作流之前，必须先有一条对应授权并同步两处不变量测试的声明列表；③ 费用状态仍是推算（`billedCny` 恒为 null），不等于账单确认。
+**五、未完成（重要）**：① R8 矩阵第 1 行的 **30 秒边界仍空缺**（本轮决定暂不花这笔钱，720p 约 45.42 元），其余工作流中只有首帧随后被开放（见上一条）、**其余六类仍未验收**，且 §8 授权开放的参数面中只有 720p/16:9/4–5 秒有真实出片；② 再开放任何其他工作流之前，必须先有一条对应授权并同步两处不变量测试的声明列表；③ 费用状态仍是推算（`billedCny` 恒为 null），不等于账单确认。
 
 ### 2026-09-15：修复 ComfyUI 状态提示从未生效的缺陷（UI 第 0 期）
 
