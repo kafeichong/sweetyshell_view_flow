@@ -375,6 +375,16 @@ def _run_evidence(args: argparse.Namespace, client: Any, probe: Callable[[str], 
     return 0 if passed else 1
 
 
+def _preflight_slot_ids(client: Any, preflight_id: str) -> list[str]:
+    """预检声明的素材 slot；空列表表示该工作流没有输入素材。"""
+    report = client.check_preflight(preflight_id) or {}
+    media = (report.get("effectiveRequest") or {}).get("media") or []
+    return [
+        item["slotId"] for item in media
+        if isinstance(item, dict) and item.get("slotId")
+    ]
+
+
 def _run_next(args: argparse.Namespace, client: Any) -> int:
     # 三道闸门缺一不可：花钱确认、操作者自备幂等键、素材 slot 绑定。
     if not args.confirm_spend:
@@ -386,9 +396,6 @@ def _run_next(args: argparse.Namespace, client: Any) -> int:
             "IDEMPOTENCY_KEY_REQUIRED: 必须由操作者提供稳定幂等键，重试时沿用同一个键；"
             "不要使用时间戳，否则重试会变成第二次付费"
         )
-    if not args.media:
-        raise AcceptanceRefused("MEDIA_BINDINGS_REQUIRED: 至少需要一个 --media SLOT_ID=ASSET_ID")
-
     current = (client.get_current_task_for_slot(args.slot_id) or {}).get("currentTask")
     if current and current.get("clientDeliveryStatus") != "delivered":
         raise AcceptanceRefused(
@@ -396,13 +403,25 @@ def _run_next(args: argparse.Namespace, client: Any) -> int:
             "该槽仍有未完成本地交付的任务，正确动作是恢复原任务而不是新建下一版"
         )
 
+    # 绑定必须与预检声明的 slot 完全一致：少一个会漏素材，多一个说明绑错了预检。
+    # 文生视频这类没有输入素材的工作流声明为空，因此不需要任何 --media。
+    declared = _preflight_slot_ids(client, args.preflight_id)
+    bindings = dict(_parse_binding(item) for item in args.media)
+    missing = [slot for slot in declared if slot not in bindings]
+    if missing:
+        raise AcceptanceRefused(
+            f"MEDIA_BINDINGS_INCOMPLETE: 预检声明了 {declared}，缺少 {missing}"
+        )
+    extra = [slot for slot in bindings if slot not in declared]
+    if extra:
+        raise AcceptanceRefused(
+            f"MEDIA_BINDING_NOT_IN_PREFLIGHT: {extra} 不在预检声明的 {declared} 里"
+        )
+
     payload = {
         "preflightId": args.preflight_id,
         "executionSlotId": args.slot_id,
-        "media": [
-            {"slotId": slot_id, "assetId": asset_id}
-            for slot_id, asset_id in (_parse_binding(item) for item in args.media)
-        ],
+        "media": [{"slotId": slot, "assetId": bindings[slot]} for slot in declared],
     }
     task = client.create_task(
         idempotency_key=args.idempotency_key, mode="production", payload=payload,

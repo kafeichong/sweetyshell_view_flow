@@ -66,11 +66,13 @@ class FakeClient:
     它们本来就要调用写接口。
     """
 
-    def __init__(self, *, task=None, slot_task=None, artifact=None, strict=True, report=None):
+    def __init__(self, *, task=None, slot_task=None, artifact=None, strict=True, report=None,
+                 preflight_slots=("reference-image",)):
         self.task = task if task is not None else summary()
         self.slot_task = slot_task
         self.strict = strict
         self.report = report
+        self.preflight_slots = list(preflight_slots)
         self.artifact = artifact or {
             "localPath": "/tmp/out/task-1-result.mp4",
             "sizeBytes": 2246,
@@ -87,6 +89,15 @@ class FakeClient:
     def upload_media(self, media, *, filename, mime_type):
         self._record("upload_media", filename)
         return {"assetId": "asset-uploaded-1", "filename": filename, "mimeType": mime_type}
+
+    def check_preflight(self, preflight_id):
+        self._record("check_preflight", preflight_id)
+        return {"effectiveRequest": {"media": [{"slotId": slot} for slot in self.preflight_slots]}}
+
+    def create_task(self, *, idempotency_key, mode, payload):
+        self._record("create_task", idempotency_key)
+        self.created = payload
+        return {"id": "task-new", "status": "pending"}
 
     def preflight(self, intent):
         self._record("preflight", intent)
@@ -283,6 +294,49 @@ def test_next_refuses_while_the_slot_still_holds_an_undelivered_task(tmp_path):
         )
 
 
+def test_next_allows_a_workflow_without_input_media(tmp_path):
+    """文生视频没有任何输入素材，不能因为"缺绑定"被挡在门外。"""
+    module = load_module()
+    client = FakeClient(strict=False, preflight_slots=())
+    args = module.parse_args([
+        "next", "--slot-id", "r8-text-4s", "--preflight-id", "p-1",
+        "--idempotency-key", "r8-text-4s", "--confirm-spend",
+    ])
+
+    exit_code = module.run(args, client=client, probe=decode_probe, workdir=tmp_path)
+
+    assert exit_code == 0
+    assert client.created == {
+        "preflightId": "p-1", "executionSlotId": "r8-text-4s", "media": [],
+    }
+
+
+def test_next_refuses_when_bindings_do_not_cover_the_preflight_slots(tmp_path):
+    module = load_module()
+    client = FakeClient(strict=False, preflight_slots=("reference-image", "reference-video"))
+    args = module.parse_args([
+        "next", "--slot-id", "s", "--preflight-id", "p-1",
+        "--idempotency-key", "k", "--confirm-spend",
+        "--media", "reference-image=asset-1",
+    ])
+
+    with pytest.raises(module.AcceptanceRefused, match="MEDIA_BINDINGS_INCOMPLETE"):
+        module.run(args, client=client, probe=decode_probe, workdir=tmp_path)
+
+
+def test_next_refuses_bindings_that_the_preflight_does_not_declare(tmp_path):
+    module = load_module()
+    client = FakeClient(strict=False, preflight_slots=("reference-image",))
+    args = module.parse_args([
+        "next", "--slot-id", "s", "--preflight-id", "p-1",
+        "--idempotency-key", "k", "--confirm-spend",
+        "--media", "reference-image=asset-1", "--media", "reference-video=asset-2",
+    ])
+
+    with pytest.raises(module.AcceptanceRefused, match="MEDIA_BINDING_NOT_IN_PREFLIGHT"):
+        module.run(args, client=client, probe=decode_probe, workdir=tmp_path)
+
+
 def test_next_refuses_without_media_slot_bindings(tmp_path):
     module = load_module()
     args = module.parse_args([
@@ -290,7 +344,7 @@ def test_next_refuses_without_media_slot_bindings(tmp_path):
         "--idempotency-key", "k-1", "--confirm-spend",
     ])
 
-    with pytest.raises(module.AcceptanceRefused, match="MEDIA_BINDINGS_REQUIRED"):
+    with pytest.raises(module.AcceptanceRefused, match="MEDIA_BINDINGS_INCOMPLETE"):
         module.run(args, client=FakeClient(), probe=decode_probe, workdir=tmp_path)
 
 
