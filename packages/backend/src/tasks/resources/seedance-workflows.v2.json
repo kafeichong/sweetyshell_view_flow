@@ -144,15 +144,19 @@
       "rule": "billedTokens = max((inputVideoSeconds + outputDuration) * width * height * outputFrameRate / 1024, ceil(outputDuration * 5 / 3) * width * height * outputFrameRate / 1024)",
       "reference": "Official Seedance 2.5 minimum-token table or account price calculator linked from the catalog page",
       "evidence": {
-        "derivedFrom": "方舟价格快查表最低 token 用量表 + 价格示例",
+        "source": "火山方舟视频生成模型价格快查表（官方公开分享的飞书文档）",
+        "sourceUrl": "https://bytedance.larkoffice.com/wiki/FXaYwxzJ5i5Zdik32ipcWzt7nxd",
+        "verifiedOn": "2026-09-15",
+        "verification": "read_the_official_table_directly",
         "verifiedPoints": 96,
         "covered": [
-          "seedance 2.5 480p/720p/1080p 16:9 输出 4-30 秒：81 行逐位吻合",
-          "seedance 2.5 480p 4:3/1:1/21:9：3 点吻合",
-          "seedance 2.5 价格示例 3 分辨率 x 最低/最高价：6 点吻合",
-          "seedance 2.0 价格示例（864x496）：6 点吻合"
+          "官方『seedance-2.5系列最低token限制』视图 480p/720p/1080p 子视图，16:9 输出 4-30 秒：81 行逐位一致",
+          "官方 480p 4:3、1:1、21:9 行：3 点一致",
+          "官方『seedance-2.5系列价格』视图 720p 含输入视频：输入 2/3/4 秒落在同一下限 194,400，输入 5/10/15/20/25/30 秒逐个等于公式值",
+          "官方 1080p 含输入视频：输入 2/3 秒下限 437,400、价格 20.12",
+          "官方价格示例 2.5 与 2.0 的真实像素尺寸：12 点一致"
         ],
-        "note": "权威来源为官方指向的 Lark 快查表，当前不可直接访问；本规则由官方价格示例与公开快查表数据反推并按全部可得数据点逐一验证，未使用估算或固定兜底。"
+        "note": "规则已直接对照官方快查表核对（2026-09-15），不再只是由示例反推。官方表本身是按时长/比例/长边/短边列出的查找表，未用文字写出该公式；本条记录的是「公式逐位复现官方表」这一事实，不是官方条文原文。输入时长为非整数秒时官方表未覆盖，按精确小数秒计算。"
       },
       "productionQuotePolicy": "reserve_the_max_of_formula_and_minimum"
     },
