@@ -83,31 +83,47 @@ def test_reference_image_template_is_the_single_image_4_to_30_second_workflow():
     assert duration == list(range(4, 31))
 
 
-def test_omni_reference_template_chains_image_video_and_audio_collections():
+def test_omni_reference_template_ships_ready_made_slots_for_extra_media():
     workflow = load_template(WORKFLOW_ROOT / "seedance-multi-reference-preflight-v1.comfy.json")
-    nodes = {node["type"]: node for node in workflow["nodes"]}
+    nodes = workflow["nodes"]
+    by_id = {node["id"]: node for node in nodes}
+    types = [node["type"] for node in nodes]
 
-    assert "VideoFlowMultiReferenceInput" not in nodes
-    assert nodes["VideoFlowReferenceImageInput"]["widgets_values"] == ["请选择图片"]
-    assert nodes["VideoFlowReferenceVideoInput"]["widgets_values"] == ["请选择视频"]
-    assert nodes["VideoFlowReferenceAudioInput"]["widgets_values"] == ["请选择音频"]
+    assert types.count("VideoFlowMultiReferenceInput") == 0
+    assert types.count("VideoFlowReferenceImageInput") == 4
+    assert types.count("VideoFlowReferenceVideoInput") == 2
+    assert types.count("VideoFlowReferenceAudioInput") == 1
 
-    links = {(source, target, kind) for _, source, _, target, _, kind in workflow["links"]}
-    assert (
-        nodes["VideoFlowReferenceImageInput"]["id"],
-        nodes["VideoFlowReferenceVideoInput"]["id"],
-        "VIDEO_FLOW_LOCAL_MEDIA_LIST",
-    ) in links
-    assert (
-        nodes["VideoFlowReferenceVideoInput"]["id"],
-        nodes["VideoFlowReferenceAudioInput"]["id"],
-        "VIDEO_FLOW_LOCAL_MEDIA_LIST",
-    ) in links
-    assert (
-        nodes["VideoFlowReferenceAudioInput"]["id"],
-        nodes["VideoFlowMultiReferenceRequest"]["id"],
-        "VIDEO_FLOW_LOCAL_MEDIA_LIST",
-    ) in links
+    # 只有第一个图槽默认指向真实文件；其余槽位留在"（不使用）"，创意想加素材直接选，
+    # 不想加就晾着，不用删连线、也不用右键旁路节点。
+    image_nodes = [node for node in nodes if node["type"] == "VideoFlowReferenceImageInput"]
+    assert [node["widgets_values"] for node in image_nodes] == [
+        ["请选择图片"],
+        [preflight_nodes.UNUSED_MEDIA_CHOICE],
+        [preflight_nodes.UNUSED_MEDIA_CHOICE],
+        [preflight_nodes.UNUSED_MEDIA_CHOICE],
+    ]
+    spare = [node for node in nodes if node["type"] in ("VideoFlowReferenceVideoInput", "VideoFlowReferenceAudioInput")]
+    assert spare and all(node["widgets_values"] == [preflight_nodes.UNUSED_MEDIA_CHOICE] for node in spare)
+
+    # 七个槽位串成一条链，顺序是 4 图 → 2 视频 → 1 音频，末尾接请求节点。
+    # 从请求节点反向走链，避免把节点 id 写死在测试里。
+    incoming = {(link[3], link[4]): link for link in workflow["links"]}
+    request = next(node for node in nodes if node["type"] == "VideoFlowMultiReferenceRequest")
+    chain, current, slot = [], request["id"], 0
+    while (link := incoming.get((current, slot))) is not None:
+        chain.append(by_id[link[1]]["type"])
+        current, slot = link[1], 0
+
+    assert chain == [
+        "VideoFlowReferenceAudioInput",
+        "VideoFlowReferenceVideoInput",
+        "VideoFlowReferenceVideoInput",
+        "VideoFlowReferenceImageInput",
+        "VideoFlowReferenceImageInput",
+        "VideoFlowReferenceImageInput",
+        "VideoFlowReferenceImageInput",
+    ]
 
 
 def test_video_edit_template_uses_video_collection_and_fixed_edit_request():
