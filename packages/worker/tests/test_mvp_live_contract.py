@@ -1292,7 +1292,32 @@ class AdditionalCrossPackageScenariosTests(unittest.TestCase):
         if response.status_code != 200:
             raise AssertionError(f"set limits failed: {response.status_code} {response.text}")
 
-    def _set_provider_mode(self, *, create_mode: Optional[str] = None, usage_mode: Optional[str] = None):
+    def _set_gate(self, paused: bool, reason: str):
+        with self._admin_api() as client:
+            return client.patch(
+                "/api/v1/admin/operations/production-gate",
+                json={
+                    "paused": paused,
+                    "reason": reason,
+                    "operator": "contract",
+                    "evidenceRef": "live-contract",
+                },
+            )
+
+    def _set_provider_mode(
+        self,
+        *,
+        create_mode: Optional[str] = None,
+        usage_mode: Optional[str] = None,
+        task_status: Optional[str] = None,
+    ):
+        if task_status is not None:
+            response = httpx.get(
+                f"{self.provider_url}/__test__/task-status",
+                params={"value": task_status},
+            )
+            response.raise_for_status()
+            assert response.json()["taskStatus"] == task_status
         if create_mode is not None:
             response = httpx.get(
                 f"{self.provider_url}/__test__/create-mode",
@@ -1565,6 +1590,51 @@ class AdditionalCrossPackageScenariosTests(unittest.TestCase):
             self._stop_worker(worker)
         after = provider_stats(self.provider_url)["createCount"]
         self.assertEqual(before, after)
+
+    def test_pausing_the_gate_does_not_strand_an_in_flight_provider_task(self):
+        """暂停只拦新准入；已经提交到 Provider 的任务必须继续轮询与归档。
+
+        否则故障期间一按暂停，已经付过费的在途任务就被卡死、产物再也拿不回来。
+        与"暂停拦住新准入"是两个方向相反的断言，缺一不可。
+        """
+        self._reset_provider()
+        prompt = "live e13b pause in flight"
+        # 先让 Provider 停在"已受理未完成"，制造一个真实的在途窗口。
+        self._set_provider_mode(task_status="running")
+        try:
+            response = self._post_task(prompt=prompt, idempotency_key="e13b-pause-in-flight")
+            self.assertIn(response.status_code, (200, 201), response.text)
+            task_id = response.json()["id"]
+
+            before = provider_stats(self.provider_url)["createCountsByKey"].get(prompt, 0)
+            self._run_one_cycle()
+            self.assertEqual(
+                provider_stats(self.provider_url)["createCountsByKey"].get(prompt, 0),
+                before + 1,
+                "在途任务本应已经被提交到 Provider",
+            )
+
+            paused = self._set_gate(True, "contract: in-flight continues under pause")
+            self.assertEqual(paused.status_code, 200)
+
+            self._set_provider_mode(task_status="succeeded")
+            deadline = time.monotonic() + 60.0
+            while time.monotonic() < deadline:
+                self._run_one_cycle()
+                if self._task_summary(task_id).get("delivery", {}).get("status") == "ready":
+                    break
+                time.sleep(0.5)
+            else:
+                self.fail("暂停期间在途任务没有完成归档，产物被卡住了")
+
+            self.assertEqual(
+                provider_stats(self.provider_url)["createCountsByKey"].get(prompt, 0),
+                before + 1,
+                "暂停下恢复在途任务不应产生第二次 Provider create",
+            )
+        finally:
+            self._set_gate(False, "contract: restore after in-flight check")
+            self._set_provider_mode(task_status="succeeded")
 
 
 if __name__ == "__main__":
