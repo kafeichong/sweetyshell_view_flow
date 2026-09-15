@@ -78,6 +78,9 @@ launchctl setenv VIDEO_FLOW_SPEC_VERSION comfy-acceptance-v1
 
 完全退出并重新启动 Comfy Desktop。客户端配置节点应读取上述四个值，不能把回执写入 `~/.video-flow/receipts`。
 
+> ⚠️ **这四个变量只用于本手册描述的隔离验收。** 注入期间客户端指向的是测试 Backend，Preview 与 Production 都不产生真实费用。
+> 要跑**真实付费验收**，必须先把它们清掉（§7）、重启 Comfy Desktop，并**导入仓库里的模板而不是本手册第 2 节生成的副本**——验收副本的配置节点写死了 `127.0.0.1:3400`。完整步骤见 [R8 授权范围清单](./r8-production-acceptance-scope.md) §4.2。
+
 ## 4. Preview 验收
 
 从 `/private/tmp/video-flow-comfy-acceptance/workflows` 导入目标模板，保持 `Video Flow Execution Policy` 为 `preview`，点击 Queue。

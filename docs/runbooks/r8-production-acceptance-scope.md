@@ -93,6 +93,42 @@ $PY scripts/seedance_production_acceptance.py evidence --task-id <TASK_ID> --out
 - 幂等键由操作者提供并在重试时沿用**同一个**；工具不会自动生成时间戳键。
 - 提交结果不确定时**先查原任务**，不要重跑。
 
+### 4.2 通过 ComfyUI 客户端执行（人工操作）
+
+也可以走创意同事真实使用的路径：在 ComfyUI 里 Preview → 切 Production → 再次 Queue。
+**前提是本机客户端必须从验收环境切到生产**，否则会打到隔离环境、拿不到真实成片。
+
+本机若曾按 [local-manual-test.md](./local-manual-test.md) §3 注入过验收配置，先清掉：
+
+```bash
+launchctl unsetenv VIDEO_FLOW_BACKEND_URL
+launchctl unsetenv VIDEO_FLOW_TOKEN_FILE
+launchctl unsetenv VIDEO_FLOW_RECEIPT_DIR
+launchctl unsetenv VIDEO_FLOW_SPEC_VERSION
+```
+
+清掉后客户端回落到各自的生产默认值：
+
+| 项 | 回落目标 | 说明 |
+| --- | --- | --- |
+| token | `~/.video-flow/token` | 即本次授权的 Actor 凭证 |
+| 回执目录 | `~/.video-flow/receipts` | 与验收环境的回执分开 |
+| backend | `https://ai.sweetyshell.com` | 仅在配置节点没有 widget 值时生效 |
+
+**完全退出并重启 Comfy Desktop**（`launchctl` 的改动只在进程启动时生效）。
+
+⚠️ **必须导入仓库里的模板**，不要用验收环境的副本：
+
+```text
+packages/comfyui-video-flow-client/workflows/<工作流>-preflight-v1.comfy.json
+```
+
+配置节点的 `backend_url` 取自**画布上的 widget 值**而不是环境变量——`/private/tmp/video-flow-comfy-acceptance/workflows/` 里那些副本写死了 `127.0.0.1:3400`，导入它们会打到隔离环境。仓库模板的 widget 是 `https://ai.sweetyshell.com`。
+
+验收后若要回到隔离环境，按 [local-manual-test.md](./local-manual-test.md) §3 重新注入并重启即可（§7 有清除步骤）。
+
+**人工操作时同样要留意**：Preview 不产生费用；切到 Production 后再次 Queue 才正式提交；客户端显示的是服务端报价，**实际结算可能略高于报价**（见 PROJECT_STATUS 中"预占少算一帧"的实测记录）。
+
 ## 5. 每项必须记录的证据
 
 对齐 R8 的完成定义，逐项记录：
