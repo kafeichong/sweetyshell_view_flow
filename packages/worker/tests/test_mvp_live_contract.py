@@ -568,12 +568,13 @@ class LiveMVPContractTests(unittest.TestCase):
             self.assertEqual(result["costSummary"]["reservationState"], "settled")
             self.assertIsNotNone(result["costSummary"]["usageCalculatedCny"])
 
-    def test_omni_input_video_stays_preview_only_until_minimum_tokens_are_known(self):
-        slot_id = "slot-r6-omni-video-unresolved-minimum"
+    def test_omni_input_video_reaches_delivery_with_the_official_minimum_tokens(self):
+        slot_id = "slot-r6-omni-input-video-minimum"
+        prompt = "live omni input video minimum tokens"
         payload = {
             "mode": "production",
             "workflowKey": "seedance.omni-reference.v1",
-            "prompt": {"positive": "live omni unresolved video minimum"},
+            "prompt": {"positive": prompt},
             "generation": {
                 "duration": 15,
                 "ratio": "16:9",
@@ -588,7 +589,6 @@ class LiveMVPContractTests(unittest.TestCase):
                 {"assetId": required_env("VIDEO_FLOW_LIVE_AUDIO_ASSET_ID"), "role": "reference_audio"},
             ],
         }
-        before = provider_stats(self.provider_url)["createCount"]
         with self._api() as client:
             intent = _workflow_intent(payload)
             preview = client.post(
@@ -599,15 +599,24 @@ class LiveMVPContractTests(unittest.TestCase):
             preview.raise_for_status()
             report = preview.json()
             self.assertEqual(report["requestCheck"]["status"], "passed")
-            self.assertEqual(report["quote"]["status"], "unavailable")
-            self.assertIn("INPUT_VIDEO_MINIMUM_TOKENS_UNRESOLVED", report["quote"]["missing"])
-            self.assertIn("QUOTE_UNAVAILABLE", [item["code"] for item in report["productionAdmission"]["blockers"]])
+            self.assertTrue(report["productionAdmission"]["canSubmit"])
 
-            rejected = client.post(
+            # 含输入视频的请求按「公式值与官方最低用量的较大者」计费。
+            basis = report["quote"]["basis"]
+            self.assertEqual(report["quote"]["status"], "estimated")
+            self.assertEqual(report["quote"]["missing"], [])
+            output = basis["output"]
+            minimum_total_seconds = -(-output["durationSeconds"] * 5 // 3)
+            expected_minimum = -(-minimum_total_seconds * output["width"] * output["height"] * output["frameRate"] // 1024)
+            self.assertEqual(basis["minimumTokens"], expected_minimum)
+            self.assertEqual(basis["billedTokens"], max(basis["formulaTokens"], expected_minimum))
+            self.assertEqual(basis["minimumTokensApplied"], expected_minimum > basis["formulaTokens"])
+
+            created = client.post(
                 "/api/v1/tasks",
                 headers={
                     "Authorization": f"Bearer {self.actor_token}",
-                    "Idempotency-Key": "r6-omni-video-unresolved-minimum",
+                    "Idempotency-Key": "r6-omni-input-video-minimum",
                 },
                 json={
                     "mode": "production",
@@ -619,24 +628,42 @@ class LiveMVPContractTests(unittest.TestCase):
                     ],
                 },
             )
-            self.assertEqual(rejected.status_code, 400)
-            self.assertIn("QUOTE_UNAVAILABLE", rejected.text)
-            current = client.get(
-                f"/api/v1/tasks/slots/{slot_id}/current",
+        created.raise_for_status()
+        task = created.json()
+        self.assertEqual(
+            [item["role"] for item in task["executionPlan"]["media"]],
+            ["reference_image", "reference_video", "reference_audio"],
+        )
+        self.assertEqual(task["executionPlan"]["reserveCny"], report["quote"]["reserveCny"])
+
+        before = provider_stats(self.provider_url)["createCountsByKey"].get(prompt, 0)
+        self._run_one_cycle()
+        stats = provider_stats(self.provider_url)
+        self.assertEqual(stats["createCountsByKey"].get(prompt, 0), before + 1)
+        self.assertEqual(
+            [(item["type"], item.get("role")) for item in stats["lastCreatePayload"]["content"][1:]],
+            [("image_url", "reference_image"), ("video_url", "reference_video"), ("audio_url", "reference_audio")],
+        )
+
+        with self._api() as client:
+            summary = client.get(
+                f"/api/v1/tasks/{task['id']}",
                 headers={"Authorization": f"Bearer {self.actor_token}"},
             )
-            current.raise_for_status()
-            self.assertIsNone(current.json()["currentTask"])
+        summary.raise_for_status()
+        result = summary.json()
+        self.assertEqual(result["execution"]["status"], "completed")
+        self.assertEqual(result["delivery"]["status"], "ready")
+        self.assertEqual(result["costSummary"]["reservationState"], "settled")
+        self.assertIsNotNone(result["costSummary"]["usageCalculatedCny"])
 
-        self._run_one_cycle()
-        self.assertEqual(provider_stats(self.provider_url)["createCount"], before)
-
-    def test_video_edit_preview_freezes_special_fields_but_production_stays_closed(self):
-        slot_id = "slot-r6-video-edit-unresolved-minimum"
+    def test_video_edit_freezes_special_fields_and_reaches_mov_delivery(self):
+        slot_id = "slot-r6-video-edit"
+        prompt = "remove the background from @video1"
         payload = {
             "mode": "production",
             "workflowKey": "seedance.video-edit.v1",
-            "prompt": {"positive": "remove the background from @video1"},
+            "prompt": {"positive": prompt},
             "generation": {
                 "duration": -1,
                 "ratio": "adaptive",
@@ -650,8 +677,6 @@ class LiveMVPContractTests(unittest.TestCase):
                 "role": "reference_video",
             }],
         }
-        before = provider_stats(self.provider_url)["createCount"]
-
         with self._api() as client:
             intent = _workflow_intent(payload)
             preview = client.post(
@@ -664,17 +689,22 @@ class LiveMVPContractTests(unittest.TestCase):
 
             self.assertEqual(report["requestCheck"]["status"], "passed")
             self.assertEqual(report["effectiveRequest"]["generation"], payload["generation"])
-            self.assertEqual(report["quote"]["status"], "unavailable")
-            self.assertIn("INPUT_VIDEO_MINIMUM_TOKENS_UNRESOLVED", report["quote"]["missing"])
-            self.assertIn("QUOTE_UNAVAILABLE", [
-                item["code"] for item in report["productionAdmission"]["blockers"]
-            ])
+            self.assertTrue(report["productionAdmission"]["canSubmit"])
+            # duration=-1 时按唯一参考视频的时长确定输出时长，据此套用最低用量规则。
+            self.assertEqual(report["quote"]["status"], "estimated")
+            self.assertEqual(report["quote"]["missing"], [])
+            basis = report["quote"]["basis"]
+            self.assertEqual(basis["outputDurationBasis"], "single_reference_video")
+            self.assertEqual(
+                basis["output"]["durationSeconds"], intent["media"][0]["metadata"]["durationSeconds"],
+            )
+            self.assertEqual(basis["billedTokens"], max(basis["formulaTokens"], basis["minimumTokens"]))
 
-            rejected = client.post(
+            created = client.post(
                 "/api/v1/tasks",
                 headers={
                     "Authorization": f"Bearer {self.actor_token}",
-                    "Idempotency-Key": "r6-video-edit-unresolved-minimum",
+                    "Idempotency-Key": "r6-video-edit",
                 },
                 json={
                     "mode": "production",
@@ -686,24 +716,38 @@ class LiveMVPContractTests(unittest.TestCase):
                     }],
                 },
             )
-            self.assertEqual(rejected.status_code, 400)
-            self.assertIn("QUOTE_UNAVAILABLE", rejected.text)
-            current = client.get(
-                f"/api/v1/tasks/slots/{slot_id}/current",
+        created.raise_for_status()
+        task = created.json()
+        self.assertEqual(task["executionPlan"]["duration"], -1)
+        self.assertEqual(task["executionPlan"]["outputFormat"], "mov")
+
+        before = provider_stats(self.provider_url)["createCountsByKey"].get(prompt, 0)
+        self._run_one_cycle()
+        stats = provider_stats(self.provider_url)
+        self.assertEqual(stats["createCountsByKey"].get(prompt, 0), before + 1)
+        self.assertEqual(stats["lastCreatePayload"]["duration"], -1)
+        self.assertEqual(stats["lastCreatePayload"]["output_format"], "mov")
+        self.assertEqual(stats["lastCreatePayload"]["ratio"], "adaptive")
+
+        with self._api() as client:
+            summary = client.get(
+                f"/api/v1/tasks/{task['id']}",
                 headers={"Authorization": f"Bearer {self.actor_token}"},
             )
-            current.raise_for_status()
-            self.assertIsNone(current.json()["currentTask"])
+        summary.raise_for_status()
+        result = summary.json()
+        self.assertEqual(result["execution"]["status"], "completed")
+        self.assertEqual(result["delivery"]["status"], "ready")
+        self.assertEqual(result["costSummary"]["reservationState"], "settled")
+        self.assertIsNotNone(result["costSummary"]["usageCalculatedCny"])
 
-        self._run_one_cycle()
-        self.assertEqual(provider_stats(self.provider_url)["createCount"], before)
-
-    def test_video_extend_preview_freezes_special_fields_but_production_stays_closed(self):
-        slot_id = "slot-r6-video-extend-unresolved-minimum"
+    def test_video_extend_freezes_special_fields_and_reaches_mov_delivery(self):
+        slot_id = "slot-r6-video-extend"
+        prompt = "extend @video1 backward by 11 seconds"
         payload = {
             "mode": "production",
             "workflowKey": "seedance.video-extend.v1",
-            "prompt": {"positive": "extend @video1 backward by 11 seconds"},
+            "prompt": {"positive": prompt},
             "generation": {
                 "duration": 11,
                 "ratio": "adaptive",
@@ -717,8 +761,6 @@ class LiveMVPContractTests(unittest.TestCase):
                 "role": "reference_video",
             }],
         }
-        before = provider_stats(self.provider_url)["createCount"]
-
         with self._api() as client:
             intent = _workflow_intent(payload)
             preview = client.post(
@@ -731,17 +773,18 @@ class LiveMVPContractTests(unittest.TestCase):
 
             self.assertEqual(report["requestCheck"]["status"], "passed")
             self.assertEqual(report["effectiveRequest"]["generation"], payload["generation"])
-            self.assertEqual(report["quote"]["status"], "unavailable")
-            self.assertIn("INPUT_VIDEO_MINIMUM_TOKENS_UNRESOLVED", report["quote"]["missing"])
-            self.assertIn("QUOTE_UNAVAILABLE", [
-                item["code"] for item in report["productionAdmission"]["blockers"]
-            ])
+            self.assertTrue(report["productionAdmission"]["canSubmit"])
+            self.assertEqual(report["quote"]["status"], "estimated")
+            self.assertEqual(report["quote"]["missing"], [])
+            basis = report["quote"]["basis"]
+            self.assertEqual(basis["output"]["durationSeconds"], 11)
+            self.assertEqual(basis["billedTokens"], max(basis["formulaTokens"], basis["minimumTokens"]))
 
-            rejected = client.post(
+            created = client.post(
                 "/api/v1/tasks",
                 headers={
                     "Authorization": f"Bearer {self.actor_token}",
-                    "Idempotency-Key": "r6-video-extend-unresolved-minimum",
+                    "Idempotency-Key": "r6-video-extend",
                 },
                 json={
                     "mode": "production",
@@ -753,17 +796,30 @@ class LiveMVPContractTests(unittest.TestCase):
                     }],
                 },
             )
-            self.assertEqual(rejected.status_code, 400)
-            self.assertIn("QUOTE_UNAVAILABLE", rejected.text)
-            current = client.get(
-                f"/api/v1/tasks/slots/{slot_id}/current",
+        created.raise_for_status()
+        task = created.json()
+        self.assertEqual(task["executionPlan"]["duration"], 11)
+        self.assertEqual(task["executionPlan"]["outputFormat"], "mov")
+
+        before = provider_stats(self.provider_url)["createCountsByKey"].get(prompt, 0)
+        self._run_one_cycle()
+        stats = provider_stats(self.provider_url)
+        self.assertEqual(stats["createCountsByKey"].get(prompt, 0), before + 1)
+        self.assertEqual(stats["lastCreatePayload"]["duration"], 11)
+        self.assertEqual(stats["lastCreatePayload"]["output_format"], "mov")
+        self.assertEqual(stats["lastCreatePayload"]["ratio"], "adaptive")
+
+        with self._api() as client:
+            summary = client.get(
+                f"/api/v1/tasks/{task['id']}",
                 headers={"Authorization": f"Bearer {self.actor_token}"},
             )
-            current.raise_for_status()
-            self.assertIsNone(current.json()["currentTask"])
-
-        self._run_one_cycle()
-        self.assertEqual(provider_stats(self.provider_url)["createCount"], before)
+        summary.raise_for_status()
+        result = summary.json()
+        self.assertEqual(result["execution"]["status"], "completed")
+        self.assertEqual(result["delivery"]["status"], "ready")
+        self.assertEqual(result["costSummary"]["reservationState"], "settled")
+        self.assertIsNotNone(result["costSummary"]["usageCalculatedCny"])
 
     def test_single_intent_creates_the_provider_task_exactly_once(self):
         """E06 的核心不变量：一个意图只 create 一次，重跑沿用原任务。"""
