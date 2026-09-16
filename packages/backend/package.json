@@ -13,7 +13,8 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
-    "assets:backfill": "node dist/tools/asset-hash-backfill.js"
+    "assets:backfill": "node dist/src/tools/asset-hash-backfill.js",
+    "assets:reinspect": "node dist/src/tools/asset-reinspection.js"
   },
   "dependencies": {
     "@nestjs/common": "^12.0.1",
