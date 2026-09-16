@@ -8,6 +8,24 @@
 
 ## 0. 本轮交付判断
 
+### 2026-09-16：新增创意人员账号 `creative-zhuyang`（朱阳），并加入生产白名单
+
+授权人 kafeichong 要求为创意同事朱阳开一个独立账号用于客户端真实操作验收。
+
+| 项 | 值 |
+| --- | --- |
+| Actor ID | `creative-zhuyang`（沿用 `creative-pilot` 的 `creative-*` 命名） |
+| 显示名 | 朱阳 |
+| 状态 | `active` |
+| 额度 | `dailyLimitCny = 300`、`monthlyLimitCny = 3000`（服务端强制） |
+| 生产白名单 | `VIDEO_FLOW_PRODUCTION_ACTORS=creative-pilot,creative-zhuyang`（生产 `.env`，改前备份 `.env.bak-20260916105757`，后端已 `--force-recreate` 重建） |
+| 创建方式 | `POST /api/v1/admin/credentials` + `PATCH .../limits`（Admin Guard） |
+| 开通自检 | 新 token 调目录接口 **200**；免费预检 `requestCheck=passed`、**`canSubmit=true` 且无 blockers**（说明白名单已生效，不会被 `PRODUCTION_NOT_ALLOWED` 拦） |
+
+**token 不写入任何仓库文件**：接口只在创建时返回一次明文（库里只存哈希），已按 600 权限存到操作机 `~/.video-flow/creative-zhuyang.token`，由管理员当面或安全渠道交给本人。
+
+**撤销方式**：`PATCH /api/v1/admin/credentials/creative-zhuyang/revoke` → 从生产 `.env` 的白名单里移除该 actor → `docker compose up -d --force-recreate video-backend`。注意：**再次调用创建接口会轮换 token**（旧 token 立即失效），补发凭证走的是同一条路。
+
 ### 2026-09-16：客户端交付给创意同事做真实操作验收（受控测试期交付）
 
 **交付物**：`packages/comfyui-video-flow-client/` 的**干净导出**（不是工作目录），版本 `CLIENT_VERSION = 2026-09-16.1`。导出方式：
