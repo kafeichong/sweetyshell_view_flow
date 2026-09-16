@@ -93,7 +93,7 @@
         "Node name for S&R": "VideoFlowReferenceImageInput"
       },
       "widgets_values": [
-        "请选择图片"
+        "（不给素材）"
       ]
     },
     {
@@ -128,7 +128,7 @@
         "Node name for S&R": "VideoFlowReferenceImageInput"
       },
       "widgets_values": [
-        "（不使用）"
+        "（不给素材）"
       ]
     },
     {
@@ -163,7 +163,7 @@
         "Node name for S&R": "VideoFlowReferenceImageInput"
       },
       "widgets_values": [
-        "（不使用）"
+        "（不给素材）"
       ]
     },
     {
@@ -198,7 +198,7 @@
         "Node name for S&R": "VideoFlowReferenceImageInput"
       },
       "widgets_values": [
-        "（不使用）"
+        "（不给素材）"
       ]
     },
     {
@@ -233,7 +233,7 @@
         "Node name for S&R": "VideoFlowReferenceVideoInput"
       },
       "widgets_values": [
-        "（不使用）"
+        "（不给素材）"
       ]
     },
     {
@@ -268,7 +268,7 @@
         "Node name for S&R": "VideoFlowReferenceVideoInput"
       },
       "widgets_values": [
-        "（不使用）"
+        "（不给素材）"
       ]
     },
     {
@@ -303,7 +303,7 @@
         "Node name for S&R": "VideoFlowReferenceAudioInput"
       },
       "widgets_values": [
-        "（不使用）"
+        "（不给素材）"
       ]
     },
     {

@@ -281,19 +281,37 @@ def test_unused_reference_slot_passes_the_upstream_list_through_untouched(monkey
     assert [item['descriptor']['slotId'] for item in media] == ['reference-image-1', 'reference-audio-1']
 
 
-def test_unused_choice_is_offered_last_and_never_on_fixed_count_image_nodes(tmp_path, monkeypatch):
+def test_unused_choice_comes_first_with_tooltip_and_never_on_fixed_count_image_nodes(tmp_path, monkeypatch):
     (tmp_path / 'image-1.png').write_bytes(b'x')
     monkeypatch.setitem(__import__('sys').modules, 'folder_paths', SimpleNamespace(get_input_directory=lambda: str(tmp_path)))
 
-    # 放末尾：槽位里存的占位符在文件存在时不在列表里，ComfyUI 会回落到第一个真实文件。
-    choices = n.ReferenceImageInput.INPUT_TYPES()['required']['image'][0]
-    assert choices == ['image-1.png', n.UNUSED_MEDIA_CHOICE]
+    # 放第一位：ComfyUI 的 COMBO 以第一项为默认值，所以新加的节点、以及模板里多摆的
+    # 槽位默认都是空的，不会悄悄带上第一个文件——"没动过 = 没用上"。
+    choices, options = n.ReferenceImageInput.INPUT_TYPES()['required']['image']
+    assert choices == [n.UNUSED_MEDIA_CHOICE, 'image-1.png']
+    # 空槽要有文字说明兜底（官方的 per-input tooltip 位），提示里必须点出"至少一个"。
+    assert '至少要有一个参考素材' in options['tooltip']
 
-    # 首帧与首尾帧的图片数量是官方规定的（1 张 / 2 张），不能提供"（不使用）"，
+    # 首帧与首尾帧的图片数量是官方规定的（1 张 / 2 张），不能提供这个选项，
     # 否则用户会以为可以少给一张。
     for cls in (n.FirstFrameInput, n.FirstLastFrameInput):
         for spec in cls.INPUT_TYPES()['required'].values():
             assert n.UNUSED_MEDIA_CHOICE not in spec[0]
+
+
+def test_reference_nodes_carry_descriptions_and_validate_before_queueing():
+    # 三个参考节点与请求节点都要有 DESCRIPTION（官方的节点级说明位），
+    # 否则"可以留空"这件事只存在于代码里，用户看不到。
+    for cls in (n.ReferenceImageInput, n.ReferenceVideoInput, n.ReferenceAudioInput, n.MultiReferenceRequest):
+        assert cls.DESCRIPTION.strip()
+
+    # 空列表在排队前就被拦下，返回可操作的文案；有素材时放行。
+    message = n.MultiReferenceRequest.VALIDATE_INPUTS(reference_media=[])
+    assert isinstance(message, str)
+    assert '至少需要一个参考素材' in message and '不给素材' in message
+    assert n.MultiReferenceRequest.VALIDATE_INPUTS(
+        reference_media=[{'descriptor': {'role': 'reference_image'}}],
+    ) is True
 
 
 def test_reference_media_inputs_enforce_official_item_limits(monkeypatch):

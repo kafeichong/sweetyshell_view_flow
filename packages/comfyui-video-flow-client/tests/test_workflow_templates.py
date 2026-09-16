@@ -94,17 +94,12 @@ def test_omni_reference_template_ships_ready_made_slots_for_extra_media():
     assert types.count("VideoFlowReferenceVideoInput") == 2
     assert types.count("VideoFlowReferenceAudioInput") == 1
 
-    # 只有第一个图槽默认指向真实文件；其余槽位留在"（不使用）"，创意想加素材直接选，
-    # 不想加就晾着，不用删连线、也不用右键旁路节点。
-    image_nodes = [node for node in nodes if node["type"] == "VideoFlowReferenceImageInput"]
-    assert [node["widgets_values"] for node in image_nodes] == [
-        ["请选择图片"],
-        [preflight_nodes.UNUSED_MEDIA_CHOICE],
-        [preflight_nodes.UNUSED_MEDIA_CHOICE],
-        [preflight_nodes.UNUSED_MEDIA_CHOICE],
-    ]
-    spare = [node for node in nodes if node["type"] in ("VideoFlowReferenceVideoInput", "VideoFlowReferenceAudioInput")]
-    assert spare and all(node["widgets_values"] == [preflight_nodes.UNUSED_MEDIA_CHOICE] for node in spare)
+    # **所有槽位默认都是空的**：没动过的槽位不会悄悄带上某个文件，想用哪个就显式去选，
+    # 不想用的晾着即可——不用删连线、也不用右键旁路节点。
+    slots = [node for node in nodes if node["type"] in (
+        "VideoFlowReferenceImageInput", "VideoFlowReferenceVideoInput", "VideoFlowReferenceAudioInput")]
+    assert len(slots) == 7
+    assert all(node["widgets_values"] == [preflight_nodes.UNUSED_MEDIA_CHOICE] for node in slots)
 
     # 七个槽位串成一条链，顺序是 4 图 → 2 视频 → 1 音频，末尾接请求节点。
     # 从请求节点反向走链，避免把节点 id 写死在测试里。
