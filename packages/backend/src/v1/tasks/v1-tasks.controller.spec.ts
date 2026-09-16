@@ -5,6 +5,7 @@ jest.mock('@nestjs/common', () => ({
   Controller: () => (target: unknown) => target,
   UseGuards: () => (target: unknown) => target,
   Post: () => () => {}, Get: () => () => {}, Body: () => () => {}, Headers: () => () => {}, Param: () => () => {},
+  Query: () => () => {},
   ConflictException: class ConflictException extends Error { status = 409; },
   BadRequestException: class BadRequestException extends Error { status = 400; response: unknown; constructor(value: unknown) { super(typeof value === 'string' ? value : 'Bad Request'); this.response = value; } },
   ForbiddenException: class ForbiddenException extends Error { status = 403; },

@@ -1,4 +1,10 @@
-import { Test, TestingModule } from '@nestjs/testing';
+// 本仓的 spec 一律**直接构造**被测服务、手写依赖替身（见 production-submission.service.spec.ts
+// 等），不用 @nestjs/testing：它 v12 是**纯 ESM**、没有 CJS 产物，而 Jest 跑在 CJS 模式，
+// 连 `export * from './interfaces/index.js'` 都解析不了，整个 suite 一个断言都到不了。
+jest.mock('@nestjs/common', () => ({
+  Injectable: () => (target: unknown) => target,
+}));
+
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
 import { ConsumptionService } from './consumption.service';
@@ -7,7 +13,7 @@ describe('ConsumptionService', () => {
   let service: ConsumptionService;
   let prisma: any;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     prisma = {
       actorCredential: { findUnique: jest.fn() },
       taskBudgetReservation: {
@@ -16,14 +22,7 @@ describe('ConsumptionService', () => {
       },
     };
 
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        ConsumptionService,
-        { provide: PrismaService, useValue: prisma },
-      ],
-    }).compile();
-
-    service = module.get<ConsumptionService>(ConsumptionService);
+    service = new ConsumptionService(prisma as unknown as PrismaService);
   });
 
   afterEach(() => {
