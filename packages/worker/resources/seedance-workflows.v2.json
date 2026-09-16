@@ -9,35 +9,104 @@
     "createTaskPath": "/api/v3/contents/generations/tasks",
     "queryTaskPathTemplate": "/api/v3/contents/generations/tasks/{id}",
     "outputFrameRate": 24,
-    "resolutions": ["480p", "720p", "1080p"],
-    "ratios": ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16", "adaptive"],
-    "outputFormats": ["mp4", "mov"],
+    "resolutions": [
+      "480p",
+      "720p",
+      "1080p"
+    ],
+    "ratios": [
+      "21:9",
+      "16:9",
+      "4:3",
+      "1:1",
+      "3:4",
+      "9:16",
+      "adaptive"
+    ],
+    "outputFormats": [
+      "mp4",
+      "mov"
+    ],
     "supportsGenerateAudio": true,
     "supportsWatermark": true,
     "dimensions": {
       "480p": {
-        "21:9": [992, 432],
-        "16:9": [854, 480],
-        "4:3": [752, 560],
-        "1:1": [640, 640],
-        "3:4": [560, 752],
-        "9:16": [480, 854]
+        "21:9": [
+          992,
+          432
+        ],
+        "16:9": [
+          854,
+          480
+        ],
+        "4:3": [
+          752,
+          560
+        ],
+        "1:1": [
+          640,
+          640
+        ],
+        "3:4": [
+          560,
+          752
+        ],
+        "9:16": [
+          480,
+          854
+        ]
       },
       "720p": {
-        "21:9": [1470, 630],
-        "16:9": [1280, 720],
-        "4:3": [1112, 834],
-        "1:1": [960, 960],
-        "3:4": [834, 1112],
-        "9:16": [720, 1280]
+        "21:9": [
+          1470,
+          630
+        ],
+        "16:9": [
+          1280,
+          720
+        ],
+        "4:3": [
+          1112,
+          834
+        ],
+        "1:1": [
+          960,
+          960
+        ],
+        "3:4": [
+          834,
+          1112
+        ],
+        "9:16": [
+          720,
+          1280
+        ]
       },
       "1080p": {
-        "21:9": [2206, 946],
-        "16:9": [1920, 1080],
-        "4:3": [1664, 1248],
-        "1:1": [1440, 1440],
-        "3:4": [1248, 1664],
-        "9:16": [1080, 1920]
+        "21:9": [
+          2206,
+          946
+        ],
+        "16:9": [
+          1920,
+          1080
+        ],
+        "4:3": [
+          1664,
+          1248
+        ],
+        "1:1": [
+          1440,
+          1440
+        ],
+        "3:4": [
+          1248,
+          1664
+        ],
+        "9:16": [
+          1080,
+          1920
+        ]
       }
     }
   },
@@ -45,8 +114,21 @@
     "maximumReferenceCount": 50,
     "maximumInlineRequestBytes": 67108864,
     "image": {
-      "roles": ["reference_image", "first_frame", "last_frame"],
-      "formats": ["jpeg", "png", "webp", "bmp", "tiff", "gif", "heic", "heif"],
+      "roles": [
+        "reference_image",
+        "first_frame",
+        "last_frame"
+      ],
+      "formats": [
+        "jpeg",
+        "png",
+        "webp",
+        "bmp",
+        "tiff",
+        "gif",
+        "heic",
+        "heif"
+      ],
       "minimumWidth": 300,
       "maximumWidth": 6000,
       "minimumHeight": 300,
@@ -57,10 +139,22 @@
       "maximumCount": 30
     },
     "video": {
-      "roles": ["reference_video"],
-      "containers": ["mp4", "mov"],
-      "videoCodecs": ["h264", "h265"],
-      "audioCodecs": ["aac", "mp3", "pcm"],
+      "roles": [
+        "reference_video"
+      ],
+      "containers": [
+        "mp4",
+        "mov"
+      ],
+      "videoCodecs": [
+        "h264",
+        "h265"
+      ],
+      "audioCodecs": [
+        "aac",
+        "mp3",
+        "pcm"
+      ],
       "minimumWidth": 300,
       "maximumWidth": 6000,
       "minimumHeight": 300,
@@ -79,8 +173,13 @@
       "maximumTotalDurationSeconds": 30
     },
     "audio": {
-      "roles": ["reference_audio"],
-      "formats": ["wav", "mp3"],
+      "roles": [
+        "reference_audio"
+      ],
+      "formats": [
+        "wav",
+        "mp3"
+      ],
       "minimumDurationSeconds": 2,
       "maximumDurationSeconds": 30,
       "maximumSizeBytesInclusive": 15728640,
@@ -91,6 +190,50 @@
       "directReferenceUploadSupported": false,
       "note": "Use an officially permitted model output, virtual-person asset, or separately verified authorized-person asset. A Video Flow assetId is not an Ark authorization asset."
     }
+  },
+  "contentRules": {
+    "source": "官方创建视频生成任务接口文档 https://docs.volcengine.com/docs/82379/1520757（2026-09-16 用本机浏览器逐段核对）",
+    "combinations": [
+      "纯文本",
+      "文本（可选）+ 图片",
+      "文本（可选）+ 视频",
+      "文本（可选）+ 音频（仅 Seedance 2.5 支持单独传入音频）",
+      "文本（可选）+ 图片 + 音频",
+      "文本（可选）+ 图片 + 视频",
+      "文本（可选）+ 视频 + 音频",
+      "文本（可选）+ 图片 + 视频 + 音频"
+    ],
+    "minimumReferenceMaterials": 1,
+    "minimumReferenceMaterialsRule": "全模态参考（参考生视频）要求 content 中至少包含一个 role 为 reference_image / reference_video / reference_audio 的参考素材；图片 0-30 张、视频 0-10 段、音频 0-10 段可自由组合。文本提示词对该任务类型是可选字段。",
+    "taskTypeExclusivity": {
+      "rule": "图生视频-首帧、图生视频-首尾帧、全模态参考生视频是 3 种**互斥**场景，不可混用：first_frame / last_frame 与 reference_* 不能出现在同一个 content 里。",
+      "note": "全模态参考可通过提示词指定参考图充当首帧/尾帧；要严格保证与指定图一致时，用专门的首尾帧任务类型。",
+      "taskTypes": [
+        "first_frame_to_video",
+        "first_last_frame_to_video",
+        "omni_reference"
+      ]
+    },
+    "omniReferenceTaskType": {
+      "field": "omni_reference_task_type",
+      "values": [
+        "auto",
+        "reference",
+        "edit",
+        "extend"
+      ],
+      "default": "auto",
+      "explicitValueEffect": "显式指定时，接口在**提交任务时提前校验**该任务类型的特殊参数限制，不符合立即报错、任务不创建；auto 时由模型判定，判定冲突会异步报错 InvalidParameter.TaskTypeConstraint。"
+    },
+    "durationReturnSemantics": {
+      "formula": "查询接口返回的 duration = 实际总帧数 / 24（向下取整）",
+      "officialExample": "最终生成 133 帧 → 133 / 24 = 5.54 秒 → 返回 5",
+      "whyItMatters": "官方自己说明帧数与「时长 × 帧率」不相等，这既解释了实测到的「+1 帧」，也说明计费按实际出片帧数计是官方口径。"
+    },
+    "evidence": [
+      "official-seedance-2.5-create-task-api",
+      "official-seedance-2.5-reference-combinations"
+    ]
   },
   "pricing": {
     "currency": "CNY",
@@ -140,11 +283,46 @@
         "reason": "Provider 按出片帧数结算，而实测出片帧数 = 输出时长 × 帧率 + 1（起始帧也计费）；官方那条公式按秒计，照它预占会系统性少算一帧，与项目『不得低估预占』冲突",
         "verifiedOn": "2026-09-15",
         "verifiedSamples": [
-          { "taskId": "3614cb63-dd7b-47d6-82ee-49ffbf7bf366", "request": "4s/720p/16:9/有声", "frames": 97, "width": 1280, "height": 720, "completionTokens": 87300 },
-          { "taskId": "d4d41580-f30c-4be1-96a7-6cce265451f1", "request": "5s/720p/16:9/有声", "frames": 121, "width": 1280, "height": 720, "completionTokens": 108900 },
-          { "taskId": "994e3fb6-6d63-4a16-ac64-c96dca9ed3d2", "request": "5s/720p/16:9（参考图）", "frames": 121, "width": 1280, "height": 720, "completionTokens": 108900 },
-          { "taskId": "3bb48246-b626-4c2b-beb8-5211f1665728", "request": "6s/480p/9:16（参考图）", "frames": 145, "width": 480, "height": 854, "completionTokens": 58045 },
-          { "taskId": "f6b3732f-d314-4263-81a6-8a96e8218876", "request": "4s/480p/adaptive（首帧）", "frames": 97, "width": 528, "height": 798, "completionTokens": 39912 }
+          {
+            "taskId": "3614cb63-dd7b-47d6-82ee-49ffbf7bf366",
+            "request": "4s/720p/16:9/有声",
+            "frames": 97,
+            "width": 1280,
+            "height": 720,
+            "completionTokens": 87300
+          },
+          {
+            "taskId": "d4d41580-f30c-4be1-96a7-6cce265451f1",
+            "request": "5s/720p/16:9/有声",
+            "frames": 121,
+            "width": 1280,
+            "height": 720,
+            "completionTokens": 108900
+          },
+          {
+            "taskId": "994e3fb6-6d63-4a16-ac64-c96dca9ed3d2",
+            "request": "5s/720p/16:9（参考图）",
+            "frames": 121,
+            "width": 1280,
+            "height": 720,
+            "completionTokens": 108900
+          },
+          {
+            "taskId": "3bb48246-b626-4c2b-beb8-5211f1665728",
+            "request": "6s/480p/9:16（参考图）",
+            "frames": 145,
+            "width": 480,
+            "height": 854,
+            "completionTokens": 58045
+          },
+          {
+            "taskId": "f6b3732f-d314-4263-81a6-8a96e8218876",
+            "request": "4s/480p/adaptive（首帧）",
+            "frames": 97,
+            "width": 528,
+            "height": 798,
+            "completionTokens": 39912
+          }
         ],
         "note": "五条真实结算全部等于『(输出时长 × 帧率 + 1) 帧 × 宽 × 高 / 1024』再向下截断（最后一条是 adaptive 输出、尺寸不在合同像素表内，同样成立）；本实现向上取整，因此最多比 Provider 多留 1 token（480p 9:16 一条即 58,046 对 58,045）。30 秒边界尚未实测，最低 token 口径不随本调整变动。"
       },
@@ -155,9 +333,27 @@
         "policy": "bounded 路径按「表内最大像素 × 1.01」预留（ADAPTIVE_BOUND_MARGIN）；两次实测溢出为 0.008% 与 0.053%，1% 留足整数量级余量，代价是这几档多预留不到 0.1 元。可锁定尺寸的路径不加余量——那几档实际出片与表内尺寸逐位一致。",
         "outputRatioRule": "自适应输出画幅**跟随首帧**：两条实测首帧比例 0.6663、产物 786×1180 = 0.6661，尾帧（0.6822）不参与定画幅。",
         "evidence": [
-          { "taskId": "1614cd62-21f2-440a-a493-0d60923e3e77", "providerTaskId": "cgt-20260915195813-n7itd", "width": 786, "height": 1180, "completionTokens": 109594 },
-          { "taskId": "141babe3-906e-4b5a-998b-eaa6947d2ea6", "providerTaskId": "cgt-20260915200306-e72is", "width": 786, "height": 1180, "completionTokens": 109594 },
-          { "taskId": "f6b3732f-d314-4263-81a6-8a96e8218876", "providerTaskId": "cgt-20260915194409-mw10a", "width": 528, "height": 798, "completionTokens": 39912 }
+          {
+            "taskId": "1614cd62-21f2-440a-a493-0d60923e3e77",
+            "providerTaskId": "cgt-20260915195813-n7itd",
+            "width": 786,
+            "height": 1180,
+            "completionTokens": 109594
+          },
+          {
+            "taskId": "141babe3-906e-4b5a-998b-eaa6947d2ea6",
+            "providerTaskId": "cgt-20260915200306-e72is",
+            "width": 786,
+            "height": 1180,
+            "completionTokens": 109594
+          },
+          {
+            "taskId": "f6b3732f-d314-4263-81a6-8a96e8218876",
+            "providerTaskId": "cgt-20260915194409-mw10a",
+            "width": 528,
+            "height": 798,
+            "completionTokens": 39912
+          }
         ]
       }
     },
@@ -165,7 +361,11 @@
       "applies": true,
       "appliesWhen": "input_includes_reference_video",
       "status": "resolved",
-      "dependsOn": ["resolution", "ratio", "outputDuration"],
+      "dependsOn": [
+        "resolution",
+        "ratio",
+        "outputDuration"
+      ],
       "minimumTotalSeconds": "ceil(outputDuration * 5 / 3)",
       "rule": "billedTokens = max((inputVideoSeconds + outputDuration) * width * height * outputFrameRate / 1024, ceil(outputDuration * 5 / 3) * width * height * outputFrameRate / 1024)",
       "reference": "Official Seedance 2.5 minimum-token table or account price calculator linked from the catalog page",
@@ -224,18 +424,28 @@
                 "specVersion": "workflow-production-v2"
               },
               "parameters": {
-                "duration": 4, "ratio": "16:9", "resolution": "720p",
-                "outputFormat": "mp4", "generateAudio": true, "watermark": false
+                "duration": 4,
+                "ratio": "16:9",
+                "resolution": "720p",
+                "outputFormat": "mp4",
+                "generateAudio": true,
+                "watermark": false
               },
               "artifact": {
                 "taskId": "3614cb63-dd7b-47d6-82ee-49ffbf7bf366",
                 "providerTaskId": "cgt-20260915182806-2999s",
                 "sha256": "34a6c42f8a9ddcc203e48e2e742746d260c6c856e5a318d0c3bcb9e80d4142b0",
-                "bytes": 8409722, "width": 1280, "height": 720, "frames": 97, "durationSeconds": 4.041667
+                "bytes": 8409722,
+                "width": 1280,
+                "height": 720,
+                "frames": 97,
+                "durationSeconds": 4.041667
               },
               "billing": {
-                "reservedCny": "6.048000", "settledCny": "6.111000",
-                "completionTokens": 87300, "status": "usage_calculated"
+                "reservedCny": "6.048000",
+                "settledCny": "6.111000",
+                "completionTokens": 87300,
+                "status": "usage_calculated"
               },
               "evidenceRef": "/private/tmp/video-flow-comfy-acceptance/evidence/r8/r8-text-4s-evidence.json"
             },
@@ -249,18 +459,28 @@
                 "specVersion": "workflow-production-v2"
               },
               "parameters": {
-                "duration": 5, "ratio": "16:9", "resolution": "720p",
-                "outputFormat": "mp4", "generateAudio": true, "watermark": false
+                "duration": 5,
+                "ratio": "16:9",
+                "resolution": "720p",
+                "outputFormat": "mp4",
+                "generateAudio": true,
+                "watermark": false
               },
               "artifact": {
                 "taskId": "d4d41580-f30c-4be1-96a7-6cce265451f1",
                 "providerTaskId": "cgt-20260915183853-isazs",
                 "sha256": "65d04429683a1041ccb9922e20073b73f98652ec9a061cb581e22f1ce21a75d5",
-                "bytes": 8023991, "width": 1280, "height": 720, "frames": 121, "durationSeconds": 5.056
+                "bytes": 8023991,
+                "width": 1280,
+                "height": 720,
+                "frames": 121,
+                "durationSeconds": 5.056
               },
               "billing": {
-                "reservedCny": "7.560000", "settledCny": "7.623000",
-                "completionTokens": 108900, "status": "usage_calculated"
+                "reservedCny": "7.560000",
+                "settledCny": "7.623000",
+                "completionTokens": 108900,
+                "status": "usage_calculated"
               },
               "evidenceRef": "/private/tmp/video-flow-comfy-acceptance/evidence/r8/r8-text-5s-evidence.json"
             }
@@ -284,12 +504,30 @@
           "minimum": 4,
           "maximum": 30
         },
-        "ratios": ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16", "adaptive"],
-        "resolutions": ["480p", "720p", "1080p"],
-        "outputFormats": ["mp4", "mov"]
+        "ratios": [
+          "21:9",
+          "16:9",
+          "4:3",
+          "1:1",
+          "3:4",
+          "9:16",
+          "adaptive"
+        ],
+        "resolutions": [
+          "480p",
+          "720p",
+          "1080p"
+        ],
+        "outputFormats": [
+          "mp4",
+          "mov"
+        ]
       },
       "providerFields": {},
-      "evidence": ["official-video-generation-capability-table", "official-seedance-2.5-output-spec"]
+      "evidence": [
+        "official-video-generation-capability-table",
+        "official-seedance-2.5-output-spec"
+      ]
     },
     {
       "key": "seedance.reference-image-to-video.v1",
@@ -308,7 +546,11 @@
       },
       "media": {
         "roles": [
-          {"role": "reference_image", "minimum": 1, "maximum": 30}
+          {
+            "role": "reference_image",
+            "minimum": 1,
+            "maximum": 30
+          }
         ],
         "minimumTotal": 1,
         "maximumTotal": 30
@@ -325,12 +567,30 @@
           "minimum": 4,
           "maximum": 30
         },
-        "ratios": ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16", "adaptive"],
-        "resolutions": ["480p", "720p", "1080p"],
-        "outputFormats": ["mp4", "mov"]
+        "ratios": [
+          "21:9",
+          "16:9",
+          "4:3",
+          "1:1",
+          "3:4",
+          "9:16",
+          "adaptive"
+        ],
+        "resolutions": [
+          "480p",
+          "720p",
+          "1080p"
+        ],
+        "outputFormats": [
+          "mp4",
+          "mov"
+        ]
       },
       "providerFields": {},
-      "evidence": ["official-seedance-2.5-30-second-reference-image-example", "official-seedance-2.5-media-limits"]
+      "evidence": [
+        "official-seedance-2.5-30-second-reference-image-example",
+        "official-seedance-2.5-media-limits"
+      ]
     },
     {
       "key": "seedance.first-frame-to-video.v1",
@@ -355,18 +615,28 @@
                 "specVersion": "workflow-production-v2"
               },
               "parameters": {
-                "duration": 4, "ratio": "adaptive", "resolution": "480p",
-                "outputFormat": "mp4", "generateAudio": true, "watermark": false
+                "duration": 4,
+                "ratio": "adaptive",
+                "resolution": "480p",
+                "outputFormat": "mp4",
+                "generateAudio": true,
+                "watermark": false
               },
               "artifact": {
                 "taskId": "f6b3732f-d314-4263-81a6-8a96e8218876",
                 "providerTaskId": "cgt-20260915194409-mw10a",
                 "sha256": "e6dd50282c1603261ef95357f8c69f5bbe41d4f2933a34a18482a9140eceaef5",
-                "bytes": 2677725, "width": 528, "height": 798, "frames": 97, "durationSeconds": 4.064
+                "bytes": 2677725,
+                "width": 528,
+                "height": 798,
+                "frames": 97,
+                "durationSeconds": 4.064
               },
               "billing": {
-                "reservedCny": "2.841650", "settledCny": "2.793840",
-                "completionTokens": 39912, "status": "usage_calculated"
+                "reservedCny": "2.841650",
+                "settledCny": "2.793840",
+                "completionTokens": 39912,
+                "status": "usage_calculated"
               },
               "evidenceRef": "/private/tmp/video-flow-comfy-acceptance/evidence/r8/r8-first-frame-4s-evidence.json"
             }
@@ -375,7 +645,11 @@
       },
       "media": {
         "roles": [
-          {"role": "first_frame", "minimum": 1, "maximum": 1}
+          {
+            "role": "first_frame",
+            "minimum": 1,
+            "maximum": 1
+          }
         ],
         "minimumTotal": 1,
         "maximumTotal": 1
@@ -392,12 +666,23 @@
           "minimum": 4,
           "maximum": 30
         },
-        "ratios": ["adaptive"],
-        "resolutions": ["480p", "720p", "1080p"],
-        "outputFormats": ["mp4", "mov"]
+        "ratios": [
+          "adaptive"
+        ],
+        "resolutions": [
+          "480p",
+          "720p",
+          "1080p"
+        ],
+        "outputFormats": [
+          "mp4",
+          "mov"
+        ]
       },
       "providerFields": {},
-      "evidence": ["official-seedance-2.5-first-frame-contract"]
+      "evidence": [
+        "official-seedance-2.5-first-frame-contract"
+      ]
     },
     {
       "key": "seedance.first-last-frame-to-video.v1",
@@ -422,19 +707,29 @@
                 "specVersion": "workflow-production-v2"
               },
               "parameters": {
-                "duration": 5, "ratio": "adaptive", "resolution": "720p",
-                "outputFormat": "mp4", "generateAudio": true, "watermark": false,
+                "duration": 5,
+                "ratio": "adaptive",
+                "resolution": "720p",
+                "outputFormat": "mp4",
+                "generateAudio": true,
+                "watermark": false,
                 "media": "first_frame 611x917 + last_frame 717x1051（均为 image/webp）"
               },
               "artifact": {
                 "taskId": "1614cd62-21f2-440a-a493-0d60923e3e77",
                 "providerTaskId": "cgt-20260915195813-n7itd",
                 "sha256": "f2a6dba74fbdb66568749a81b03acfd4cef2e26a0d4c950154389e37ef8a6664",
-                "bytes": 3340842, "width": 786, "height": 1180, "frames": 121, "durationSeconds": 5.056
+                "bytes": 3340842,
+                "width": 786,
+                "height": 1180,
+                "frames": 121,
+                "durationSeconds": 5.056
               },
               "billing": {
-                "reservedCny": "7.671090", "settledCny": "7.671580",
-                "completionTokens": 109594, "status": "usage_calculated"
+                "reservedCny": "7.671090",
+                "settledCny": "7.671580",
+                "completionTokens": 109594,
+                "status": "usage_calculated"
               },
               "evidenceRef": "/private/tmp/video-flow-comfy-acceptance/evidence/r8/r8-first-last-frame-5s-run2-evidence.json"
             },
@@ -448,19 +743,29 @@
                 "specVersion": "workflow-production-v2"
               },
               "parameters": {
-                "duration": 5, "ratio": "adaptive", "resolution": "720p",
-                "outputFormat": "mp4", "generateAudio": true, "watermark": false,
+                "duration": 5,
+                "ratio": "adaptive",
+                "resolution": "720p",
+                "outputFormat": "mp4",
+                "generateAudio": true,
+                "watermark": false,
                 "media": "同上一轮（intentDigest 相同，两次独立出片）"
               },
               "artifact": {
                 "taskId": "141babe3-906e-4b5a-998b-eaa6947d2ea6",
                 "providerTaskId": "cgt-20260915200306-e72is",
                 "sha256": "79007cafa1eefe67129ca5f16a80827251c33b265cfdd4ceae2259b1f2d0c0ca",
-                "bytes": 3780959, "width": 786, "height": 1180, "frames": 121, "durationSeconds": 5.056
+                "bytes": 3780959,
+                "width": 786,
+                "height": 1180,
+                "frames": 121,
+                "durationSeconds": 5.056
               },
               "billing": {
-                "reservedCny": "7.671090", "settledCny": "7.671580",
-                "completionTokens": 109594, "status": "usage_calculated"
+                "reservedCny": "7.671090",
+                "settledCny": "7.671580",
+                "completionTokens": 109594,
+                "status": "usage_calculated"
               },
               "evidenceRef": "/private/tmp/video-flow-comfy-acceptance/evidence/r8/r8-first-last-frame-5s-run1-evidence.json"
             }
@@ -469,12 +774,23 @@
       },
       "media": {
         "roles": [
-          {"role": "first_frame", "minimum": 1, "maximum": 1},
-          {"role": "last_frame", "minimum": 1, "maximum": 1}
+          {
+            "role": "first_frame",
+            "minimum": 1,
+            "maximum": 1
+          },
+          {
+            "role": "last_frame",
+            "minimum": 1,
+            "maximum": 1
+          }
         ],
         "minimumTotal": 2,
         "maximumTotal": 2,
-        "orderedRoles": ["first_frame", "last_frame"]
+        "orderedRoles": [
+          "first_frame",
+          "last_frame"
+        ]
       },
       "generation": {
         "providerDuration": {
@@ -488,12 +804,23 @@
           "minimum": 4,
           "maximum": 30
         },
-        "ratios": ["adaptive"],
-        "resolutions": ["480p", "720p", "1080p"],
-        "outputFormats": ["mp4", "mov"]
+        "ratios": [
+          "adaptive"
+        ],
+        "resolutions": [
+          "480p",
+          "720p",
+          "1080p"
+        ],
+        "outputFormats": [
+          "mp4",
+          "mov"
+        ]
       },
       "providerFields": {},
-      "evidence": ["official-seedance-2.5-first-last-frame-example"]
+      "evidence": [
+        "official-seedance-2.5-first-last-frame-example"
+      ]
     },
     {
       "key": "seedance.omni-reference.v1",
@@ -512,9 +839,21 @@
       },
       "media": {
         "roles": [
-          {"role": "reference_audio", "minimum": 0, "maximum": 10},
-          {"role": "reference_image", "minimum": 0, "maximum": 30},
-          {"role": "reference_video", "minimum": 0, "maximum": 10}
+          {
+            "role": "reference_audio",
+            "minimum": 0,
+            "maximum": 10
+          },
+          {
+            "role": "reference_image",
+            "minimum": 0,
+            "maximum": 30
+          },
+          {
+            "role": "reference_video",
+            "minimum": 0,
+            "maximum": 10
+          }
         ],
         "minimumTotal": 1,
         "maximumTotal": 50
@@ -531,14 +870,32 @@
           "minimum": 4,
           "maximum": 30
         },
-        "ratios": ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16", "adaptive"],
-        "resolutions": ["480p", "720p", "1080p"],
-        "outputFormats": ["mp4", "mov"]
+        "ratios": [
+          "21:9",
+          "16:9",
+          "4:3",
+          "1:1",
+          "3:4",
+          "9:16",
+          "adaptive"
+        ],
+        "resolutions": [
+          "480p",
+          "720p",
+          "1080p"
+        ],
+        "outputFormats": [
+          "mp4",
+          "mov"
+        ]
       },
       "providerFields": {
         "omni_reference_task_type": "reference"
       },
-      "evidence": ["official-seedance-2.5-omni-reference-example", "official-seedance-2.5-media-limits"]
+      "evidence": [
+        "official-seedance-2.5-omni-reference-example",
+        "official-seedance-2.5-media-limits"
+      ]
     },
     {
       "key": "seedance.video-edit.v1",
@@ -557,9 +914,22 @@
       },
       "media": {
         "roles": [
-          {"role": "reference_audio", "minimum": 0, "maximum": 10},
-          {"role": "reference_image", "minimum": 0, "maximum": 30},
-          {"role": "reference_video", "minimum": 1, "maximum": 10, "minimumDurationSeconds": 4}
+          {
+            "role": "reference_audio",
+            "minimum": 0,
+            "maximum": 10
+          },
+          {
+            "role": "reference_image",
+            "minimum": 0,
+            "maximum": 30
+          },
+          {
+            "role": "reference_video",
+            "minimum": 1,
+            "maximum": 10,
+            "minimumDurationSeconds": 4
+          }
         ],
         "minimumTotal": 1,
         "maximumTotal": 50
@@ -574,15 +944,27 @@
           "kind": "fixed",
           "value": -1
         },
-        "ratios": ["adaptive"],
-        "resolutions": ["480p", "720p", "1080p"],
-        "outputFormats": ["mp4", "mov"],
+        "ratios": [
+          "adaptive"
+        ],
+        "resolutions": [
+          "480p",
+          "720p",
+          "1080p"
+        ],
+        "outputFormats": [
+          "mp4",
+          "mov"
+        ],
         "recommendedOutputFormat": "mov"
       },
       "providerFields": {
         "omni_reference_task_type": "edit"
       },
-      "evidence": ["official-seedance-2.5-video-edit-example", "official-seedance-2.5-task-type-constraints"]
+      "evidence": [
+        "official-seedance-2.5-video-edit-example",
+        "official-seedance-2.5-task-type-constraints"
+      ]
     },
     {
       "key": "seedance.video-extend.v1",
@@ -601,9 +983,21 @@
       },
       "media": {
         "roles": [
-          {"role": "reference_audio", "minimum": 0, "maximum": 10},
-          {"role": "reference_image", "minimum": 0, "maximum": 30},
-          {"role": "reference_video", "minimum": 1, "maximum": 10}
+          {
+            "role": "reference_audio",
+            "minimum": 0,
+            "maximum": 10
+          },
+          {
+            "role": "reference_image",
+            "minimum": 0,
+            "maximum": 30
+          },
+          {
+            "role": "reference_video",
+            "minimum": 1,
+            "maximum": 10
+          }
         ],
         "minimumTotal": 1,
         "maximumTotal": 50
@@ -620,15 +1014,27 @@
           "minimum": 4,
           "maximum": 30
         },
-        "ratios": ["adaptive"],
-        "resolutions": ["480p", "720p", "1080p"],
-        "outputFormats": ["mp4", "mov"],
+        "ratios": [
+          "adaptive"
+        ],
+        "resolutions": [
+          "480p",
+          "720p",
+          "1080p"
+        ],
+        "outputFormats": [
+          "mp4",
+          "mov"
+        ],
         "recommendedOutputFormat": "mov"
       },
       "providerFields": {
         "omni_reference_task_type": "extend"
       },
-      "evidence": ["official-seedance-2.5-video-extend-example", "official-seedance-2.5-task-type-constraints"]
+      "evidence": [
+        "official-seedance-2.5-video-extend-example",
+        "official-seedance-2.5-task-type-constraints"
+      ]
     },
     {
       "key": "seedance.audio-reference-to-video.v1",
@@ -647,7 +1053,11 @@
       },
       "media": {
         "roles": [
-          {"role": "reference_audio", "minimum": 1, "maximum": 10}
+          {
+            "role": "reference_audio",
+            "minimum": 1,
+            "maximum": 10
+          }
         ],
         "minimumTotal": 1,
         "maximumTotal": 10
@@ -664,14 +1074,32 @@
           "minimum": 4,
           "maximum": 30
         },
-        "ratios": ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16", "adaptive"],
-        "resolutions": ["480p", "720p", "1080p"],
-        "outputFormats": ["mp4", "mov"]
+        "ratios": [
+          "21:9",
+          "16:9",
+          "4:3",
+          "1:1",
+          "3:4",
+          "9:16",
+          "adaptive"
+        ],
+        "resolutions": [
+          "480p",
+          "720p",
+          "1080p"
+        ],
+        "outputFormats": [
+          "mp4",
+          "mov"
+        ]
       },
       "providerFields": {
         "omni_reference_task_type": "reference"
       },
-      "evidence": ["official-seedance-2.5-audio-only-capability", "official-seedance-2.5-media-limits"]
+      "evidence": [
+        "official-seedance-2.5-audio-only-capability",
+        "official-seedance-2.5-media-limits"
+      ]
     }
   ],
   "evidence": {
@@ -729,6 +1157,20 @@
       "url": "https://docs.volcengine.com/docs/82379/2607688?lang=zh",
       "localSnapshot": "docs/arkdocs/Doubao Seedance 2.5 教程.md",
       "locator": "输入素材要求"
+    },
+    "official-seedance-2.5-create-task-api": {
+      "url": "https://docs.volcengine.com/docs/82379/1520757?lang=zh",
+      "localSnapshot": "docs/arkdocs/视频生成教程.md",
+      "locator": "请求参数 / Body 参数 / content 与各素材要求、role 取值、omni_reference_task_type、duration 返回值说明",
+      "verifiedOn": "2026-09-16",
+      "verification": "read_the_official_api_page_directly_in_local_browser"
+    },
+    "official-seedance-2.5-reference-combinations": {
+      "url": "https://docs.volcengine.com/docs/82379/2607688?lang=zh",
+      "localSnapshot": "docs/arkdocs/Doubao Seedance 2.5 教程.md",
+      "locator": "任务类型与判定条件（全模态生视频任务行）、50 个全模态参考素材输入",
+      "verifiedOn": "2026-09-16",
+      "verification": "read_the_official_page_directly"
     }
   }
 }

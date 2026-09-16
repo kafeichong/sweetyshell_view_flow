@@ -68,7 +68,7 @@
 | [architecture/seedance-integration-baseline.md](./architecture/seedance-integration-baseline.md) | 冻结的系统边界、稳定领域模型（Task / ExecutionAttempt / Asset / ActorCredential）、API 兼容规则、执行与计费规则、迁移与回滚原则 |
 | [architecture/adr/0001-production-execution-slot.md](./architecture/adr/0001-production-execution-slot.md) | Production 模式、执行槽、顺序生成、Task / Attempt 语义和本地交付完成边界的架构决策 |
 | [architecture/video-workflow-interface-research-2026-09-14.md](./architecture/video-workflow-interface-research-2026-09-14.md) | 视频工作流、统一任务接口与媒体角色调研；记录待决策的 Workflow Registry 方向，不描述当前生产能力 |
-| [architecture/seedance-2-5-contract-evidence.md](./architecture/seedance-2-5-contract-evidence.md) | 2026-09-14 分阶段取证记录；最新 R0 合同证据看当日快照，不描述当前生产能力 |
+| [architecture/seedance-2-5-contract-evidence.md](./architecture/seedance-2-5-contract-evidence.md) | **查 Provider 接口规则先看这里**：素材限制、content 组合、三类任务互斥、`duration` 返回值语义，以及查证路径（合同 → `docs/arkdocs/` 快照 → 官网需用本机浏览器）；含 2026-09-14 分阶段取证记录，不描述当前生产能力 |
 | [architecture/seedance-2-5-official-pdf-digest-2026-09-14.md](./architecture/seedance-2-5-official-pdf-digest-2026-09-14.md) | Steven 下载的火山方舟官网 PDF 整理：字段、媒体限制、查询/取消合同与提示词落地规则；不描述当前生产能力 |
 
 ### 运行手册（Runbooks）

@@ -154,6 +154,20 @@ test('only the workflows declared for controlled acceptance are open', async () 
   assert.deepEqual(open, [...DECLARED_OPEN_WORKFLOWS].sort());
 });
 
+test('content rules keep their official evidence pointers', async () => {
+  const contract = await loadContract();
+  const rules = contract.contentRules;
+
+  // 这几条规则是客户端给用户看的提示、以及"至少一个参考素材"校验的依据，
+  // 因此每条都必须指向官方来源——没有出处的规则不许留在合同里。
+  assert.ok(rules.combinations.length >= 8);
+  assert.equal(rules.minimumReferenceMaterials, 1);
+  for (const evidenceId of rules.evidence) {
+    assert.ok(contract.evidence[evidenceId], `contentRules references unknown evidence ${evidenceId}`);
+    assert.match(contract.evidence[evidenceId].url, /^https:\/\/docs\.volcengine\.com\//);
+  }
+});
+
 test('v2 pricing contract distinguishes an estimate, reservation blocker, and final usage', async () => {
   const contract = await loadContract();
   const pricing = contract.pricing;
