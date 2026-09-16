@@ -19,10 +19,14 @@ const RESULT_KEY = "video_flow_video";
 const WIDGET_NAME = "result_video";
 // 预览框高度。固定值 + `object-fit: contain`，横竖屏都在框内按比例居中，永远不会撑破节点。
 const PREVIEW_HEIGHT = 260;
+const TAG = "[video.flow]";
 
 // 发起运行的那个图。`execution_start` 是点运行那一刻发出的，此时活动标签就是"要跑的那个"，
 // 之后用户随便切都影响不到它。
 let runningGraph = null;
+// 所有建出来过的预览节点。`runningGraph` 兜不住时（例如用户在任务跑完之前刷新过页面，
+// 就收不到这次的 `execution_start`）用它，比按 id 去"当前标签"里瞎找安全得多。
+const knownNodes = new Set();
 
 function videoUrl(item) {
   const params = new URLSearchParams({
@@ -56,8 +60,23 @@ function playerWidget(node) {
   return widget;
 }
 
+/** 找结果该挂到哪个节点：先认"发起运行的那个图"，再退回"唯一一个同 id 的预览节点"。 */
+function locate(rawId) {
+  if (runningGraph) {
+    const node = runningGraph.getNodeById?.(rawId);
+    if (node?.comfyClass === NODE_CLASS) return node;
+  }
+  const candidates = [...knownNodes].filter((node) => String(node.id) === String(rawId));
+  if (candidates.length === 1) return candidates[0];
+  console.warn(`${TAG} 收到成片但定位不到节点 id=${rawId}（当前标签上那个图里没有，已知预览节点 ${knownNodes.size} 个、同 id ${candidates.length} 个）`);
+  return null;
+}
+
 app.registerExtension({
   name: "video.flow.result.preview",
+  nodeCreated(node) {
+    if (node.comfyClass === NODE_CLASS) knownNodes.add(node);
+  },
   setup() {
     api.addEventListener("execution_start", () => {
       runningGraph = app.graph ?? runningGraph;
@@ -66,20 +85,18 @@ app.registerExtension({
     api.addEventListener("executed", ({ detail } = {}) => {
       const items = detail?.output?.[RESULT_KEY];
       if (!Array.isArray(items) || !items.length) return;
-
       const rawId = detail?.display_node ?? detail?.node;
-      // 用记下来的图，**不是** app.graph / app.rootGraph：那是"当前打开"的标签。
-      const target = (runningGraph ?? app.graph)?.getNodeById?.(rawId);
-      if (!target || target.comfyClass !== NODE_CLASS) return;
+      const target = locate(rawId);
+      if (!target) return;
 
       const widget = playerWidget(target);
-      const video = widget.videoEl;
       // 只定**节点**的尺寸：节点撑到至少 360 宽、外加一条 PREVIEW_HEIGHT 的预览框。
       const width = Math.max(target.size?.[0] ?? 0, 360);
       widget.computeSize = () => [width, PREVIEW_HEIGHT];
-      video.src = videoUrl(items[0]);
+      widget.videoEl.src = videoUrl(items[0]);
       target.setSize([width, target.computeSize()[1]]);
       target.setDirtyCanvas?.(true, true);
+      console.info(`${TAG} 成片已挂到「${target.title || target.type}」(#${target.id})`);
     });
   },
 });

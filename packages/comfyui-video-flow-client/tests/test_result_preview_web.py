@@ -22,7 +22,7 @@ def test_result_preview_locates_the_node_in_the_graph_that_ran():
     assert "runningGraph" in code, "要记下发起运行的那个图，不能每次现取当前标签"
     assert "execution_start" in code, "运行开始时要记下当时的图"
     assert "executed" in code, "要自己接 executed 事件，不能等前端的 onExecuted"
-    # `app.graph` 只在没有 runningGraph 时兜底，且必须同时有 runningGraph——单独用它就是那个 bug。
-    assert "runningGraph ?? app.graph" in code or "runningGraph || app.graph" in code, (
-        'app.graph 只能作为 runningGraph 缺失时的兜底'
-    )
+    # 兜底不能退回"当前标签的图"：`app.graph` 在定位节点的那段代码里一次都不该出现。
+    locate = code.split("function locate")[1].split("app.registerExtension")[0]
+    assert "app.graph" not in locate, '定位节点时不能用 app.graph——那正是"挂错工作流"的成因'
+    assert "knownNodes" in locate, "runningGraph 兜不住时（如运行中途刷新过页面）要用已知节点兜底"
