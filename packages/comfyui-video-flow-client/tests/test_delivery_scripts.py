@@ -173,6 +173,30 @@ def test_one_click_installer_installs_into_a_comfy_desktop_instance(tmp_path):
     assert (root / "custom_nodes/video_flow_client/client.py").is_file()
 
 
+def test_diagnostics_script_reports_layout_without_leaking_the_token(tmp_path):
+    home = tmp_path / "home"
+    (home / ".video-flow").mkdir(parents=True)
+    (home / ".video-flow/token").write_text("vf_super_secret_token\n", encoding="utf-8")
+    root = _fake_comfy_root(tmp_path / "desktop-install")
+    _write_desktop_manifest(home, root.parent)
+
+    completed = subprocess.run(
+        [str(CLIENT_DIR / "诊断.command")], check=True, text=True, capture_output=True,
+        env={
+            **os.environ,
+            "HOME": str(home),
+            "VIDEO_FLOW_COMFYUI_CANDIDATES": str(tmp_path / "not-here"),
+        },
+    )
+
+    # 报出找到的根与是否已安装，方便远端判断布局……
+    assert str(root) in completed.stdout
+    assert "未安装" in completed.stdout
+    assert "~/.video-flow/token 存在" in completed.stdout
+    # ……但绝不能把凭证内容带进要发给管理员的文本里。
+    assert "vf_super_secret_token" not in completed.stdout
+
+
 def test_installer_never_touches_other_custom_nodes(tmp_path):
     comfy_root = tmp_path / "ComfyUI"
     python_path = comfy_root / ".venv/bin/python"
