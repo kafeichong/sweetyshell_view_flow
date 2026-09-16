@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { AssetPresignService } from '../assets/asset-presign.service';
+import { MEDIA_INSPECTOR_VERSION } from '../assets/media-inspector-version';
 import { PrismaService } from '../prisma.service';
 import { PreflightRecordError, PreflightService } from './preflight.service';
 import { isExecutionSlotLocked, TaskBudgetService } from './task-budget.service';
@@ -14,8 +15,13 @@ export type ProductionSubmission = {
 };
 
 export class ProductionSubmissionError extends Error {
-  constructor(public readonly code: string, public readonly path = 'submission') {
-    super(code);
+  /**
+   * `message` 不传时等于 `code`。只有"用户知道码也没用、必须知道下一步做什么"的错误才传它：
+   * 控制器会把 `message` 原样交给客户端，而一个光秃秃的码正是 2026-09-16 那次"三处错误信息
+   * 丢原因"的由来。
+   */
+  constructor(public readonly code: string, public readonly path = 'submission', message?: string) {
+    super(message ?? code);
     this.name = 'ProductionSubmissionError';
   }
 }
@@ -30,6 +36,7 @@ type AssetRow = {
   sizeBytes: bigint | null;
   mimeType: string | null;
   mediaMetadata: unknown;
+  inspectorVersion: string | null;
 };
 
 type AssetStore = {
@@ -220,6 +227,19 @@ export class ProductionSubmissionService {
         where: { id: assetId, ownerId: actorId, role: 'input', inspectionStatus: 'verified' },
       });
       if (!asset) throw new ProductionSubmissionError('SUBMISSION_ASSET_NOT_VERIFIED', `media.${descriptor.slotId}`);
+      // 资产是内容寻址复用的：同一个文件第二次上传直接复用旧行、不会再检查一次。所以检查器
+      // 升级后，库里旧资产的 media_metadata 仍是按**旧口径**算的，下面按摘要逐字段比对必然
+      // 对不上——而用户只会看到一个说不出原因的 PREFLIGHT_ACTUAL_CONTENT_MISMATCH（2026-09-16
+      // 真实踩到，当时是手工逐行修的库）。版本对不上就先说清是哪一份、该跑什么命令。
+      if (asset.inspectorVersion !== MEDIA_INSPECTOR_VERSION) {
+        throw new ProductionSubmissionError(
+          'ASSET_INSPECTION_STALE',
+          `media.${descriptor.slotId}`,
+          `素材 ${asset.id} 的媒体信息是按旧版检查器算的（记录了 ${asset.inspectorVersion ?? '未记录'}，当前是 `
+          + `${MEDIA_INSPECTOR_VERSION}），与本次提交的口径对不上。这是资产复用机制造成的，素材本身没问题：`
+          + `需要平台维护者跑一次资产重检（npm run assets:reinspect -- --apply）之后再提交。`,
+        );
+      }
       const matches = asset.fileHash === descriptor.sha256
         && asset.sizeBytes !== null && Number(asset.sizeBytes) === descriptor.sizeBytes
         && asset.mimeType?.toLowerCase() === descriptor.mimeType
