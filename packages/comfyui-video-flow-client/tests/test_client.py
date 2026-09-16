@@ -865,3 +865,30 @@ def test_wait_reports_delivery_failed_after_archiving():
     # 生成成功但归档失败：不能当成功，也不能让用户以为是 Provider 失败。
     assert error.value.error_code == "upload:ARTIFACT_UPLOAD_FAILED"
     assert error.value.task_id == "task-1"
+
+
+def test_provider_failure_surfaces_the_reason_and_says_whether_retrying_helps():
+    """Provider 的失败原因藏在 attempt 上，客户端不能只报一句"provider reported a failure"。
+
+    真事：一段被判为"可能含真人"的视频，task.errorMsg 是空的、细节在 attempt.failureMessage 里，
+    客户端于是只报"provider reported a failure"——用户既不知道原因，也不知道重试有没有用。
+    """
+    summary = {
+        "delivery": {"status": "not_started"},
+        "taskStatus": "failed",
+        "errorMsg": None,
+        "executionAttempts": [{
+            "failureCode": "UNRETRYABLE_FAILURE",
+            "failureMessage": 'Invalid request: {"error":{"code":"InputVideoSensitiveContentDetected.PrivacyInformation",'
+                              '"message":"the input video may contain real person"}}',
+        }],
+    }
+
+    with pytest.raises(TaskProviderFailed) as error:
+        _wait_client(lambda _request: httpx.Response(200, json=summary)).wait_for_task("task-1", poll_seconds=0)
+
+    message = str(error.value)
+    assert error.value.task_id == "task-1"
+    assert "真人" in message and "重试同一段不会成功" in message       # 可操作的那句
+    assert "InputVideoSensitiveContentDetected" in message            # 平台原始原因
+    assert "UNRETRYABLE_FAILURE" in message                            # 失败码

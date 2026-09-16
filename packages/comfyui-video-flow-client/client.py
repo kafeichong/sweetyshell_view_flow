@@ -55,6 +55,38 @@ class TaskRequiresReview(TaskWaitError):
         super().__init__(task_id, "REQUIRES_REVIEW", message)
 
 
+# 平台侧拒绝的原因码 → 可操作的中文说明。识别不出来也要把原文带出来（里面有 request id），
+# 不猜、不吞。命中这里的两条都是**不可重试**的：同一份素材再提交多少次都一样。
+PROVIDER_FAILURE_HINTS = {
+    "InputVideoSensitiveContentDetected": (
+        "输入视频被平台判定可能含真人：官方不支持直接上传含真人人脸的参考图/视频。"
+        "换一段不含真人的素材再试——重试同一段不会成功。"
+    ),
+    "InputImageSensitiveContentDetected": (
+        "输入图片被平台判定可能含真人：官方不支持直接上传含真人人脸的参考图/视频。"
+        "换一张不含真人的素材再试——重试同一张不会成功。"
+    ),
+}
+
+
+def provider_failure_message(summary: dict[str, Any]) -> str:
+    """把 Provider 的失败原因拼成用户看得懂、能照着做的一句话。
+
+    细节在 attempt 上（`failureCode` / `failureMessage`），而 `task.errorMsg` 可能是空的：
+    只读 errorMsg 会退化成"provider reported a failure"——用户既不知道原因，也不知道该不该重试。
+    """
+    attempt = (summary.get("executionAttempts") or [{}])[0]
+    detail = str(summary.get("errorMsg") or attempt.get("failureMessage") or "")
+    code = attempt.get("failureCode")
+    hint = next((text for key, text in PROVIDER_FAILURE_HINTS.items() if key in detail), "")
+    parts = [hint]
+    if code:
+        parts.append(f"失败码 {code}。")
+    if detail:
+        parts.append(f"平台原始信息：{detail[:400]}")
+    return "".join(parts) or "provider reported a failure"
+
+
 class TaskProviderFailed(TaskWaitError):
     def __init__(self, task_id: str, message: str):
         super().__init__(task_id, "PROVIDER_FAILED", message)
@@ -344,10 +376,7 @@ class VideoFlowClient:
             )
 
         if task_status == "failed":
-            raise TaskProviderFailed(
-                task_id,
-                str(summary.get("errorMsg") or "provider reported a failure"),
-            )
+            raise TaskProviderFailed(task_id, provider_failure_message(summary))
 
         return None
 
