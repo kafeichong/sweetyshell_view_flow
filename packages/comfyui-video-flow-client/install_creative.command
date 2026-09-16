@@ -22,27 +22,23 @@ is_comfyui_root() {
   test -x "$1/.venv/bin/python" && test -d "$1/custom_nodes"
 }
 
-choose_comfyui_root() {
-  local candidate
-  for candidate in "$HOME/ComfyUI" "$HOME/Documents/ComfyUI" "/Volumes/lvmac/ai/ComfyUI/ComfyUI"; do
-    if is_comfyui_root "$candidate"; then
-      printf '%s\n' "$candidate"
-      return
-    fi
-  done
-  osascript -e 'POSIX path of (choose folder with prompt "请选择 ComfyUI 根目录")'
-}
+# 目录探测抽到 find_comfyui_root.sh：常见位置 + Comfy Desktop 的 installations.json。
+# （测试用 VIDEO_FLOW_COMFYUI_CANDIDATES 覆盖候选路径，避免命中开发机上的真实安装。）
+FIND_ROOT="$SOURCE_DIR/find_comfyui_root.sh"
 
 if test -z "$COMFYUI_ROOT"; then
-  if test "${VIDEO_FLOW_NONINTERACTIVE:-}" = "1"; then
-    echo "error: noninteractive mode requires VIDEO_FLOW_COMFYUI_ROOT" >&2
+  if COMFYUI_ROOT="$("$FIND_ROOT")"; then
+    :
+  elif test "${VIDEO_FLOW_NONINTERACTIVE:-}" = "1"; then
+    echo "error: 自动找不到 ComfyUI 目录；非交互模式请显式设置 VIDEO_FLOW_COMFYUI_ROOT" >&2
     exit 2
+  else
+    command -v osascript >/dev/null || {
+      echo "error: 此安装器仅支持 macOS 图形界面；请设置 VIDEO_FLOW_COMFYUI_ROOT" >&2
+      exit 2
+    }
+    COMFYUI_ROOT="$(osascript -e 'POSIX path of (choose folder with prompt "请选择 ComfyUI 根目录：里面应当有一个 custom_nodes 文件夹（Comfy Desktop 用户可在 设置 → 打开安装目录 查看）")')"
   fi
-  command -v osascript >/dev/null || {
-    echo "error: 此安装器仅支持 macOS 图形界面；请设置 VIDEO_FLOW_COMFYUI_ROOT" >&2
-    exit 2
-  }
-  COMFYUI_ROOT="$(choose_comfyui_root)"
 fi
 
 COMFYUI_ROOT="${COMFYUI_ROOT%/}"
