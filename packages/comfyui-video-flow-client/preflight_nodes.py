@@ -139,7 +139,8 @@ class ProductInput:
         import folder_paths
         root = Path(folder_paths.get_input_directory())
         images = sorted(str(p.relative_to(root)) for p in root.rglob('*') if p.is_file() and p.suffix.lower() in ('.png', '.jpg', '.jpeg', '.webp'))
-        return {"required": {"image": (images or ["请选择产品图"], {"image_upload": True})}}
+        # 占位符放第一位且始终保留：见 _file_choices 的说明（模板里存的值必须永远有效）。
+        return {"required": {"image": (["请选择产品图"] + images, {"image_upload": True})}}
     RETURN_TYPES = ("VIDEO_FLOW_LOCAL_MEDIA",)
     RETURN_NAMES = ("media",)
     FUNCTION = "inspect"
@@ -211,9 +212,16 @@ def _image_choices():
 
 
 def _file_choices(suffixes, empty_label):
+    """固定数量素材的下拉：**占位符始终在列表里，且放第一位**。
+
+    放第一位是为了"没选就不算选"；始终保留是为了模板里存的那个占位符值永远有效——
+    否则用户一旦往 input 目录里放了文件，模板中保存的"请选择图片"就不在选项里，
+    导入时会被前端判成"输入值不可用"（踩过）。
+    """
     import folder_paths
     root = Path(folder_paths.get_input_directory())
-    return sorted(str(p.relative_to(root)) for p in root.rglob('*') if p.is_file() and p.suffix.lower() in suffixes) or [empty_label]
+    files = sorted(str(p.relative_to(root)) for p in root.rglob('*') if p.is_file() and p.suffix.lower() in suffixes)
+    return [empty_label] + files
 
 
 UNUSED_MEDIA_CHOICE = "（不给素材）"
