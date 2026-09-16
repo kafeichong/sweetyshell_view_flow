@@ -20,6 +20,10 @@ venv/
 
 # Docker
 .docker/
+# 本地 compose 覆盖层。`docker compose` 会**自动加载**它，所以提交上去会被 pull 到生产，
+# 把本该只在本机生效的东西（如 postgres 的 127.0.0.1:5433 端口映射）一并带过去。
+docker-compose.override.yml
+docker-compose.override.yaml
 
 # IDE
 .vscode/
