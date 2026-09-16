@@ -76,5 +76,6 @@ fi
 "$SOURCE_DIR/install.sh" "$COMFYUI_ROOT" "$TOKEN_SOURCE"
 
 if test "${VIDEO_FLOW_NONINTERACTIVE:-}" != "1"; then
-  osascript -e 'display dialog "Video Flow 已安装完成。请完全退出并重新启动 ComfyUI，然后搜索 Video Flow 并导入图生视频模板。" buttons {"完成"} default button "完成"'
+  CLIENT_VERSION="$(sed -n 's/^CLIENT_VERSION = "\(.*\)"/\1/p' "$SOURCE_DIR/__init__.py" | head -1)"
+  osascript -e "display dialog \"Video Flow 已安装完成（版本 ${CLIENT_VERSION:-未知}）。请完全退出并重新启动 ComfyUI，然后搜索 Video Flow 并导入模板。\" buttons {\"完成\"} default button \"完成\""
 fi

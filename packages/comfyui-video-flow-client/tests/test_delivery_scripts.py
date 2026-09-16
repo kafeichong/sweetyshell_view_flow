@@ -1,4 +1,5 @@
 import os
+import re
 import stat
 import subprocess
 from pathlib import Path
@@ -55,6 +56,38 @@ def test_installer_copies_client_and_protects_token(tmp_path):
     installed_token = home / ".video-flow/token"
     assert installed_token.read_text(encoding="utf-8").strip() == "vf_test_token"
     assert stat.S_IMODE(installed_token.stat().st_mode) == 0o600
+
+
+def test_client_version_is_declared_and_reported_by_the_installer(tmp_path):
+    """交付版本必须存在、格式可解析，并由安装器打印出来。
+
+    排查"同事装的是哪一版"全靠它；安装脚本用 sed 解析 `__init__.py` 里那一行，
+    所以格式变了会静默变成"未知"，这里钉住。
+    """
+    source = (CLIENT_DIR / "__init__.py").read_text(encoding="utf-8")
+    match = re.search(r'^CLIENT_VERSION = "(\d{4}-\d{2}-\d{2}\.\d+)"$', source, flags=re.MULTILINE)
+    assert match, "CLIENT_VERSION 必须形如 2026-09-16.1，且独占一行"
+    version = match.group(1)
+
+    comfy_root = tmp_path / "ComfyUI"
+    python_path = comfy_root / ".venv/bin/python"
+    python_path.parent.mkdir(parents=True)
+    _write_executable(python_path, "#!/bin/sh\nexit 0\n")
+    (comfy_root / "custom_nodes").mkdir()
+    token_source = tmp_path / "actor-token"
+    token_source.write_text("vf_test_token\n", encoding="utf-8")
+    home = tmp_path / "home"
+    home.mkdir()
+
+    completed = subprocess.run(
+        [str(CLIENT_DIR / "install.sh"), str(comfy_root), str(token_source)],
+        check=True,
+        env={**os.environ, "HOME": str(home)},
+        text=True,
+        capture_output=True,
+    )
+
+    assert version in completed.stdout
 
 
 def test_installer_never_touches_other_custom_nodes(tmp_path):
