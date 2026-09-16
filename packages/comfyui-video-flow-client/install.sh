@@ -78,8 +78,9 @@ echo "版本: ${CLIENT_VERSION:-未知}（排查问题时请提供这一版号�
 
 # ffprobe 是本地素材检查的硬依赖（要读视频/音频的时长、帧率、编码）。缺了不会在安装时报错，
 # 而是**跑到一半**才报 FFPROBE_NOT_AVAILABLE——那时候参数都填完了，白折腾（同事机上真实踩到）。
-# 所以在这里就说清楚。搜索顺序与 media_inspection.py 的 FFPROBE_CANDIDATES 保持一致：
-# Comfy Desktop 从 GUI 启动，进程 PATH 不含 /opt/homebrew/bin，只看 command -v 会误判。
+# 包里带了各架构的 ffprobe（`ffprobe/`），这里直接装上：**不让同事去下载，也不用敲命令**。
+# 搜索顺序与 media_inspection.py 的 FFPROBE_CANDIDATES 保持一致——不能只看 `command -v`：
+# Comfy Desktop 从 GUI 启动，进程 PATH 不含 /opt/homebrew/bin，那样会在"明明装了"的机器上误报。
 FFPROBE_FOUND=""
 command -v ffprobe >/dev/null 2>&1 && FFPROBE_FOUND="$(command -v ffprobe)"
 for candidate in /opt/homebrew/bin/ffprobe /usr/local/bin/ffprobe /opt/local/bin/ffprobe /usr/bin/ffprobe "$HOME/.video-flow/ffprobe"; do
@@ -88,17 +89,15 @@ done
 
 if test -n "$FFPROBE_FOUND"; then
   echo "ffprobe: $FFPROBE_FOUND"
+elif test -x "$SOURCE_DIR/install_ffprobe.sh" && "$SOURCE_DIR/install_ffprobe.sh"; then
+  :  # 随包那份装好了，install_ffprobe.sh 自己打印了结果
 else
   echo
-  echo "⚠️  没找到 ffprobe —— 视频/音频素材检查要用它，现在不装的话，跑工作流时会报"
+  echo "⚠️  没找到 ffprobe，随包那份也没装上。视频/音频素材检查要用它，跑工作流时会报"
   echo "    FFPROBE_NOT_AVAILABLE（预检之前就停住，不会产生费用）。补上它，任选一种："
   echo
   echo "    ① 装了 Homebrew（终端里跑）：      brew install ffmpeg"
-  echo "    ② 没装 Homebrew：**双击同目录的「装ffprobe.command」**，它会按你的芯片架构自动"
-  echo "       下载、装到 ~/.video-flow/ffprobe、去掉 macOS 的隔离标记，并当场验证。不用敲命令。"
-  echo
-  echo "    （② 那个位置客户端会自己去找，不用配环境变量——Comfy Desktop 从 GUI 启动，"
-  echo "      改了 .zshrc 里的 PATH 也传不进来。）"
+  echo "    ② 没装 Homebrew：**双击同目录的「装ffprobe.command」**，它会按芯片架构自动装好。"
   echo
   echo "    装完**重启 ComfyUI**。拿不准就双击同目录的「诊断.command」，把输出发给管理员。"
 fi
