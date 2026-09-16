@@ -159,6 +159,8 @@ model Asset {
   fileHash         String?           @map("file_hash")
   inspectionStatus String?           @map("inspection_status")
   mediaMetadata   Json?             @map("media_metadata")
+  // 这份 media_metadata 是哪一版检查器算的；复用旧资产时用它判断要不要重检。
+  inspectorVersion String?          @map("inspector_version")
   createdAt        DateTime          @default(now()) @map("created_at")
 
   @@unique([ownerId, role, fileHash])

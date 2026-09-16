@@ -6,7 +6,7 @@ import { ApiCredentialGuard } from '../../auth/api-credential.guard';
 import { CurrentActor } from '../../auth/current-actor.decorator';
 import { AssetsService } from '../../assets/assets.service';
 import { AssetPresignService } from '../../assets/asset-presign.service';
-import { MediaInspectorService } from '../../assets/media-inspector.service';
+import { MEDIA_INSPECTOR_VERSION, MediaInspectorService } from '../../assets/media-inspector.service';
 import {
   SEEDANCE_INPUT_MEDIA_POLICIES,
   seedanceMediaSizeAllowed,
@@ -225,6 +225,7 @@ export class V1AssetsController {
       sizeBytes: actual.sizeBytes,
       mimeType: actual.mimeType,
       mediaMetadata,
+      inspectorVersion: MEDIA_INSPECTOR_VERSION,
       inspectionStatus: 'verified',
     });
     if (!uploaded) {

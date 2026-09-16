@@ -21,6 +21,7 @@ jest.mock('@nestjs/common', () => ({
 jest.mock('ali-oss', () => class OSS {});
 
 import { V1AssetsController } from './v1-assets.controller';
+import { MEDIA_INSPECTOR_VERSION } from '../../assets/media-inspector.service';
 import { Prisma } from '@prisma/client';
 
 describe('V1AssetsController ownership', () => {
@@ -317,6 +318,8 @@ describe('V1AssetsController ownership', () => {
       sizeBytes: 10,
       mimeType: 'image/png',
       mediaMetadata: { kind: 'image', width: 500, height: 500 },
+      // 落版本号：内容寻址复用不会重检旧资产，没有它就没法判断哪些资产需要重检。
+      inspectorVersion: MEDIA_INSPECTOR_VERSION,
       inspectionStatus: 'verified',
     });
   });
