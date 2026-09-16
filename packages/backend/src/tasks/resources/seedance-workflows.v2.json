@@ -1242,6 +1242,42 @@
                 "status": "usage_calculated"
               },
               "evidenceRef": "/tmp/video-flow-acceptance/evidence/r8/r8-audio-reference-5s-evidence.json"
+            },
+            {
+              "workflowKey": "seedance.audio-reference-to-video.v1",
+              "model": "doubao-seedance-2-5-260628",
+              "acceptedAt": "2026-09-16",
+              "software": {
+                "contractRevision": "2026-09-15.4",
+                "contractDigest": "2e95034c85ad474935befa206d2b7721eb4c3748653a83c5f6a40fdf390e8ecc",
+                "specVersion": "workflow-production-v2"
+              },
+              "parameters": {
+                "duration": 5,
+                "ratio": "16:9",
+                "resolution": "720p",
+                "outputFormat": "mp4",
+                "generateAudio": true,
+                "watermark": false,
+                "media": "1 段参考音频（mp3、10.0 秒、sha256 565bd788…）——**由用户在 ComfyUI 客户端手动 Queue**（第一条 UI 路径验收）"
+              },
+              "artifact": {
+                "taskId": "2c9e4579-4b89-40e2-8ac6-a025e9d603a4",
+                "providerTaskId": "cgt-20260916164552-29ii0",
+                "sha256": "13a1ea7259e136e042585c02d83d770c16b14b0f2e90b90b3fa7d910396a0de2",
+                "bytes": 3665101,
+                "width": 1280,
+                "height": 720,
+                "frames": 121,
+                "durationSeconds": 5.0417
+              },
+              "billing": {
+                "reservedCny": "7.623000",
+                "settledCny": "7.623000",
+                "completionTokens": 108900,
+                "status": "usage_calculated"
+              },
+              "evidenceRef": "/tmp/video-flow-acceptance/evidence/r8/r8-audio-reference-5s-comfyui-evidence.json"
             }
           ]
         }
