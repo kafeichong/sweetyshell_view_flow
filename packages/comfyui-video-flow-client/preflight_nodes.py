@@ -154,7 +154,7 @@ class ProductInput:
 class ProductRequest:
     @classmethod
     def INPUT_TYPES(cls):
-        return {"required": {"media": ("VIDEO_FLOW_LOCAL_MEDIA",), "prompt": ("STRING", {"multiline": True}),
+        return {"required": {"media": ("VIDEO_FLOW_LOCAL_MEDIA",), "prompt": ("STRING", {"multiline": True, "tooltip": PROMPT_WRITING_TOOLTIP}),
             "duration": (list(range(4, 31)),), "ratio": (["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"],),
             "resolution": (["480p", "720p", "1080p"],)}}
     RETURN_TYPES = ("VIDEO_FLOW_PREFLIGHT_REQUEST",)
@@ -180,8 +180,16 @@ PROMPT_WRITING_TOOLTIP = (
 )
 
 
+# 全模态参考多一条：提示词必须写成「参考/生成」意图，否则模型会判成编辑/延长任务而异步失败。
+MULTI_REFERENCE_PROMPT_TOOLTIP = (
+    PROMPT_WRITING_TOOLTIP
+    + " 另外：这条工作流请写「参考 / 生成」意图；写「把 X 改成 Y」「延长 N 秒」这类编辑/延长措辞，"
+      "会被判成另一类任务，提交成功后异步失败。"
+)
+
+
 class TextRequest:
-    DESCRIPTION = "文生视频成片要求：只需要提示词，不需要素材。默认值里带【】的段是骨架，替换成你要的内容即可。"
+    DESCRIPTION = "文生视频成片要求：只需要提示词，不需要素材。默认值是一段照官方公式写好的完整示例，改成你要的内容即可。"
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {"prompt": ("STRING", {"multiline": True, "tooltip": PROMPT_WRITING_TOOLTIP}),
@@ -345,13 +353,12 @@ class MultiReferenceRequest:
                    "提示词请写成「参考 / 生成」意图：写「把视频里的 X 换成 Y」这类编辑措辞、"
                    "或「把视频延长 N 秒」，模型会把任务判定成编辑 / 延长，与我们提交的任务类型冲突，"
                    "任务会在提交成功之后异步失败（钱不白花，但白等一场）——"
-                   "要编辑请用视频编辑模板，要延长请用视频延长模板。")
+                   "要编辑请用视频编辑模板，要延长请用视频延长模板。"
+                   "默认示例里提到的 @图像1 / @视频1 要和你实际放进槽位的素材对应；没放视频就把那句删掉。")
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {"reference_media": ("VIDEO_FLOW_LOCAL_MEDIA_LIST",),
-            "prompt": ("STRING", {"multiline": True, "tooltip": (
-                "写「参考 / 生成」意图；不要写「把 X 改成 Y」这类编辑措辞或「延长 N 秒」——"
-                "那会让模型判定成另一类任务，提交成功后异步失败。")}),
+            "prompt": ("STRING", {"multiline": True, "tooltip": MULTI_REFERENCE_PROMPT_TOOLTIP}),
             "duration": (list(range(4, 31)),), "ratio": (["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"],),
             "resolution": (["480p", "720p", "1080p"],)}}
     # **这里故意没有 VALIDATE_INPUTS**。ComfyUI 的校验发生在任何节点执行之前，由连线喂进来的
@@ -508,7 +515,7 @@ class FirstLastFrameInput:
 class FirstFrameRequest:
     @classmethod
     def INPUT_TYPES(cls):
-        return {"required": {"media": ("VIDEO_FLOW_LOCAL_MEDIA",), "prompt": ("STRING", {"multiline": True}),
+        return {"required": {"media": ("VIDEO_FLOW_LOCAL_MEDIA",), "prompt": ("STRING", {"multiline": True, "tooltip": PROMPT_WRITING_TOOLTIP}),
             "duration": (list(range(4, 31)),), "ratio": (["adaptive"],), "resolution": (["480p", "720p", "1080p"],)}}
     RETURN_TYPES = ("VIDEO_FLOW_PREFLIGHT_REQUEST",)
     RETURN_NAMES = ("request",)
@@ -524,7 +531,7 @@ class FirstFrameRequest:
 class FirstLastFrameRequest:
     @classmethod
     def INPUT_TYPES(cls):
-        return {"required": {"first_frame": ("VIDEO_FLOW_LOCAL_MEDIA",), "last_frame": ("VIDEO_FLOW_LOCAL_MEDIA",), "prompt": ("STRING", {"multiline": True}),
+        return {"required": {"first_frame": ("VIDEO_FLOW_LOCAL_MEDIA",), "last_frame": ("VIDEO_FLOW_LOCAL_MEDIA",), "prompt": ("STRING", {"multiline": True, "tooltip": PROMPT_WRITING_TOOLTIP}),
             "duration": (list(range(4, 31)),), "ratio": (["adaptive"],), "resolution": (["480p", "720p", "1080p"],)}}
     RETURN_TYPES = ("VIDEO_FLOW_PREFLIGHT_REQUEST",)
     RETURN_NAMES = ("request",)
