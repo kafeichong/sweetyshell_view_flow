@@ -355,9 +355,17 @@
             "width": 530,
             "height": 794,
             "completionTokens": 98629
+          },
+          {
+            "taskId": "4ebcf666-c9ff-4c72-bbe0-76e2379cc771",
+            "request": "视频编辑（duration=-1 / adaptive / mov，输入 786x1180 / 5.041667 秒，出片 786x1180 / 5.041667 秒）",
+            "frames": 121,
+            "width": 786,
+            "height": 1180,
+            "completionTokens": 218283
           }
         ],
-        "note": "生成类工作流的真实结算（4s/5s/6s、480p/720p、16:9/9:16/自适应）全部等于『(输出时长 × 帧率 + 1) 帧 × 宽 × 高 / 1024』再向下截断（起始帧也计费）；**延长是个例外**：2026-09-16 的样本（输入 5.041667 秒 + 延长 5 秒）结算 98,629 tokens = (输入 5.0 + 输出 5.0) 秒 × 530×794 × 24 / 1024，两端都按整帧计、没有多出的那一帧。本实现仍统一加一帧，所以延长类只会**高估**（该样本多预留 0.154 元），方向安全；是否按工作流区分要等更多样本，不据单一样本改计费。本实现向上取整，最多比 Provider 多留 1 token。"
+        "note": "生成类工作流的真实结算（4s/5s/6s、480p/720p、16:9/9:16/自适应）全部等于『(输出时长 × 帧率 + 1) 帧 × 宽 × 高 / 1024』再向下截断（起始帧也计费）；**延长是个例外**：2026-09-16 的样本（输入 5.041667 秒 + 延长 5 秒）结算 98,629 tokens = (输入 5.0 + 输出 5.0) 秒 × 530×794 × 24 / 1024，两端都按整帧计、没有多出的那一帧。本实现仍统一加一帧，所以延长类只会**高估**（该样本多预留 0.154 元），方向安全；是否按工作流区分要等更多样本，不据单一样本改计费。本实现向上取整，最多比 Provider 多留 1 token。；**视频编辑是第二个例外**：2026-09-16 的样本（输入 5.041667 秒 + 出片 121 帧）结算 218,283 tokens = (输入 5.041667 + 输出 5.0) 秒 × 786×1180 × 24 / 1024 向下截断——输出的 5.0 秒正是 121 帧按官方『总帧数/24 向下取整』的口径，也就是编辑同样**没有**多出那一帧。至此两类特殊任务（延长、编辑）各自都只有一个样本、都是『不加帧』，生成类样本 8 条全部『加帧』；仍不据这两条样本改预占公式（只会高估，方向安全），等 30 秒边界之类的更多样本再定是否按工作流区分。"
       },
       "adaptiveOutputBound": {
         "status": "falsified_needs_margin",
@@ -575,7 +583,7 @@
         "implementation": "incomplete",
         "admission": {
           "enabled": false,
-          "reason": "V2_FULL_CHAIN_NOT_COMPLETE"
+          "reason": "RETIRED_USE_OMNI_REFERENCE"
         },
         "validation": {
           "status": "not_run",
@@ -977,14 +985,51 @@
       "label": "Seedance Video Edit",
       "state": {
         "capability": "confirmed",
-        "implementation": "incomplete",
+        "implementation": "ready",
         "admission": {
-          "enabled": false,
-          "reason": "V2_FULL_CHAIN_NOT_COMPLETE"
+          "enabled": true,
+          "reason": null
         },
         "validation": {
-          "status": "not_run",
-          "records": []
+          "status": "passed",
+          "records": [
+            {
+              "workflowKey": "seedance.video-edit.v1",
+              "model": "doubao-seedance-2-5-260628",
+              "acceptedAt": "2026-09-16",
+              "software": {
+                "contractRevision": "2026-09-15.4",
+                "contractDigest": "2e95034c85ad474935befa206d2b7721eb4c3748653a83c5f6a40fdf390e8ecc",
+                "specVersion": "workflow-production-v2"
+              },
+              "parameters": {
+                "duration": -1,
+                "ratio": "adaptive",
+                "resolution": "720p",
+                "outputFormat": "mov",
+                "generateAudio": true,
+                "watermark": false,
+                "media": "1 段参考视频（mp4、786×1180、5.041667 秒、3,780,959 字节、sha256 79007caf…）"
+              },
+              "artifact": {
+                "taskId": "4ebcf666-c9ff-4c72-bbe0-76e2379cc771",
+                "providerTaskId": "cgt-20260916163145-9am0c",
+                "sha256": "7d824475e7091d1f37e4a7b784476b09c2af222c7b03c1ac20c7a2cf9f4a21ef",
+                "bytes": 4310592,
+                "width": 786,
+                "height": 1180,
+                "frames": 121,
+                "durationSeconds": 5.0417
+              },
+              "billing": {
+                "reservedCny": "9.335760",
+                "settledCny": "9.167886",
+                "completionTokens": 218283,
+                "status": "usage_calculated"
+              },
+              "evidenceRef": "/tmp/video-flow-acceptance/evidence/r8/r8-video-edit-5s-evidence.json"
+            }
+          ]
         }
       },
       "media": {
@@ -1154,14 +1199,87 @@
       "label": "Seedance Audio Reference to Video",
       "state": {
         "capability": "confirmed",
-        "implementation": "incomplete",
+        "implementation": "ready",
         "admission": {
-          "enabled": false,
-          "reason": "V2_FULL_CHAIN_NOT_COMPLETE"
+          "enabled": true,
+          "reason": null
         },
         "validation": {
-          "status": "not_run",
-          "records": []
+          "status": "passed",
+          "records": [
+            {
+              "workflowKey": "seedance.audio-reference-to-video.v1",
+              "model": "doubao-seedance-2-5-260628",
+              "acceptedAt": "2026-09-16",
+              "software": {
+                "contractRevision": "2026-09-15.4",
+                "contractDigest": "2e95034c85ad474935befa206d2b7721eb4c3748653a83c5f6a40fdf390e8ecc",
+                "specVersion": "workflow-production-v2"
+              },
+              "parameters": {
+                "duration": 5,
+                "ratio": "16:9",
+                "resolution": "720p",
+                "outputFormat": "mp4",
+                "generateAudio": true,
+                "watermark": false,
+                "media": "1 段参考音频（mp3、10.0 秒、160,957 字节、sha256 30985c51…）——纯音频，无输入视频"
+              },
+              "artifact": {
+                "taskId": "eb605c34-0c38-4a1d-b807-98fa52ddcd94",
+                "providerTaskId": "cgt-20260916162205-ze5ge",
+                "sha256": "95eed059538442e651ba345ace90bfad8f327264df46087e1e1dbab59a299f5f",
+                "bytes": 6585443,
+                "width": 1280,
+                "height": 720,
+                "frames": 121,
+                "durationSeconds": 5.0417
+              },
+              "billing": {
+                "reservedCny": "7.623000",
+                "settledCny": "7.623000",
+                "completionTokens": 108900,
+                "status": "usage_calculated"
+              },
+              "evidenceRef": "/tmp/video-flow-acceptance/evidence/r8/r8-audio-reference-5s-evidence.json"
+            },
+            {
+              "workflowKey": "seedance.audio-reference-to-video.v1",
+              "model": "doubao-seedance-2-5-260628",
+              "acceptedAt": "2026-09-16",
+              "software": {
+                "contractRevision": "2026-09-15.4",
+                "contractDigest": "2e95034c85ad474935befa206d2b7721eb4c3748653a83c5f6a40fdf390e8ecc",
+                "specVersion": "workflow-production-v2"
+              },
+              "parameters": {
+                "duration": 5,
+                "ratio": "16:9",
+                "resolution": "720p",
+                "outputFormat": "mp4",
+                "generateAudio": true,
+                "watermark": false,
+                "media": "1 段参考音频（mp3、10.0 秒、sha256 565bd788…）——**由用户在 ComfyUI 客户端手动 Queue**（第一条 UI 路径验收）"
+              },
+              "artifact": {
+                "taskId": "2c9e4579-4b89-40e2-8ac6-a025e9d603a4",
+                "providerTaskId": "cgt-20260916164552-29ii0",
+                "sha256": "13a1ea7259e136e042585c02d83d770c16b14b0f2e90b90b3fa7d910396a0de2",
+                "bytes": 3665101,
+                "width": 1280,
+                "height": 720,
+                "frames": 121,
+                "durationSeconds": 5.0417
+              },
+              "billing": {
+                "reservedCny": "7.623000",
+                "settledCny": "7.623000",
+                "completionTokens": 108900,
+                "status": "usage_calculated"
+              },
+              "evidenceRef": "/tmp/video-flow-acceptance/evidence/r8/r8-audio-reference-5s-comfyui-evidence.json"
+            }
+          ]
         }
       },
       "media": {

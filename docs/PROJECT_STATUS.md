@@ -8,6 +8,26 @@
 
 ## 0. 本轮交付判断
 
+### 2026-09-16：剩余两条工作流放行并部署；纯音频首轮真实验收通过；修掉 mp3 时长跨版本缺陷
+
+授权人（kafeichong）给出"剩余两条全部放行"的授权，口径同 §8–§12：**长期开放、全部参数、长期有效**。合同里 `seedance.audio-reference-to-video.v1` 与 `seedance.video-edit.v1` 从 `implementation=incomplete / admission=false` 改为 `ready / enabled=true`，两处付费放行闸门（backend spec、scripts 合同不变量测试）同步声明，runbook 新增 §13 记录授权。提交 `c948d19` 已推 `main` 并部署到生产（`docker compose build/up video-backend video-worker`，零 migration）——**至此除已退休的单参考图外，八类工作流全部开放**。
+
+**纯音频首轮真实验收已通过**：任务 `eb605c34-0c38-4a1d-b807-98fa52ddcd94`（槽 `r8-audio-reference-5`）、Provider 任务 `cgt-20260916162205-ze5ge`，5 秒 / 720p / 16:9 / mp4 / 有声，输入一段 10.0 秒 mp3。产片 1280×720 / h264 / 6,585,443 字节 / 121 帧，`verify` 12 项全过，SHA-256 `95eed059…`。**预占 7.623000 → 结算 7.623000，逐位吻合**（108,900 tokens × 70 元/百万），"+1 帧"口径在纯音频输出上同样成立；纯音频不触发输入视频最低用量规则（`minimumTokens=null`、`inputVideoSeconds=0`）。成片音轨实测为 AAC / 32kHz / 立体声、与输入 mp3 不同，与官方"音轨由模型生成"的口径一致（听感待人工确认）。记录已写进合同 `validation.records`（`passed`）。
+
+**放行当场暴露并修复的缺陷（影响全部含音频的工作流）**：首次用真实 mp3 提交正式任务被 `PREFLIGHT_ACTUAL_CONTENT_MISMATCH` 拒掉——同一个 10 秒 mp3，**容器里的 ffprobe 5.1.9 报 10.03102 秒、本机 8.0.1 报 10.0**（mp3 时长靠帧计数，版本间算法不同）。视频那条 9/15 用"改读流时长"解决，音频不行（流时长本身随版本变），故两侧统一把**音频时长按 0.1 秒归一**再比对；音频时长不进入计费公式，粒度足够。提交 `9f42dd7` 已部署。**遗留**：内容寻址复用不会重检，按旧代码检查过的音频资产仍带未归一时长（用同一文件重试仍会被拒）。**2026-09-16 已做数据修复**：生产库里 2 个音频资产中用户那个 mp3（`406b13dd…`）的 `durationSeconds` 由 `10.03102` 对齐为 `10.0`（只动该字段），随后同一文件在 ComfyUI 里重试通过。**系统性问题未解**：检查器算出的值随 ffprobe 版本变，旧资产迟早还会对不上，彻底解法是给资产记检查器版本、升级后判为待重检（仿 `asset-hash-backfill.ts` 做重检工具），尚未实现。
+
+**视频编辑首轮真实验收也已通过**：任务 `4ebcf666-c9ff-4c72-bbe0-76e2379cc771`（槽 `r8-video-edit-5`）、Provider 任务 `cgt-20260916163145-9am0c`，输入 786×1180 / 5.041667 秒的 mp4，请求 `duration=-1 / adaptive / mov / 720p`。产物 **MOV / h264 / 786×1180（画幅跟随输入）/ 121 帧 / 4,310,592 字节**，`verify` 12 项全过，SHA-256 `7d824475…`。预占 `9.335760` → 结算 **`9.167886`**（218,283 tokens × 42 元/百万）。**编辑也是"不加帧"的例外**：`218,283 = (输入 5.041667 + 输出 5.0) 秒 × 786×1180 × 24 / 1024` 向下截断（输出 5.0 秒即 121 帧按官方"总帧数 ÷ 24 向下取整"）——至此延长、编辑两类特殊任务各一个样本都不加帧，生成类 8 条样本全部加帧，仍不改预占公式。两条验收记录都已写进合同 `validation.records`。
+
+**⚠️ 执行方式要改（用户 2026-09-16 指示）**：上面这两条验收都是**命令行工具**跑的（`seedance_production_acceptance.py`），只证明了接口与计费链路通，**没有**证明界面可用。用户随后定规矩：**凡有花销的验证一律由他在 ComfyUI 客户端里手动 Queue** —— 一是测 UI 可用性，二是测真实客户端链路。runbook §4 已按此改写，我方只做准备（素材、免费预检报价）与只读取证、入账。**同日已补跑 UI 路径**：用户在 ComfyUI 里手动 Queue 跑通纯音频（任务 `2c9e4579…`、槽 `slot-template-audio-reference-v1`），产片 1280×720 / 121 帧、`verify` 12 项全过，预占与结算同为 `7.623000`；**且 `clientDelivery=delivered`（脚本那两次都是 pending）**，即界面、上传、Queue、下载、交付确认整条链路都被真实走通。已作为第二条记录写进合同。
+
+### 2026-09-16：单参考图入口退休；音频参考确认保留纯音频形态
+
+**单参考图 `seedance.reference-image-to-video.v1` 退休（不是"还没做完"）**：它在 provider 侧与全模态参考是同一种任务类型（`omni_reference_task_type=reference`），单图只是后者的一个子集，因此不再单独开入口——这是继"参考图不单独开放"之后把结论落到目录上。三处改动：合同三份副本的 `admission.reason` 从 `V2_FULL_CHAIN_NOT_COMPLETE` 改为 **`RETIRED_USE_OMNI_REFERENCE`**；客户端撤掉 `workflows/seedance-product-preflight-v1.comfy.json`（模板数 8 → 7，`test_workflow_templates.py` 与 `test_preflight_nodes.py` 的两条断言同步改为"七份"并按目录取而不是写死清单）；`VideoFlowProductInput` / `VideoFlowProductRequest` 两个节点保留注册但 `DESCRIPTION` 写明退化到哪个入口。产品图/参考图的正确入口：**全模态参考模板**（单图就放第一张参考图），要"图严格当第一帧"用**首帧模板**。验证：合同不变量 `scripts/tests/workflow_contract_v2.test.mjs` 6 passed、后端 `workflow-catalog` 13 passed、Worker readiness + execution policy 24 passed、客户端全量 137 passed（3 条 delivery 脚本用例在本机临时副本里因缺仓库根 `scripts/` 与 git 元数据失败，非本次改动）。
+
+**音频参考 `seedance.audio-reference-to-video.v1` 保留纯音频形态**（用户判断）：产品语义确定为**用音频驱动画面**（口型、动作、节奏与音频对齐），不放开图片/视频角色——组合素材走全模态参考，同一种 provider 任务类型不重复开入口。同时明确一条容易被误解的事实：**成片音轨不是创意传进去的那几段音频**，而是模型按提示词与画面生成的声音（官方：生成的有声视频均为单声道，与传入音频的声道数无关），要保留原音必须自己后期替换——这一点已写进客户端 README 与该节点的 `DESCRIPTION`。该工作流仍是 `admission.enabled=false` / `validation=not_run`，**尚未开放**，纯音频要真开放还需一次 R8 真实验收。
+
+**顺带修掉一个 key 漂移**：后端任务列表显示名映射用的是旧 key `seedance.audio-reference.v1`（合同里叫 `seedance.audio-reference-to-video.v1`），会让音频参考的任务在任务历史里显示不出中文名；`packages/backend/src/v1/tasks/task-list.service.ts` 与该 feature 文档已同步。
+
 ### 2026-09-16：新增创意人员账号 `creative-zhuyang`（朱阳），并加入生产白名单
 
 授权人 kafeichong 要求为创意同事朱阳开一个独立账号用于客户端真实操作验收。
