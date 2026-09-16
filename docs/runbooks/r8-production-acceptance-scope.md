@@ -319,3 +319,27 @@ packages/comfyui-video-flow-client/workflows/<工作流>-preflight-v1.comfy.json
 2. **延长按整帧计费，与生成类不同**：结算 `98,629 = (输入 5.0 + 输出 5.0) 秒 × 530×794 × 24 / 1024` 逐位吻合，而成片恰好 **120 帧 = 5×24**——**没有**生成类那多出的一帧。本实现统一加一帧，所以延长类只会高估（本例多预留 0.154 元），方向安全；**不据单一样本改计费**，已记进合同 `pricing.estimate.reservationAdjustment.note` 作为一条件待复核的差异。
 
 **过程备注**：同一段输入连续两次被平台判为"可能含真人"而拒（`UNRETRYABLE_FAILURE`），换素材后一次通过；另有一次提交因"客户端与后端 ffprobe 版本不同导致容器时长不一致"被拒（`PREFLIGHT_ACTUAL_CONTENT_MISMATCH`），已改为两边都取**流时长**并部署。
+
+## 13. 剩余两条工作流的一次性放行：音频参考 + 视频编辑（2026-09-16）
+
+授权人对当时仍未开放的两条工作流给出"全部放行"的授权，口径沿用 §8–§12：**长期开放、全部参数、长期有效**。
+
+| 项 | 值 |
+| --- | --- |
+| 授权人 / 日期 | kafeichong / 2026-09-16 |
+| 工作流 | `seedance.audio-reference-to-video.v1`、`seedance.video-edit.v1` |
+| 可用 Actor | `creative-pilot`、`creative-zhuyang` |
+| **允许的参数范围** | 合同允许的全部组合。音频参考：480p / 720p / 1080p × 七档比例（含 `adaptive`）× 4–30 秒 × mp4/mov；视频编辑：客户端固定 `duration=-1`、`ratio=adaptive`、`outputFormat=mov`（官方对编辑任务的硬要求） |
+| 素材要求 | 音频参考：**只接受 `reference_audio`**（1–10 段、单段 2–30 秒、合计 ≤30 秒），要组合图/视频请改走全模态参考。视频编辑：**至少 1 段参考视频**（4–30 秒） |
+| 金额上限 | 沿用各 actor 自身的 `dailyLimitCny`（`creative-pilot` 100 / `creative-zhuyang` 300 元/日） |
+| 时间窗 | **长期有效，另行通知** |
+| 放行时的状态 | 两条都是 `implementation=ready`、`admission.enabled=true`、**`validation=not_run`（0 条真实记录）** |
+
+**放行先于验收是既定做法**：合同的付费闸门是 `DECLARED_OPEN_WORKFLOWS`（backend spec 与 `scripts/tests/workflow_contract_v2.test.mjs` 各一份），授权写入清单后即可跑真实验收，`validation.records` 在跑完之后补。**但这次两条的 records 都是空的，意味着放行瞬间等于把"从没人跑通过的付费路径"对创意开放**——所以本轮必须紧接着各跑一次真实验收，不要留给创意去踩。
+
+**本轮要专门确认的点**：
+
+1. **音频参考没有输入视频**：不触发输入视频最低用量规则（`minimumTokens=null`），单价走 72 元/百万那一档的公式值；同时要**实测确认"成片音轨是模型生成的、不是你传进去的音频"**（官方口径：生成的有声视频均为单声道，与传入音频的声道数无关）——这条已写进客户端 README 与节点说明，实测要记录实际听到的结果。
+2. **视频编辑是 `duration=-1`**：时长由模型结合提示词定，输出可能略短于输入视频（官方约 0.4 秒误差），计费走**含输入视频**那一档（42 元/百万），并受最低用量下限约束；下限路径至今没有真实结算触发过（见 §11 与 §12 的待复核差异）。
+
+**首轮真实验收**：待跑（音频参考 5 秒 720p 预检报价见客户端实测记录；视频编辑按 §3 表格约 9.07 元）。跑完把记录写进合同 `validation.records` 并把结论补到本节。

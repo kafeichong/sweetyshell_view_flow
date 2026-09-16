@@ -10,12 +10,17 @@ const contractUrl = new URL('../../contracts/seedance-workflows.v2.json', import
 // 都是同一口径的长期开放（同一 Actor、100 元/日 上限、全部参数）。再打开任何其他
 // 工作流都必须先有一条对应授权，并在这里显式声明——这是本测试存在的意义：
 // 未声明的开放会被抓住。
+// 这里是**唯一的付费放行闸门**：合同里 admission=open 的工作流必须逐个写进这份清单，
+// 漏写就会红。名单里的每一条都对应一次显式授权（见 docs/runbooks/r8-production-acceptance-scope.md
+// 的 §8–§14），不要为了让某条能跑就顺手加进来。
 const DECLARED_OPEN_WORKFLOWS = [
   'seedance.text-to-video.v1',
   'seedance.first-frame-to-video.v1',
   'seedance.first-last-frame-to-video.v1',
   'seedance.omni-reference.v1',
   'seedance.video-extend.v1',
+  'seedance.audio-reference-to-video.v1',
+  'seedance.video-edit.v1',
 ];
 
 async function loadContract() {

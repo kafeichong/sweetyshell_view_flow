@@ -8,6 +8,14 @@
 
 ## 0. 本轮交付判断
 
+### 2026-09-16：单参考图入口退休；音频参考确认保留纯音频形态
+
+**单参考图 `seedance.reference-image-to-video.v1` 退休（不是"还没做完"）**：它在 provider 侧与全模态参考是同一种任务类型（`omni_reference_task_type=reference`），单图只是后者的一个子集，因此不再单独开入口——这是继"参考图不单独开放"之后把结论落到目录上。三处改动：合同三份副本的 `admission.reason` 从 `V2_FULL_CHAIN_NOT_COMPLETE` 改为 **`RETIRED_USE_OMNI_REFERENCE`**；客户端撤掉 `workflows/seedance-product-preflight-v1.comfy.json`（模板数 8 → 7，`test_workflow_templates.py` 与 `test_preflight_nodes.py` 的两条断言同步改为"七份"并按目录取而不是写死清单）；`VideoFlowProductInput` / `VideoFlowProductRequest` 两个节点保留注册但 `DESCRIPTION` 写明退化到哪个入口。产品图/参考图的正确入口：**全模态参考模板**（单图就放第一张参考图），要"图严格当第一帧"用**首帧模板**。验证：合同不变量 `scripts/tests/workflow_contract_v2.test.mjs` 6 passed、后端 `workflow-catalog` 13 passed、Worker readiness + execution policy 24 passed、客户端全量 137 passed（3 条 delivery 脚本用例在本机临时副本里因缺仓库根 `scripts/` 与 git 元数据失败，非本次改动）。
+
+**音频参考 `seedance.audio-reference-to-video.v1` 保留纯音频形态**（用户判断）：产品语义确定为**用音频驱动画面**（口型、动作、节奏与音频对齐），不放开图片/视频角色——组合素材走全模态参考，同一种 provider 任务类型不重复开入口。同时明确一条容易被误解的事实：**成片音轨不是创意传进去的那几段音频**，而是模型按提示词与画面生成的声音（官方：生成的有声视频均为单声道，与传入音频的声道数无关），要保留原音必须自己后期替换——这一点已写进客户端 README 与该节点的 `DESCRIPTION`。该工作流仍是 `admission.enabled=false` / `validation=not_run`，**尚未开放**，纯音频要真开放还需一次 R8 真实验收。
+
+**顺带修掉一个 key 漂移**：后端任务列表显示名映射用的是旧 key `seedance.audio-reference.v1`（合同里叫 `seedance.audio-reference-to-video.v1`），会让音频参考的任务在任务历史里显示不出中文名；`packages/backend/src/v1/tasks/task-list.service.ts` 与该 feature 文档已同步。
+
 ### 2026-09-16：新增创意人员账号 `creative-zhuyang`（朱阳），并加入生产白名单
 
 授权人 kafeichong 要求为创意同事朱阳开一个独立账号用于客户端真实操作验收。

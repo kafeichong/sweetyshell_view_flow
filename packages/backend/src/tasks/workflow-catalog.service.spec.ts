@@ -13,15 +13,18 @@ const rawContract = require('./resources/seedance-workflows.v2.json') as Workflo
 // **允许**处于开启状态的付费工作流。没列在这里却被打开 = 回归。
 // 唯一依据是 docs/runbooks/r8-production-acceptance-scope.md 的授权记录：
 // §8 text-to-video、§9 first-frame、§10 first-last-frame、§11 omni-reference、§12 video-extend，
-// 都是同一口径的长期开放（同一 Actor、100 元/日 上限、全部参数）。再打开任何其他
+// 都是同一口径的长期开放（同一 Actor、100 元/日 上限、全部参数）；§13 是 2026-09-16 的
+// "剩余两条全部放行"（audio-reference、video-edit），授权口径相同。再打开任何其他
 // 工作流都必须先有一条对应授权，并在这里显式声明——这是本测试存在的意义：
-// 未声明的开放会被抓住。
+// 未声明的开放会被抓住。当前唯一关闭的是已退休的 reference-image（单图入口并入全模态）。
 const DECLARED_OPEN_WORKFLOWS: string[] = [
   'seedance.text-to-video.v1',
   'seedance.first-frame-to-video.v1',
   'seedance.first-last-frame-to-video.v1',
   'seedance.omni-reference.v1',
   'seedance.video-extend.v1',
+  'seedance.audio-reference-to-video.v1',
+  'seedance.video-edit.v1',
 ];
 
 function textIntent(workflowKey = 'seedance.text-to-video.v1') {
@@ -100,14 +103,14 @@ describe('WorkflowCatalogService', () => {
     const originalMode = process.env.VIDEO_FLOW_TEST_MODE;
     const originalReady = process.env.VIDEO_FLOW_TEST_READY_WORKFLOWS;
     process.env.VIDEO_FLOW_TEST_MODE = '1';
-    // 刻意挑一条合同里仍处于关闭的工作流：被授权开放的那些无法用于验证
-    // "环境变量越不过合同"。
-    process.env.VIDEO_FLOW_TEST_READY_WORKFLOWS = 'seedance.video-edit.v1';
+    // 刻意挑合同里**仍处于关闭**的那条（已退休的单图入口）：被授权开放的那些
+    // 无法用来验证"环境变量越不过合同"。
+    process.env.VIDEO_FLOW_TEST_READY_WORKFLOWS = 'seedance.reference-image-to-video.v1';
     try {
-      const evaluated = new WorkflowCatalogService().evaluate(textIntent('seedance.video-edit.v1'));
+      const evaluated = new WorkflowCatalogService().evaluate(textIntent('seedance.reference-image-to-video.v1'));
       expect(evaluated.workflow.state).toMatchObject({
         implementation: 'incomplete',
-        admission: { enabled: false, reason: 'V2_FULL_CHAIN_NOT_COMPLETE' },
+        admission: { enabled: false, reason: 'RETIRED_USE_OMNI_REFERENCE' },
       });
     } finally {
       if (originalMode === undefined) delete process.env.VIDEO_FLOW_TEST_MODE;
