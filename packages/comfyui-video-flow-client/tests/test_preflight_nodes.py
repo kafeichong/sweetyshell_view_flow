@@ -668,7 +668,13 @@ def test_each_current_template_has_its_own_persistent_execution_slot():
     assert len(slots) == len(set(slots))
 
 
-def test_policy_preview_returns_comfyui_video_player_payload(tmp_path, monkeypatch):
+def test_policy_preview_hands_the_video_to_our_own_frontend(tmp_path, monkeypatch):
+    """位置交给 web/result_preview.js，**不走 `ui.images`**。
+
+    走了的话，前端会按 node id 在「当前活动工作流」里找节点再挂预览；而 id 在不同工作流之间
+    会重号，云端出片那几分钟里用户切走了，预览就落到别的工作流上（用户报过：用音频跑，结果
+    挂在另一个打开的工作流里）。
+    """
     output = tmp_path / 'output'
     video = output / 'video-flow' / 'task.mp4'
     video.parent.mkdir(parents=True)
@@ -678,8 +684,11 @@ def test_policy_preview_returns_comfyui_video_player_payload(tmp_path, monkeypat
     result = n.PolicyPreview().preview(str(video))
 
     assert result['result'] == (str(video),)
-    assert result['ui']['images'] == [{'filename': 'task.mp4', 'subfolder': 'video-flow', 'type': 'output'}]
-    assert result['ui']['animated'] == (True,)
+    assert result['ui']['video_flow_video'] == [
+        {'filename': 'task.mp4', 'subfolder': 'video-flow', 'type': 'output'}
+    ]
+    # 一旦这里回了 ui.images，ComfyUI 就会自己去挂一遍，多标签下又会挂错。
+    assert 'images' not in result['ui']
 
 
 def test_policy_preview_rejects_video_outside_comfyui_output(tmp_path, monkeypatch):

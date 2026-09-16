@@ -864,10 +864,11 @@ class PolicyPreview:
             raise ValueError("视频必须存在于 ComfyUI output 目录")
         relative = path.relative_to(output_root)
         subfolder = '' if str(relative.parent) == '.' else str(relative.parent)
-        # ComfyUI 0.35.x 的前端沿用旧 Seedance 节点的兼容格式：MP4
-        # 作为 animated image 结果返回。单独返回 ui.videos 在该前端不会显示。
-        return {'ui': {'images': [{'filename': relative.name, 'subfolder': subfolder, 'type': 'output'}],
-                       'animated': (True,)},
+        # **不走 ui.images**。前端收到它之后是按 node id 在**当前活动工作流**里找节点再挂预览的
+        # （`getNodeByExecutionId(this.rootGraph, …)`），而 id 在不同工作流之间会重号；云端出片
+        # 要几分钟，这期间用户很容易切走，视频回来时就挂到另一个工作流里恰好同号的那个节点上
+        # （用户报过）。改成交给我们自己的前端，按**发起运行的那个图**来挂：见 web/result_preview.js。
+        return {'ui': {'video_flow_video': [{'filename': relative.name, 'subfolder': subfolder, 'type': 'output'}]},
                 'result': (str(path),)}
 
 
