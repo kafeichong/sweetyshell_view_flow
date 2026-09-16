@@ -94,12 +94,11 @@ else
   echo "    FFPROBE_NOT_AVAILABLE（预检之前就停住，不会产生费用）。补上它，任选一种："
   echo
   echo "    ① 装了 Homebrew（终端里跑）：      brew install ffmpeg"
-  echo "    ② 没装 Homebrew：去 https://evermeet.cx/ffmpeg/ 下载 ffprobe，解压后："
-  echo "         mkdir -p ~/.video-flow && mv ~/Downloads/ffprobe ~/.video-flow/ffprobe"
-  echo "         chmod +x ~/.video-flow/ffprobe"
-  echo "         xattr -d com.apple.quarantine ~/.video-flow/ffprobe   # 下载来的会被系统拦，要去隔离"
+  echo "    ② 没装 Homebrew：**双击同目录的「装ffprobe.command」**，它会按你的芯片架构自动"
+  echo "       下载、装到 ~/.video-flow/ffprobe、去掉 macOS 的隔离标记，并当场验证。不用敲命令。"
   echo
-  echo "    （② 不用配环境变量：客户端会自己去 ~/.video-flow/ 找。）"
+  echo "    （② 那个位置客户端会自己去找，不用配环境变量——Comfy Desktop 从 GUI 启动，"
+  echo "      改了 .zshrc 里的 PATH 也传不进来。）"
   echo
   echo "    装完**重启 ComfyUI**。拿不准就双击同目录的「诊断.command」，把输出发给管理员。"
 fi
