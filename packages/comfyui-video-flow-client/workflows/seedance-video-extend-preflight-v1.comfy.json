@@ -1,1 +1,523 @@
-{"id":"seedance-video-extend-preflight-v1","revision":0,"last_node_id":11,"last_link_id":14,"nodes":[{"id":1,"type":"VideoFlowConfig","pos":[30,30],"size":[320,200],"order":0,"inputs":[],"outputs":[{"name":"config","type":"VIDEO_FLOW_CONFIG","links":[1,7,9,11]}],"properties":{"Node name for S&R":"VideoFlowConfig"},"widgets_values":["https://ai.sweetyshell.com","1"]},{"id":2,"type":"VideoFlowExecutionPolicy","pos":[30,270],"size":[320,200],"order":1,"inputs":[],"outputs":[{"name":"execution_policy","type":"VIDEO_FLOW_EXECUTION_POLICY","links":[2,8]}],"properties":{"Node name for S&R":"VideoFlowExecutionPolicy"},"widgets_values":["preview"]},{"id":3,"type":"VideoFlowReferenceVideoInput","pos":[400,30],"size":[360,180],"order":2,"inputs":[],"outputs":[{"name":"reference_media","type":"VIDEO_FLOW_LOCAL_MEDIA_LIST","links":[3]}],"properties":{"Node name for S&R":"VideoFlowReferenceVideoInput"},"widgets_values":["请选择视频"]},{"id":4,"type":"VideoFlowReferenceVideoInput","pos":[400,250],"size":[360,180],"order":3,"inputs":[{"name":"reference_media","type":"VIDEO_FLOW_LOCAL_MEDIA_LIST","link":3}],"outputs":[{"name":"reference_media","type":"VIDEO_FLOW_LOCAL_MEDIA_LIST","links":[4]}],"properties":{"Node name for S&R":"VideoFlowReferenceVideoInput"},"widgets_values":["请选择视频"]},{"id":5,"type":"VideoFlowReferenceVideoInput","pos":[400,470],"size":[360,180],"order":4,"inputs":[{"name":"reference_media","type":"VIDEO_FLOW_LOCAL_MEDIA_LIST","link":4}],"outputs":[{"name":"reference_media","type":"VIDEO_FLOW_LOCAL_MEDIA_LIST","links":[5]}],"properties":{"Node name for S&R":"VideoFlowReferenceVideoInput"},"widgets_values":["请选择视频"]},{"id":6,"type":"VideoFlowVideoExtendRequest","pos":[800,30],"size":[360,340],"order":5,"inputs":[{"name":"reference_media","type":"VIDEO_FLOW_LOCAL_MEDIA_LIST","link":5}],"outputs":[{"name":"request","type":"VIDEO_FLOW_PREFLIGHT_REQUEST","links":[6]}],"properties":{"Node name for S&R":"VideoFlowVideoExtendRequest"},"widgets_values":["向后延长 @video1",11,"720p"]},{"id":7,"type":"VideoFlowRequestPreflight","pos":[1190,30],"size":[340,220],"order":6,"inputs":[{"name":"config","type":"VIDEO_FLOW_CONFIG","link":1},{"name":"execution_policy","type":"VIDEO_FLOW_EXECUTION_POLICY","link":2},{"name":"request","type":"VIDEO_FLOW_PREFLIGHT_REQUEST","link":6}],"outputs":[{"name":"checked_request","type":"VIDEO_FLOW_CHECKED_REQUEST","links":[10]}],"properties":{"Node name for S&R":"VideoFlowRequestPreflight"}},{"id":8,"type":"VideoFlowConfirmedCreate","pos":[1570,30],"size":[340,220],"order":7,"inputs":[{"name":"config","type":"VIDEO_FLOW_CONFIG","link":7},{"name":"execution_policy","type":"VIDEO_FLOW_EXECUTION_POLICY","link":8},{"name":"checked_request","type":"VIDEO_FLOW_CHECKED_REQUEST","link":10}],"outputs":[{"name":"task","type":"VIDEO_FLOW_EXECUTION_RESULT","links":[12]}],"properties":{"Node name for S&R":"VideoFlowConfirmedCreate"},"widgets_values":["slot-template-video-extend-v1",1]},{"id":9,"type":"VideoFlowPolicyWait","pos":[1950,30],"size":[340,220],"order":8,"inputs":[{"name":"config","type":"VIDEO_FLOW_CONFIG","link":9},{"name":"task","type":"VIDEO_FLOW_EXECUTION_RESULT","link":12}],"outputs":[{"name":"task","type":"VIDEO_FLOW_EXECUTION_RESULT","links":[13]}],"properties":{"Node name for S&R":"VideoFlowPolicyWait"},"widgets_values":[1200]},{"id":10,"type":"VideoFlowPolicyDownload","pos":[2330,30],"size":[340,220],"order":9,"inputs":[{"name":"config","type":"VIDEO_FLOW_CONFIG","link":11},{"name":"task","type":"VIDEO_FLOW_EXECUTION_RESULT","link":13}],"outputs":[{"name":"local_video_path","type":"STRING","links":[14]}],"properties":{"Node name for S&R":"VideoFlowPolicyDownload"}},{"id":11,"type":"VideoFlowPolicyPreview","pos":[2710,30],"size":[340,200],"order":10,"inputs":[{"name":"local_video_path","type":"STRING","link":14}],"outputs":[{"name":"local_video_path","type":"STRING","links":[]}],"properties":{"Node name for S&R":"VideoFlowPolicyPreview"},"widgets_values":[""]}],"links":[[1,1,0,7,0,"VIDEO_FLOW_CONFIG"],[2,2,0,7,1,"VIDEO_FLOW_EXECUTION_POLICY"],[3,3,0,4,0,"VIDEO_FLOW_LOCAL_MEDIA_LIST"],[4,4,0,5,0,"VIDEO_FLOW_LOCAL_MEDIA_LIST"],[5,5,0,6,0,"VIDEO_FLOW_LOCAL_MEDIA_LIST"],[6,6,0,7,2,"VIDEO_FLOW_PREFLIGHT_REQUEST"],[7,1,0,8,0,"VIDEO_FLOW_CONFIG"],[8,2,0,8,1,"VIDEO_FLOW_EXECUTION_POLICY"],[9,1,0,9,0,"VIDEO_FLOW_CONFIG"],[10,7,0,8,2,"VIDEO_FLOW_CHECKED_REQUEST"],[11,1,0,10,0,"VIDEO_FLOW_CONFIG"],[12,8,0,9,1,"VIDEO_FLOW_EXECUTION_RESULT"],[13,9,0,10,1,"VIDEO_FLOW_EXECUTION_RESULT"],[14,10,0,11,0,"STRING"]],"groups":[],"config":{},"extra":{},"version":0.4}
+{
+  "id": "seedance-video-extend-preflight-v1",
+  "revision": 0,
+  "last_node_id": 11,
+  "last_link_id": 14,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "VideoFlowConfig",
+      "pos": [
+        30,
+        30
+      ],
+      "size": [
+        320,
+        200
+      ],
+      "order": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "config",
+          "type": "VIDEO_FLOW_CONFIG",
+          "links": [
+            1,
+            7,
+            9,
+            11
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VideoFlowConfig"
+      },
+      "widgets_values": [
+        "https://ai.sweetyshell.com",
+        "1"
+      ]
+    },
+    {
+      "id": 2,
+      "type": "VideoFlowExecutionPolicy",
+      "pos": [
+        30,
+        270
+      ],
+      "size": [
+        320,
+        200
+      ],
+      "order": 1,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "execution_policy",
+          "type": "VIDEO_FLOW_EXECUTION_POLICY",
+          "links": [
+            2,
+            8
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VideoFlowExecutionPolicy"
+      },
+      "widgets_values": [
+        "preview"
+      ]
+    },
+    {
+      "id": 3,
+      "type": "VideoFlowReferenceVideoInput",
+      "pos": [
+        400,
+        30
+      ],
+      "size": [
+        360,
+        180
+      ],
+      "order": 2,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "reference_media",
+          "type": "VIDEO_FLOW_LOCAL_MEDIA_LIST",
+          "links": [
+            3
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VideoFlowReferenceVideoInput"
+      },
+      "widgets_values": [
+        "请选择视频"
+      ]
+    },
+    {
+      "id": 4,
+      "type": "VideoFlowReferenceVideoInput",
+      "pos": [
+        400,
+        250
+      ],
+      "size": [
+        360,
+        180
+      ],
+      "order": 3,
+      "inputs": [
+        {
+          "name": "reference_media",
+          "type": "VIDEO_FLOW_LOCAL_MEDIA_LIST",
+          "link": 3
+        }
+      ],
+      "outputs": [
+        {
+          "name": "reference_media",
+          "type": "VIDEO_FLOW_LOCAL_MEDIA_LIST",
+          "links": [
+            4
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VideoFlowReferenceVideoInput"
+      },
+      "widgets_values": [
+        "请选择视频"
+      ]
+    },
+    {
+      "id": 5,
+      "type": "VideoFlowReferenceVideoInput",
+      "pos": [
+        400,
+        470
+      ],
+      "size": [
+        360,
+        180
+      ],
+      "order": 4,
+      "inputs": [
+        {
+          "name": "reference_media",
+          "type": "VIDEO_FLOW_LOCAL_MEDIA_LIST",
+          "link": 4
+        }
+      ],
+      "outputs": [
+        {
+          "name": "reference_media",
+          "type": "VIDEO_FLOW_LOCAL_MEDIA_LIST",
+          "links": [
+            5
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VideoFlowReferenceVideoInput"
+      },
+      "widgets_values": [
+        "请选择视频"
+      ]
+    },
+    {
+      "id": 6,
+      "type": "VideoFlowVideoExtendRequest",
+      "pos": [
+        800,
+        30
+      ],
+      "size": [
+        360,
+        340
+      ],
+      "order": 5,
+      "inputs": [
+        {
+          "name": "reference_media",
+          "type": "VIDEO_FLOW_LOCAL_MEDIA_LIST",
+          "link": 5
+        }
+      ],
+      "outputs": [
+        {
+          "name": "request",
+          "type": "VIDEO_FLOW_PREFLIGHT_REQUEST",
+          "links": [
+            6
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VideoFlowVideoExtendRequest"
+      },
+      "widgets_values": [
+        "在 @视频1 的基础上向后延长 5 秒的视频：镜头继续缓缓拉远，露出完整的桌面与窗边的自然光，杯子静置不动、杯口的热气缓缓升腾，画面节奏与前一镜保持一致。低角度拍摄，浅景深，背景干净虚化；环境安静，只有轻微的水滴声，整体干净、高级、有质感。",
+        5,
+        "720p"
+      ]
+    },
+    {
+      "id": 7,
+      "type": "VideoFlowRequestPreflight",
+      "pos": [
+        1190,
+        30
+      ],
+      "size": [
+        340,
+        220
+      ],
+      "order": 6,
+      "inputs": [
+        {
+          "name": "config",
+          "type": "VIDEO_FLOW_CONFIG",
+          "link": 1
+        },
+        {
+          "name": "execution_policy",
+          "type": "VIDEO_FLOW_EXECUTION_POLICY",
+          "link": 2
+        },
+        {
+          "name": "request",
+          "type": "VIDEO_FLOW_PREFLIGHT_REQUEST",
+          "link": 6
+        }
+      ],
+      "outputs": [
+        {
+          "name": "checked_request",
+          "type": "VIDEO_FLOW_CHECKED_REQUEST",
+          "links": [
+            10
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VideoFlowRequestPreflight"
+      }
+    },
+    {
+      "id": 8,
+      "type": "VideoFlowConfirmedCreate",
+      "pos": [
+        1570,
+        30
+      ],
+      "size": [
+        340,
+        220
+      ],
+      "order": 7,
+      "inputs": [
+        {
+          "name": "config",
+          "type": "VIDEO_FLOW_CONFIG",
+          "link": 7
+        },
+        {
+          "name": "execution_policy",
+          "type": "VIDEO_FLOW_EXECUTION_POLICY",
+          "link": 8
+        },
+        {
+          "name": "checked_request",
+          "type": "VIDEO_FLOW_CHECKED_REQUEST",
+          "link": 10
+        }
+      ],
+      "outputs": [
+        {
+          "name": "task",
+          "type": "VIDEO_FLOW_EXECUTION_RESULT",
+          "links": [
+            12
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VideoFlowConfirmedCreate"
+      },
+      "widgets_values": [
+        "slot-template-video-extend-v1",
+        1
+      ]
+    },
+    {
+      "id": 9,
+      "type": "VideoFlowPolicyWait",
+      "pos": [
+        1950,
+        30
+      ],
+      "size": [
+        340,
+        220
+      ],
+      "order": 8,
+      "inputs": [
+        {
+          "name": "config",
+          "type": "VIDEO_FLOW_CONFIG",
+          "link": 9
+        },
+        {
+          "name": "task",
+          "type": "VIDEO_FLOW_EXECUTION_RESULT",
+          "link": 12
+        }
+      ],
+      "outputs": [
+        {
+          "name": "task",
+          "type": "VIDEO_FLOW_EXECUTION_RESULT",
+          "links": [
+            13
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VideoFlowPolicyWait"
+      },
+      "widgets_values": [
+        1200
+      ]
+    },
+    {
+      "id": 10,
+      "type": "VideoFlowPolicyDownload",
+      "pos": [
+        2330,
+        30
+      ],
+      "size": [
+        340,
+        220
+      ],
+      "order": 9,
+      "inputs": [
+        {
+          "name": "config",
+          "type": "VIDEO_FLOW_CONFIG",
+          "link": 11
+        },
+        {
+          "name": "task",
+          "type": "VIDEO_FLOW_EXECUTION_RESULT",
+          "link": 13
+        }
+      ],
+      "outputs": [
+        {
+          "name": "local_video_path",
+          "type": "STRING",
+          "links": [
+            14
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VideoFlowPolicyDownload"
+      }
+    },
+    {
+      "id": 11,
+      "type": "VideoFlowPolicyPreview",
+      "pos": [
+        2710,
+        30
+      ],
+      "size": [
+        340,
+        200
+      ],
+      "order": 10,
+      "inputs": [
+        {
+          "name": "local_video_path",
+          "type": "STRING",
+          "link": 14
+        }
+      ],
+      "outputs": [
+        {
+          "name": "local_video_path",
+          "type": "STRING",
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VideoFlowPolicyPreview"
+      },
+      "widgets_values": [
+        ""
+      ]
+    }
+  ],
+  "links": [
+    [
+      1,
+      1,
+      0,
+      7,
+      0,
+      "VIDEO_FLOW_CONFIG"
+    ],
+    [
+      2,
+      2,
+      0,
+      7,
+      1,
+      "VIDEO_FLOW_EXECUTION_POLICY"
+    ],
+    [
+      3,
+      3,
+      0,
+      4,
+      0,
+      "VIDEO_FLOW_LOCAL_MEDIA_LIST"
+    ],
+    [
+      4,
+      4,
+      0,
+      5,
+      0,
+      "VIDEO_FLOW_LOCAL_MEDIA_LIST"
+    ],
+    [
+      5,
+      5,
+      0,
+      6,
+      0,
+      "VIDEO_FLOW_LOCAL_MEDIA_LIST"
+    ],
+    [
+      6,
+      6,
+      0,
+      7,
+      2,
+      "VIDEO_FLOW_PREFLIGHT_REQUEST"
+    ],
+    [
+      7,
+      1,
+      0,
+      8,
+      0,
+      "VIDEO_FLOW_CONFIG"
+    ],
+    [
+      8,
+      2,
+      0,
+      8,
+      1,
+      "VIDEO_FLOW_EXECUTION_POLICY"
+    ],
+    [
+      9,
+      1,
+      0,
+      9,
+      0,
+      "VIDEO_FLOW_CONFIG"
+    ],
+    [
+      10,
+      7,
+      0,
+      8,
+      2,
+      "VIDEO_FLOW_CHECKED_REQUEST"
+    ],
+    [
+      11,
+      1,
+      0,
+      10,
+      0,
+      "VIDEO_FLOW_CONFIG"
+    ],
+    [
+      12,
+      8,
+      0,
+      9,
+      1,
+      "VIDEO_FLOW_EXECUTION_RESULT"
+    ],
+    [
+      13,
+      9,
+      0,
+      10,
+      1,
+      "VIDEO_FLOW_EXECUTION_RESULT"
+    ],
+    [
+      14,
+      10,
+      0,
+      11,
+      0,
+      "STRING"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {},
+  "version": 0.4
+}
