@@ -75,4 +75,32 @@ fi
 CLIENT_VERSION="$(sed -n 's/^CLIENT_VERSION = "\(.*\)"/\1/p' "$SOURCE_DIR/__init__.py" | head -1)"
 echo "Video Flow 客户端已安装到: $TARGET_DIR"
 echo "版本: ${CLIENT_VERSION:-未知}（排查问题时请提供这一版号）"
+
+# ffprobe 是本地素材检查的硬依赖（要读视频/音频的时长、帧率、编码）。缺了不会在安装时报错，
+# 而是**跑到一半**才报 FFPROBE_NOT_AVAILABLE——那时候参数都填完了，白折腾（同事机上真实踩到）。
+# 所以在这里就说清楚。搜索顺序与 media_inspection.py 的 FFPROBE_CANDIDATES 保持一致：
+# Comfy Desktop 从 GUI 启动，进程 PATH 不含 /opt/homebrew/bin，只看 command -v 会误判。
+FFPROBE_FOUND=""
+command -v ffprobe >/dev/null 2>&1 && FFPROBE_FOUND="$(command -v ffprobe)"
+for candidate in /opt/homebrew/bin/ffprobe /usr/local/bin/ffprobe /opt/local/bin/ffprobe /usr/bin/ffprobe "$HOME/.video-flow/ffprobe"; do
+  if test -z "$FFPROBE_FOUND" && test -x "$candidate"; then FFPROBE_FOUND="$candidate"; fi
+done
+
+if test -n "$FFPROBE_FOUND"; then
+  echo "ffprobe: $FFPROBE_FOUND"
+else
+  echo
+  echo "⚠️  没找到 ffprobe —— 视频/音频素材检查要用它，现在不装的话，跑工作流时会报"
+  echo "    FFPROBE_NOT_AVAILABLE（预检之前就停住，不会产生费用）。补上它，任选一种："
+  echo
+  echo "    ① 装了 Homebrew（终端里跑）：      brew install ffmpeg"
+  echo "    ② 没装 Homebrew：去 https://evermeet.cx/ffmpeg/ 下载 ffprobe，"
+  echo "       解压后放到 ~/.video-flow/ffprobe（文件名就叫 ffprobe），然后："
+  echo "         chmod +x ~/.video-flow/ffprobe"
+  echo
+  echo "    （② 不用配环境变量：客户端会自己去 ~/.video-flow/ 找。）"
+  echo
+  echo "    装完**重启 ComfyUI**。拿不准就双击同目录的「诊断.command」，把输出发给管理员。"
+fi
+
 echo "请重启 ComfyUI，并在节点库中搜索 Video Flow。"

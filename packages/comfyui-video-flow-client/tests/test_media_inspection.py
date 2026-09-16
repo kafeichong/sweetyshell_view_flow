@@ -143,6 +143,18 @@ def test_ffprobe_lookup_falls_back_to_known_install_locations(tmp_path, monkeypa
     assert media.ffprobe_executable() == str(fake)
 
 
+def test_ffprobe_lookup_includes_the_manual_drop_in_location():
+    """没装包管理器的机器，可以把 ffprobe 直接丢进 `~/.video-flow/`。
+
+    同事机器上真实踩到过 FFPROBE_NOT_AVAILABLE。**让他"设个环境变量"是不现实的**——Comfy
+    Desktop 从 GUI 启动，改 .zshrc 里的 PATH 传不进来。所以安装器引导的是一个"丢文件"的落点，
+    客户端就必须真的去那儿找；这条断言盯住它别在重构里被删掉。
+    """
+    from pathlib import Path
+
+    assert str(Path.home() / ".video-flow" / "ffprobe") in media.FFPROBE_CANDIDATES
+
+
 def test_ffprobe_lookup_prefers_an_explicit_override(tmp_path, monkeypatch):
     chosen = tmp_path / "custom-ffprobe"
     chosen.write_text("#!/bin/sh\n")

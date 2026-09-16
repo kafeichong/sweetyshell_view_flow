@@ -145,6 +145,10 @@ FFPROBE_CANDIDATES = (
     "/usr/local/bin/ffprobe",      # macOS / Intel 的 Homebrew
     "/opt/local/bin/ffprobe",      # MacPorts
     "/usr/bin/ffprobe",            # 常见发行版自带
+    # 没装包管理器时的"手动落点"：把 ffprobe 二进制丢进 ~/.video-flow/ 即可，不用碰环境变量
+    # （Comfy Desktop 从 GUI 启动，改了 .zshrc 里的 PATH 也传不进来）。同事机器上缺 ffprobe
+    # 报 FFPROBE_NOT_AVAILABLE 时，安装器就是引导到这里。
+    str(Path.home() / ".video-flow" / "ffprobe"),
 )
 
 
