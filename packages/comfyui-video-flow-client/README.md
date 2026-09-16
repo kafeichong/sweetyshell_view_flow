@@ -77,4 +77,6 @@ python -m pytest -q
 
 安装指南只在 [ROADMAP](../../docs/ROADMAP.md) 规定的客户端包装出口门禁关闭，且 [PROJECT_STATUS](../../docs/PROJECT_STATUS.md) 记录对应验收证据后恢复。至少需要旧节点和错误模板退出交付包、三包回归与隔离合同通过、目标 ComfyUI 完成真实操作验收、三端版本配套发布，并由管理员明确账号、工作流和预算授权。
 
+**当前允许范围以 PROJECT_STATUS 为准。** 2026-09-16 起有一次**受控测试期交付**（对应上面"目标 ComfyUI 完成真实操作验收"这条），门禁本身仍未关闭；交付时必须用 `git archive` 导出干净副本，不要把工作目录（可能含未提交的界面改动）直接交给同事——原因见 PROJECT_STATUS 同日条目。交付版本号在 `__init__.py` 的 `CLIENT_VERSION`，安装器会打印出来。
+
 此前的 v1 安装和节点说明已归档为 [历史快照](../../docs/archive/2026-09-15-comfyui-client-readme-v1-superseded.md)，不得照此操作。

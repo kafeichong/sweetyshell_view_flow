@@ -8,6 +8,22 @@
 
 ## 0. 本轮交付判断
 
+### 2026-09-16：客户端交付给创意同事做真实操作验收（受控测试期交付）
+
+**交付物**：`packages/comfyui-video-flow-client/` 的**干净导出**（不是工作目录），版本 `CLIENT_VERSION = 2026-09-16.1`。导出方式：
+
+```bash
+git archive main:packages/comfyui-video-flow-client | tar -x -C <目标目录>
+```
+
+**为什么必须用导出而不是直接拷目录**：客户端目录里混着并行会话**尚未提交**的消费/任务历史界面（`web/js/ConsumptionPanel.js`、`TaskListPanel.js`、`VideoFlowHistoryPanel.js`、`web/video_flow_history.*`、`web/css/`、`web/test/` 等）。`install.sh` 是 `cp -R web` 整目录拷贝，而 `__init__.py` 里 `WEB_DIRECTORY = "./web"` 意味着 ComfyUI 会把这些文件**当前端插件直接加载**——直接拷工作目录会把半成品界面装到同事机器上。
+
+**导出副本实测**（2026-09-16）：42 个文件、只含已提交内容；独立导入通过（20 个节点类、空槽选项「不给素材」、`ffprobe` 兜底命中 `/opt/homebrew/bin/ffprobe`、8 份模板齐备）。安装器现在会打印版本号，排查时让同事报这一版即可。
+
+**门禁状态**：ROADMAP 的客户端包装出口门禁**仍未关闭**，本条记录的是**受控测试期交付**——对应门禁条件里的"目标 ComfyUI 完成真实操作验收"；三端版本配套发布、管理员账号与预算授权等条件仍要在正式发布前补齐，届时按 README 的门禁清单逐条关掉并更新本节。
+
+**同事侧前提**：若在他自己的机器上用他自己的 token，需要先 `POST /api/v1/admin/credentials` 建 actor、`PATCH /api/v1/admin/credentials/{actorId}/limits` 设额度、把 actor 加进生产 `VIDEO_FLOW_PRODUCTION_ACTORS` 并重启后端；否则一提交就被 `PRODUCTION_NOT_ALLOWED` 拦下。
+
 ### 2026-09-15：第四条工作流（多模态参考）按 §11 长期开放
 
 授权人按 [R8 授权清单 §11](./runbooks/r8-production-acceptance-scope.md) 开放 `seedance.omni-reference.v1`（客户端模板 `seedance-multi-reference-preflight-v1.comfy.json`），口径与前三条一致（同一 Actor、100 元/日、全部参数、长期有效）。合同改为 `implementation=ready` / `admission={enabled:true, reason:null}`，`validation` 保持 `not_run`——这条同样没有真实出片（只有隔离环境的 R6.5）。两处不变量测试的声明列表同步加入。

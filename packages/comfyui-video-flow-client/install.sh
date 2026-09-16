@@ -60,5 +60,7 @@ if test -n "$TOKEN_SOURCE"; then
   fi
 fi
 
+CLIENT_VERSION="$(sed -n 's/^CLIENT_VERSION = "\(.*\)"/\1/p' "$SOURCE_DIR/__init__.py" | head -1)"
 echo "Video Flow 客户端已安装到: $TARGET_DIR"
+echo "版本: ${CLIENT_VERSION:-未知}（排查问题时请提供这一版号）"
 echo "请重启 ComfyUI，并在节点库中搜索 Video Flow。"
