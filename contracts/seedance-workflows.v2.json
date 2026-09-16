@@ -347,9 +347,17 @@
             "width": 786,
             "height": 1180,
             "completionTokens": 109594
+          },
+          {
+            "taskId": "5b1b2f2c-a5d8-4770-927e-05b95203e6f7",
+            "request": "5s/480p/adaptive（延长，输入 786x1180 / 5.041667 秒）",
+            "frames": 120,
+            "width": 530,
+            "height": 794,
+            "completionTokens": 98629
           }
         ],
-        "note": "八条真实结算全部等于『(输出时长 × 帧率 + 1) 帧 × 宽 × 高 / 1024』再向下截断（新增的一条是**含输入视频**的样本：`(10 + 4 + 1/24) 秒 × 560×752×24/1024 = 138,591.25` → Provider 记 138,591，说明输入视频秒数与『+1 帧』在含视频时同样成立）；本实现向上取整，因此最多比 Provider 多留 1 token。30 秒边界尚未实测，最低 token 口径不随本调整变动。"
+        "note": "生成类工作流的真实结算（4s/5s/6s、480p/720p、16:9/9:16/自适应）全部等于『(输出时长 × 帧率 + 1) 帧 × 宽 × 高 / 1024』再向下截断（起始帧也计费）；**延长是个例外**：2026-09-16 的样本（输入 5.041667 秒 + 延长 5 秒）结算 98,629 tokens = (输入 5.0 + 输出 5.0) 秒 × 530×794 × 24 / 1024，两端都按整帧计、没有多出的那一帧。本实现仍统一加一帧，所以延长类只会**高估**（该样本多预留 0.154 元），方向安全；是否按工作流区分要等更多样本，不据单一样本改计费。本实现向上取整，最多比 Provider 多留 1 token。"
       },
       "adaptiveOutputBound": {
         "status": "falsified_needs_margin",
@@ -1044,8 +1052,46 @@
           "reason": null
         },
         "validation": {
-          "status": "not_run",
-          "records": []
+          "status": "passed",
+          "records": [
+            {
+              "workflowKey": "seedance.video-extend.v1",
+              "model": "doubao-seedance-2-5-260628",
+              "acceptedAt": "2026-09-16",
+              "software": {
+                "contractRevision": "2026-09-15.4",
+                "contractDigest": "2e95034c85ad474935befa206d2b7721eb4c3748653a83c5f6a40fdf390e8ecc",
+                "specVersion": "workflow-production-v2"
+              },
+              "parameters": {
+                "duration": 5,
+                "ratio": "adaptive",
+                "resolution": "480p",
+                "outputFormat": "mov",
+                "generateAudio": true,
+                "watermark": false,
+                "media": "1 段参考视频（786x1180，5.041667 秒，h264+aac）"
+              },
+              "artifact": {
+                "taskId": "5b1b2f2c-a5d8-4770-927e-05b95203e6f7",
+                "providerTaskId": "cgt-20260916142151-11ick",
+                "sha256": "eec338f874989b8419003581a24eeede217e1245c295c5fac32fd2c26b04a7df",
+                "bytes": 2131354,
+                "width": 530,
+                "height": 794,
+                "frames": 120,
+                "durationSeconds": 5.0
+              },
+              "billing": {
+                "reservedCny": "4.296180",
+                "settledCny": "4.142418",
+                "completionTokens": 98629,
+                "status": "usage_calculated"
+              },
+              "evidenceRef": "/private/tmp/video-flow-comfy-acceptance/evidence/r8/r8-video-extend-5s-evidence.json",
+              "notes": "返回的是延长出来的那一段（5.0 秒），不是输入+延长的完整视频；同一段输入连续两次提交都因平台真人内容判定被拒，换成不含真人的素材后一次通过。"
+            }
+          ]
         }
       },
       "media": {
