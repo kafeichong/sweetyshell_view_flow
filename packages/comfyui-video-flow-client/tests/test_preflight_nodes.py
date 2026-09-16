@@ -1,5 +1,6 @@
 import json
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -635,7 +636,8 @@ def test_existing_slot_task_recovers_before_expired_preflight_or_current_admissi
 
 def test_workflow_links_resolve_and_default_is_preview():
     from pathlib import Path
-    workflow = json.loads((Path(__file__).parents[1] / 'workflows/seedance-product-preflight-v1.comfy.json').read_text())
+    # 用连线最多的那条（全模态参考）当样本：它同时覆盖素材链与预检/提交链。
+    workflow = json.loads((Path(__file__).parents[1] / 'workflows/seedance-multi-reference-preflight-v1.comfy.json').read_text())
     nodes = {node['id']: node for node in workflow['nodes']}
     policy = next(node for node in nodes.values() if node['type'] == 'VideoFlowExecutionPolicy')
     assert policy['widgets_values'] == ['preview']
@@ -650,13 +652,9 @@ def test_each_current_template_has_its_own_persistent_execution_slot():
     from pathlib import Path
 
     workflow_root = Path(__file__).parents[1] / 'workflows'
-    names = [
-        'seedance-product-preflight-v1.comfy.json',
-        'seedance-text-to-video-preflight-v1.comfy.json',
-        'seedance-first-frame-to-video-preflight-v1.comfy.json',
-        'seedance-first-last-frame-to-video-preflight-v1.comfy.json',
-        'seedance-multi-reference-preflight-v1.comfy.json',
-    ]
+    # 按目录取而不是写死清单：新增模板时这条自动覆盖，退休的模板（参考图那条）不会漏在名单里。
+    names = sorted(path.name for path in workflow_root.glob('*-preflight-v1.comfy.json'))
+    assert len(names) == 7, names
     slots = []
 
     for name in names:
@@ -837,3 +835,108 @@ def test_delivered_slot_starts_a_new_idempotent_round_with_the_same_preflight(tm
         'executionSlotId': 'slot-1',
         'media': [],
     }
+
+
+def _file_picker(spec):
+    """把两种下拉写法都读成 (选项列表, 附加键)，不是文件选择器就返回 (None, None)。
+
+    两种写法前端都认：老式 `[选项列表, {...}]`（`isComboInputSpecV1`），
+    V3 `("COMBO", {"options": [...], ...})`（`getComboSpecComboOptions`）。
+    """
+    if isinstance(spec[0], list):
+        return spec[0], (spec[1] if len(spec) > 1 else {})
+    if spec[0] == 'COMBO':
+        options = spec[1] or {}
+        return options.get('options', []), options
+    return None, None
+
+
+def test_every_file_picking_widget_offers_an_upload(tmp_path, monkeypatch):
+    """"选文件"的槽位都得给出把本机文件传进来的办法，但图片/视频和音频走的不是一条路。
+
+    真事：图片节点一直有 `image_upload`，视频漏了，用户报"视频不能上传只能选择"；补上
+    `video_upload` 后视频槽出现上传按钮（(`"COMBO"`, {...}) 写法不会丢选项列表，
+    `getComboSpecComboOptions` 会从第二个元素里取 options）。
+
+    音频**不能**照抄：前端那条 `audio_upload` 路是写给 LoadAudio 那一族的——它注入的
+    AUDIOUPLOAD widget 会去找只有那一族才有的 `audioUI`，我们这种自定义节点上直接抛错；
+    另一条注入路（useImageUploadWidget）只认 image_upload / video_upload，明确不认
+    audio_upload。所以音频槽刻意不带标志，按钮由 web/audio_upload.js 自己加——两件事
+    都要在这里盯住，否则下次很容易有人"顺手统一一下"又把它改回标志。
+    """
+    (tmp_path / "clip.mp4").write_bytes(b"x")
+    monkeypatch.setitem(__import__('sys').modules, 'folder_paths', SimpleNamespace(
+        get_input_directory=lambda: str(tmp_path),
+        get_annotated_filepath=lambda name: str(tmp_path / name),
+    ))
+
+    # 文件选择器的标志：选项里带占位符或「不给素材」哨兵；非文件参数（时长/比例/分辨率）没有。
+    FILE_MARKERS = ("（不给素材）", "请选择")
+    pickers = []
+    for name, cls in sorted(n.CLASSES.items()):
+        for key, spec in cls.INPUT_TYPES().get('required', {}).items():
+            options, extra = _file_picker(spec)
+            if not options or not any(
+                isinstance(option, str) and any(marker in option for marker in FILE_MARKERS)
+                for option in options
+            ):
+                continue
+            pickers.append(f'{name}.{key}')
+            if cls is n.ReferenceAudioInput:
+                assert not extra.get('audio_upload'), (
+                    '音频槽不该带 audio_upload：前端那条注入路会去取我们节点上没有的 audioUI 后抛错'
+                )
+            else:
+                assert any(k.endswith('_upload') for k in extra), f'{name}.{key} 是文件选择器但没有上传标志'
+
+    # 首帧/首尾帧×2/产品图 + 参考音频/参考图/参考视频：少一个就说明漏了
+    assert pickers == [
+        'VideoFlowFirstFrameInput.image',
+        'VideoFlowFirstLastFrameInput.first_image',
+        'VideoFlowFirstLastFrameInput.last_image',
+        'VideoFlowProductInput.image',
+        'VideoFlowReferenceAudioInput.audio',
+        'VideoFlowReferenceImageInput.image',
+        'VideoFlowReferenceVideoInput.video',
+    ], pickers
+
+    # 音频槽的按钮改由扩展提供：文件要在，要挂在音频节点上，要走通用上传入口。
+    extension = Path(n.__file__).with_name('web') / 'audio_upload.js'
+    assert extension.is_file(), '音频上传按钮的扩展丢了，音频槽就没有上传功能了'
+    source = extension.read_text(encoding='utf-8')
+    assert 'VideoFlowReferenceAudioInput' in source, '扩展没挂到音频节点上'
+    assert '/upload/image' in source, '扩展没有走 ComfyUI 的通用上传入口'
+    # 只查代码，注释里可以随便解释这条规矩（这一行下面的断言就是例子）。
+    code = "\n".join(line.split("//")[0] for line in source.splitlines())
+    assert 'canvasOnly' not in code, (
+        '按钮带上 canvasOnly 就只会在经典画布里显示：Nodes 2.0 的 widgetRegistry 用 '
+        '`!options.canvasOnly && !!widget.type` 决定渲不渲染'
+    )
+
+
+def test_admission_failure_names_the_blockers_instead_of_a_bare_message():
+    """被闸门挡下时，报错要带服务端给的原因码，不能只说"不满足条件"。
+
+    真事：纯音频那条工作流还没开放，用户在 Production 下只看到"当前不满足正式提交条件"，
+    得自己去翻检查报告里的 JSON 才知道是 WORKFLOW_NOT_READY + WORKFLOW_NOT_ENABLED
+    （V2_FULL_CHAIN_NOT_COMPLETE）——而被挡下的原因决定了他该找谁、下一步做什么。
+    """
+    record = {
+        "productionAdmission": {
+            "canSubmit": False,
+            "blockers": [
+                {"code": "WORKFLOW_NOT_READY", "message": "WORKFLOW_NOT_READY", "path": "workflowKey", "status": "failed"},
+                {"code": "WORKFLOW_NOT_ENABLED", "message": "V2_FULL_CHAIN_NOT_COMPLETE", "path": "workflowKey", "status": "failed"},
+                # 只有码、没有原因的条目也要能写出来，不能变成 "None"
+                {"code": "QUOTE_UNAVAILABLE", "status": "failed"},
+            ],
+        },
+    }
+
+    assert n.admission_blockers(record) == [
+        "WORKFLOW_NOT_READY",
+        "WORKFLOW_NOT_ENABLED(V2_FULL_CHAIN_NOT_COMPLETE)",
+        "QUOTE_UNAVAILABLE",
+    ]
+    # 没有 blockers 字段时不要乱写，退回原来的那句话。
+    assert n.admission_blockers({}) == []

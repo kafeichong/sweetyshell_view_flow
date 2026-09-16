@@ -57,33 +57,69 @@ def _frame_rate(value: Any) -> float | None:
     return round(numerator / denominator, 6)
 
 
+def _measured(value: Any, digits: int = 2) -> str:
+    """把实测值写成人能读的样子；读不到就明说，别让它变成 "None"。
+
+    时长按两位小数（95.346938 秒要写成 95.35，用户才好判断该剪到几秒）；帧率这类则用
+    有效数字（24.0 写成 24，29.97 原样保留）。
+    """
+    number = _number(value)
+    if number is None:
+        return "读不到"
+    return f"{number:.{digits}f}" if digits else f"{number:g}"
+
+
+def _stable_audio_duration(value: Any) -> Any:
+    """音频时长按 0.1 秒归一，理由见后端 media-inspector.service.ts 的同名处理。
+
+    mp3 的时长靠帧计数，不同 ffprobe 版本会对同一个文件给出不同的值（实测同一个 10 秒 mp3：
+    容器里的 5.1.9 报 10.03102、本机 8.0.1 报 10.0）。预检元数据要按内容摘要与服务端逐字段
+    比对，不归一就会在正式提交时撞 `PREFLIGHT_ACTUAL_CONTENT_MISMATCH`（2026-09-16 首次
+    提交纯音频任务时真实踩到）。音频时长不进入计费公式，只用于官方 2–30 秒的限制。
+    """
+    number = _number(value)
+    return round(number, 1) if number is not None else value
+
+
+def _invalid(code: str, detail: str) -> MediaInspectionError:
+    """不合格的错误信息必须写清"实际是多少、要求是多少"。
+
+    踩过：只丢一个 `AUDIO_DURATION_INVALID` 出去，用户拿到 95 秒的音乐，在 ComfyUI 的报错面板里
+    就只看到这一行码——既看不出是时长还是格式的问题，也不知道该剪到几秒，而这些限制本来
+    都是可操作的。码放最前面，测试与日志照旧可以按码匹配。
+    """
+    return MediaInspectionError(f"{code}: {detail}")
+
+
 def _validate(kind: str, mime_type: str, size_bytes: int, metadata: dict[str, Any]) -> None:
     if size_bytes <= 0 or (size_bytes >= MAX_SIZE[kind] if kind == "image" else size_bytes > MAX_SIZE[kind]):
-        raise MediaInspectionError(f"{kind.upper()}_SIZE_INVALID")
+        raise _invalid(f"{kind.upper()}_SIZE_INVALID",
+                       f"文件 {size_bytes / 1024 / 1024:.2f} MB，上限 {MAX_SIZE[kind] / 1024 / 1024:g} MB")
     if kind in {"image", "video"}:
         width = metadata.get("width")
         height = metadata.get("height")
         if not isinstance(width, int) or not isinstance(height, int) or not (300 <= width <= 6000 and 300 <= height <= 6000):
-            raise MediaInspectionError(f"{kind.upper()}_DIMENSIONS_INVALID")
+            raise _invalid(f"{kind.upper()}_DIMENSIONS_INVALID",
+                           f"尺寸 {width}×{height}，要求宽和高都在 300–6000 像素之间")
         if not 0.4 <= width / height <= 2.5:
-            raise MediaInspectionError(f"{kind.upper()}_ASPECT_RATIO_INVALID")
+            raise _invalid(f"{kind.upper()}_ASPECT_RATIO_INVALID", f"宽高比 {width / height:.2f}，要求 0.4–2.5")
     if kind == "video":
         pixels = metadata["width"] * metadata["height"]
         if not 407696 <= pixels <= 8295044:
-            raise MediaInspectionError("VIDEO_PIXELS_INVALID")
+            raise _invalid("VIDEO_PIXELS_INVALID", f"像素 {pixels}，要求 407696–8295044")
         if not 2 <= metadata.get("durationSeconds", 0) <= 30:
-            raise MediaInspectionError("VIDEO_DURATION_INVALID")
+            raise _invalid("VIDEO_DURATION_INVALID", f"时长 {_measured(metadata.get('durationSeconds'))} 秒，要求 2–30 秒")
         if not 24 <= metadata.get("frameRate", 0) <= 60:
-            raise MediaInspectionError("VIDEO_FRAME_RATE_INVALID")
+            raise _invalid("VIDEO_FRAME_RATE_INVALID", f"帧率 {_measured(metadata.get('frameRate'), 0)}，要求 24–60")
         if metadata.get("videoCodec") not in {"h264", "h265", "hevc"}:
-            raise MediaInspectionError("VIDEO_CODEC_INVALID")
+            raise _invalid("VIDEO_CODEC_INVALID", f"编码 {metadata.get('videoCodec')}，只接受 h264 / h265 / hevc")
         if mime_type not in {"video/mp4", "video/quicktime"}:
-            raise MediaInspectionError("VIDEO_CONTAINER_INVALID")
+            raise _invalid("VIDEO_CONTAINER_INVALID", f"容器 {mime_type}，只接受 mp4 / mov")
     if kind == "audio":
         if not 2 <= metadata.get("durationSeconds", 0) <= 30:
-            raise MediaInspectionError("AUDIO_DURATION_INVALID")
+            raise _invalid("AUDIO_DURATION_INVALID", f"时长 {_measured(metadata.get('durationSeconds'))} 秒，要求 2–30 秒")
         if mime_type not in {"audio/wav", "audio/mpeg"}:
-            raise MediaInspectionError("AUDIO_FORMAT_INVALID")
+            raise _invalid("AUDIO_FORMAT_INVALID", f"格式 {mime_type}，只接受 wav / mp3")
 
 
 def _inspect_image(path: Path) -> tuple[str, dict[str, Any]] | None:
@@ -92,7 +128,7 @@ def _inspect_image(path: Path) -> tuple[str, dict[str, Any]] | None:
             image.load()
             mime_type = IMAGE_MIME.get(image.format or "")
             if not mime_type or getattr(image, "n_frames", 1) != 1:
-                raise MediaInspectionError("IMAGE_FORMAT_INVALID")
+                raise _invalid("IMAGE_FORMAT_INVALID", f"图片格式 {image.format} 不支持，只接受 png / jpg / jpeg / webp 的静态图")
             width, height = image.size
             return mime_type, {"kind": "image", "width": width, "height": height}
     except UnidentifiedImageError:
@@ -162,7 +198,7 @@ def _inspect_av(path: Path) -> tuple[str, str, dict[str, Any]]:
     duration = stream_duration if stream_duration else _number(format_data.get("duration"))
     if video:
         if "mov" not in format_name and "mp4" not in format_name:
-            raise MediaInspectionError("VIDEO_CONTAINER_INVALID")
+            raise _invalid("VIDEO_CONTAINER_INVALID", f"容器是 {format_name or '未知'}，只接受 mp4 / mov")
         brand = str((format_data.get("tags") or {}).get("major_brand", "")).strip().lower()
         mime_type = "video/quicktime" if brand.startswith("qt") else "video/mp4"
         codec = str(video.get("codec_name", "")).lower()
@@ -183,10 +219,10 @@ def _inspect_av(path: Path) -> tuple[str, str, dict[str, Any]]:
         elif "mp3" in format_name:
             mime_type = "audio/mpeg"
         else:
-            raise MediaInspectionError("AUDIO_FORMAT_INVALID")
+            raise _invalid("AUDIO_FORMAT_INVALID", f"格式是 {format_name or '未知'}，只接受 wav / mp3")
         return "audio", mime_type, {
             "kind": "audio",
-            "durationSeconds": duration,
+            "durationSeconds": _stable_audio_duration(duration),
             "audioCodec": str(audio.get("codec_name", "")).lower(),
         }
     raise MediaInspectionError("MEDIA_INSPECTION_FAILED")
@@ -241,7 +277,9 @@ def validate_media_collection(media: list[dict[str, Any]]) -> None:
             if item.get("descriptor", {}).get("role") == role
         )
 
-    if total("reference_video") > 30:
-        raise MediaInspectionError("VIDEO_TOTAL_DURATION_INVALID")
-    if total("reference_audio") > 30:
-        raise MediaInspectionError("AUDIO_TOTAL_DURATION_INVALID")
+    video_total = total("reference_video")
+    if video_total > 30:
+        raise _invalid("VIDEO_TOTAL_DURATION_INVALID", f"参考视频合计 {_measured(video_total)} 秒，上限 30 秒")
+    audio_total = total("reference_audio")
+    if audio_total > 30:
+        raise _invalid("AUDIO_TOTAL_DURATION_INVALID", f"参考音频合计 {_measured(audio_total)} 秒，上限 30 秒")

@@ -13,7 +13,9 @@ def load_template(path):
 
 
 def test_all_preflight_templates_have_bidirectional_type_safe_links():
-    assert len(PREFLIGHT_TEMPLATES) == 8
+    # 七份：参考图那条工作流已退休（provider 侧就是全模态的 reference 子集，产品图改用
+    # 全模态模板），它的模板 `seedance-product-preflight-v1.comfy.json` 不再交付。
+    assert len(PREFLIGHT_TEMPLATES) == 7
 
     for path in PREFLIGHT_TEMPLATES:
         workflow = load_template(path)
@@ -72,13 +74,16 @@ def test_all_preflight_templates_default_to_preview_and_reach_an_output_node():
         assert any(nodes[node_id]["type"] in output_classes for node_id in reachable), path.name
 
 
-def test_reference_image_template_is_the_single_image_4_to_30_second_workflow():
-    workflow = load_template(WORKFLOW_ROOT / "seedance-product-preflight-v1.comfy.json")
-    node_types = [node["type"] for node in workflow["nodes"]]
+def test_retired_reference_image_entry_keeps_its_nodes_but_ships_no_template():
+    """参考图那条工作流退休了：节点还在（删节点会牵动注册与老画布），但模板不再交付。
 
-    assert node_types.count("VideoFlowProductInput") == 1
-    assert node_types.count("VideoFlowProductRequest") == 1
-    assert "VideoFlowReferenceImageInput" not in node_types
+    产品图/参考图的正确入口是全模态模板——单图就是放第一张参考图；要"图严格当首帧"
+    用首帧模板。这条断言盯住"别再有人把模板加回来"。
+    """
+    assert not (WORKFLOW_ROOT / "seedance-product-preflight-v1.comfy.json").exists()
+    # 节点仍在注册表里，且说明里要写清退化到哪个入口，否则用户会照旧搭一条走不通的画布。
+    assert preflight_nodes.CLASSES["VideoFlowProductInput"] is preflight_nodes.ProductInput
+    assert "全模态" in preflight_nodes.ProductRequest.DESCRIPTION
     duration = preflight_nodes.ProductRequest.INPUT_TYPES()["required"]["duration"][0]
     assert duration == list(range(4, 31))
 
@@ -90,7 +95,6 @@ OPEN_TEMPLATE_REQUEST_NODES = {
     "seedance-first-frame-to-video-preflight-v1.comfy.json": "VideoFlowFirstFrameRequest",
     "seedance-first-last-frame-to-video-preflight-v1.comfy.json": "VideoFlowFirstLastFrameRequest",
     "seedance-multi-reference-preflight-v1.comfy.json": "VideoFlowMultiReferenceRequest",
-    "seedance-product-preflight-v1.comfy.json": "VideoFlowProductRequest",
     "seedance-video-edit-preflight-v1.comfy.json": "VideoFlowVideoEditRequest",
     "seedance-audio-reference-preflight-v1.comfy.json": "VideoFlowAudioReferenceRequest",
 }
