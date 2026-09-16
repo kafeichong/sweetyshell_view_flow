@@ -24,6 +24,9 @@ const TAG = "[video.flow]";
 // 发起运行的那个图。`execution_start` 是点运行那一刻发出的，此时活动标签就是"要跑的那个"，
 // 之后用户随便切都影响不到它。
 let runningGraph = null;
+// 那次运行的 prompt_id。用它把"结果"和"引发它的那次运行"绑死——只认 `execution_start` 记下的
+// 那个 prompt 的 `executed`，别的一概不碰。这样即使有别的运行/别的标签在同时活动，也不会串。
+let runningPromptId = null;
 // 所有建出来过的预览节点。`runningGraph` 兜不住时（例如用户在任务跑完之前刷新过页面，
 // 就收不到这次的 `execution_start`）用它，比按 id 去"当前标签"里瞎找安全得多。
 const knownNodes = new Set();
@@ -78,13 +81,19 @@ app.registerExtension({
     if (node.comfyClass === NODE_CLASS) knownNodes.add(node);
   },
   setup() {
-    api.addEventListener("execution_start", () => {
+    api.addEventListener("execution_start", ({ detail } = {}) => {
       runningGraph = app.graph ?? runningGraph;
+      runningPromptId = detail?.prompt_id ?? null;
     });
 
     api.addEventListener("executed", ({ detail } = {}) => {
       const items = detail?.output?.[RESULT_KEY];
       if (!Array.isArray(items) || !items.length) return;
+      // 只认我们记下的那次运行的结果。对不上就说明它是别的地方发起的，别乱挂。
+      if (runningPromptId && detail?.prompt_id && detail.prompt_id !== runningPromptId) {
+        console.warn(`${TAG} 成片属于另一次运行（prompt ${detail.prompt_id}，当前记录的是 ${runningPromptId}），跳过`);
+        return;
+      }
       const rawId = detail?.display_node ?? detail?.node;
       const target = locate(rawId);
       if (!target) return;

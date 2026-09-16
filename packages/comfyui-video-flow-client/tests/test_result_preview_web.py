@@ -26,3 +26,9 @@ def test_result_preview_locates_the_node_in_the_graph_that_ran():
     locate = code.split("function locate")[1].split("app.registerExtension")[0]
     assert "app.graph" not in locate, '定位节点时不能用 app.graph——那正是"挂错工作流"的成因'
     assert "knownNodes" in locate, "runningGraph 兜不住时（如运行中途刷新过页面）要用已知节点兜底"
+    # 光靠"最近一次运行开始"还不够：结果要能和**引发它的那次运行**对上，否则同时有别的运行时
+    # 会把别人的成片挂过来。用 prompt_id 绑死。
+    assert "runningPromptId" in code, "要用 prompt_id 把结果和引发它的那次运行绑死"
+    assert "runningPromptId" in code.split("api.addEventListener(\"executed\"")[1], (
+        "prompt_id 的比对要发生在 executed 的处理里"
+    )
