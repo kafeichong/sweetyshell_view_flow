@@ -93,7 +93,7 @@
         "Node name for S&R": "VideoFlowReferenceVideoInput"
       },
       "widgets_values": [
-        "请选择视频"
+        "（不给素材）"
       ]
     },
     {
@@ -128,7 +128,7 @@
         "Node name for S&R": "VideoFlowReferenceVideoInput"
       },
       "widgets_values": [
-        "请选择视频"
+        "（不给素材）"
       ]
     },
     {
@@ -163,7 +163,7 @@
         "Node name for S&R": "VideoFlowReferenceVideoInput"
       },
       "widgets_values": [
-        "请选择视频"
+        "（不给素材）"
       ]
     },
     {

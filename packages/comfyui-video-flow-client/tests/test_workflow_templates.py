@@ -91,6 +91,46 @@ OPEN_TEMPLATE_REQUEST_NODES = {
 }
 
 
+def test_every_template_widget_value_is_still_a_valid_choice(tmp_path, monkeypatch):
+    """模板里存的下拉值，必须永远在节点给出的选项列表里。
+
+    踩过：参考节点的下拉首项改成「不给素材」之后，老模板里存的"请选择视频"就不在列表里了，
+    导入时前端判成"输入值不可用"，用户看到的是"部分输入值不适用于该节点"。这类漂移只在
+    **input 目录里有素材文件**时才暴露（没文件时占位符恰好是唯一选项），所以这里就按有文件来测。
+    """
+    import sys
+    from types import SimpleNamespace
+
+    for name in ("a.png", "b.webp", "clip.mp4", "sound.wav"):
+        (tmp_path / name).write_bytes(b"x")
+    monkeypatch.setitem(sys.modules, "folder_paths", SimpleNamespace(
+        get_input_directory=lambda: str(tmp_path),
+        get_annotated_filepath=lambda name: str(tmp_path / name),
+    ))
+
+    for path in PREFLIGHT_TEMPLATES:
+        workflow = load_template(path)
+        for node in workflow["nodes"]:
+            node_class = preflight_nodes.CLASSES.get(node["type"])
+            if node_class is None:
+                continue
+            values = node.get("widgets_values") or []
+            index = 0
+            for name, spec in node_class.INPUT_TYPES().get("required", {}).items():
+                kind, options = spec[0], (spec[1] if len(spec) > 1 else {})
+                is_widget = isinstance(kind, list) or kind in ("STRING", "INT", "FLOAT", "BOOLEAN")
+                if not is_widget:
+                    continue  # 连线输入不占 widget 槽位
+                if index < len(values) and isinstance(kind, list):
+                    assert values[index] in kind, (
+                        f"{path.name} 的 {node['type']}.{name} 存的是 {values[index]!r}，"
+                        "但它不在选项列表里——导入时会被前端判成『输入值不可用』"
+                    )
+                index += 1
+                if options.get("image_upload"):
+                    index += 1  # 上传按钮也是一个 widget 槽位
+
+
 def test_open_templates_ship_worked_examples_rather_than_placeholders():
     """默认提示词会**直接提交给模型**：每条都得是一段照着改就能用的完整示例。
 
@@ -176,7 +216,7 @@ def test_video_edit_template_uses_video_collection_and_fixed_edit_request():
     nodes = {node["type"]: node for node in workflow["nodes"]}
 
     assert nodes["VideoFlowExecutionPolicy"]["widgets_values"] == ["preview"]
-    assert nodes["VideoFlowReferenceVideoInput"]["widgets_values"] == ["请选择视频"]
+    assert nodes["VideoFlowReferenceVideoInput"]["widgets_values"] == [preflight_nodes.UNUSED_MEDIA_CHOICE]
     assert nodes["VideoFlowVideoEditRequest"]["widgets_values"] == ["编辑参考视频", "720p"]
     links = {(source, target, kind) for _, source, _, target, _, kind in workflow["links"]}
     assert (
