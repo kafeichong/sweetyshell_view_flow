@@ -3,6 +3,7 @@ jest.mock('@nestjs/common', () => ({
   Injectable: () => (target: unknown) => target,
 }));
 
+import { MEDIA_INSPECTOR_VERSION } from '../assets/media-inspector-version';
 import { workflowDigest } from './workflow-catalog.service';
 import { PreflightRecordError } from './preflight.service';
 import {
@@ -81,6 +82,7 @@ function dependencies() {
     id: 'asset-1', ownerId: 'actor-1', role: 'input', objectKey: 'inputs/asset.png',
     inspectionStatus: 'verified', fileHash: sha256, sizeBytes: BigInt(12),
     mimeType: 'image/png', mediaMetadata: { kind: 'image', width: 1280, height: 720 },
+    inspectorVersion: MEDIA_INSPECTOR_VERSION,
   };
   const prisma = {
     task: { findFirst: jest.fn().mockResolvedValue(null) },
@@ -170,6 +172,25 @@ describe('ProductionSubmissionService', () => {
     );
     await expect(service.submit('actor-1', 'request-1', confirmed()))
       .rejects.toMatchObject({ code: 'PREFLIGHT_ACTUAL_CONTENT_MISMATCH' });
+    expect(deps.presign.verifyObjectContent).not.toHaveBeenCalled();
+  });
+
+  it('names the stale inspection instead of leaving an unexplained mismatch', async () => {
+    const deps = dependencies();
+    // 元数据**看起来**与提交声明完全一致，只是按旧版检查器算的——这正是真实形态：重检一批
+    // 资产时绝大多数行的内容是逐字节不变的，变的只有版本号。光看摘要是查不出问题的。
+    deps.asset.inspectorVersion = '2026-09-15.1';
+    const service = new ProductionSubmissionService(
+      deps.prisma as never, deps.preflight as never, deps.presign as never, deps.budget as never,
+    );
+
+    await expect(service.submit('actor-1', 'request-1', confirmed())).rejects.toMatchObject({
+      code: 'ASSET_INSPECTION_STALE',
+      path: 'media.reference-1',
+      // 用户拿到码也没用，得知道该找谁做什么——所以这条错误带 message。
+      message: expect.stringContaining('assets:reinspect'),
+    });
+    expect(deps.budget.createTaskWithReservation).not.toHaveBeenCalled();
     expect(deps.presign.verifyObjectContent).not.toHaveBeenCalled();
   });
 

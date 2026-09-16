@@ -54,16 +54,9 @@ export const defaultMediaProbeRunner: ProbeRunner = async (url) => {
     return stdout;
 };
 
-/**
- * 检查器"算出来的东西"的版本号。**只要改了 inspect() 产出的字段或算法（新增字段、归一、
- * 四舍五入、单位、取哪个时长字段），就必须递增**，并把既有的旧资产重检一遍。
- *
- * 为什么需要它：资产是**内容寻址复用**的——同一个文件第二次上传会直接复用旧行、不会再检查
- * 一次。于是检查器一改，库里就留下按旧口径算出来的 Metadata，而预检声明来自客户端的新口径，
- * 正式提交按摘要逐字段比对就会神秘失败（2026-09-16 真实踩到：同一个 mp3 在 ffprobe 5.1.9
- * 与 8.0.1 下差 0.031 秒）。有了版本号，"哪些资产需要重检"才是可判定的。
- */
-export const MEDIA_INSPECTOR_VERSION = '2026-09-16.2';
+// 版本号的定义搬去了 ./media-inspector-version（那里没有依赖，见该文件里写的理由）。这里
+// 继续转出去，让既有的 `from './media-inspector.service'` 引用不用改。
+export { MEDIA_INSPECTOR_VERSION } from './media-inspector-version';
 
 @Injectable()
 export class MediaInspectorService {

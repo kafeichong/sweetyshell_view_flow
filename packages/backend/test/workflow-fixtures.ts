@@ -1,6 +1,7 @@
 /** 当前 v2 工作流合同的测试夹具；必须经过真实 Preview HTTP 入口。 */
 import { createHash } from 'crypto';
 import { Prisma } from '@prisma/client';
+import { MEDIA_INSPECTOR_VERSION } from '../src/assets/media-inspector-version';
 import { ContractHarness } from './contract-harness';
 
 /** Deterministic isolated object bytes; image metadata is separately seeded, not decoded here. */
@@ -23,6 +24,9 @@ export async function referenceImageWorkflowRequest(harness: ContractHarness, pr
         fileHash: sha256, sizeBytes: bytes.length, mimeType,
         mediaMetadata: metadata as Prisma.InputJsonValue,
         inspectionStatus: 'verified',
+        // 真实上传路径（v1-assets.controller 的 verify 步）会盖上当前检查器版本，正式提交
+        // 拿它挡"按旧口径算出来的"资产；夹具要模拟同一个形态，否则提交会被 ASSET_INSPECTION_STALE 拒掉。
+        inspectorVersion: MEDIA_INSPECTOR_VERSION,
       },
     });
   }
