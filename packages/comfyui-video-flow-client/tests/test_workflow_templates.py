@@ -83,6 +83,21 @@ def test_reference_image_template_is_the_single_image_4_to_30_second_workflow():
     assert duration == list(range(4, 31))
 
 
+def test_text_template_ships_a_fill_in_skeleton_rather_than_a_lesson():
+    """默认提示词会**直接提交给模型**，所以它必须是能用的骨架，不是教程。
+
+    谁要是把说明文字写进默认值，用户忘了改就会连说明一起发出去——花钱还影响出片。
+    """
+    workflow = load_template(WORKFLOW_ROOT / "seedance-text-to-video-preflight-v1.comfy.json")
+    request = next(node for node in workflow["nodes"] if node["type"] == "VideoFlowTextRequest")
+    prompt = request["widgets_values"][0]
+
+    assert "【" in prompt and "】" in prompt, "骨架要用【】标出待填的位置"
+    for instructional in ("写法", "公式", "建议", "tooltip"):
+        assert instructional not in prompt, f"默认值里不能出现说明性文字：{instructional}"
+    assert len(prompt) <= 80, "骨架要短，长了用户不会读"
+
+
 def test_omni_reference_template_ships_ready_made_slots_for_extra_media():
     workflow = load_template(WORKFLOW_ROOT / "seedance-multi-reference-preflight-v1.comfy.json")
     nodes = workflow["nodes"]

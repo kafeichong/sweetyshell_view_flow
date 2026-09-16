@@ -299,6 +299,18 @@ def test_unused_choice_comes_first_with_tooltip_and_never_on_fixed_count_image_n
             assert n.UNUSED_MEDIA_CHOICE not in spec[0]
 
 
+def test_text_request_prompt_carries_the_official_writing_guidance():
+    # 官方提示词公式与两条硬口径（长度建议、反向描述只对字幕/音频有效）要出现在用户悬停看得到的地方。
+    tooltip = n.TextRequest.INPUT_TYPES()['required']['prompt'][1]['tooltip']
+
+    assert '分镜' in tooltip and '镜头 N' in tooltip
+    # 骨架里写着【景别】【运镜】，得让用户知道这些格子能填什么词。
+    assert '景别' in tooltip and '特写' in tooltip and '运镜' in tooltip and '环绕' in tooltip
+    assert '500' in tooltip
+    assert '反向' in tooltip and '字幕' in tooltip
+    assert n.TextRequest.DESCRIPTION.strip()
+
+
 def test_multi_reference_warns_that_edit_style_prompts_are_judged_as_another_task_type():
     # 官方明确：模型仍会结合提示词判定任务类型，与提交时指定的不一致就异步失败。
     # 客户端拦不住语义，只能在用户看得到的地方把写法说清楚。
