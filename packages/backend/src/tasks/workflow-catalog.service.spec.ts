@@ -207,6 +207,70 @@ describe('WorkflowCatalogService', () => {
     expect(video.requestCheck.status).toBe('passed');
   });
 
+  it('enforces the workflow-level reference rules the client explains to users', () => {
+    const referenceImage = (index: number) => ({
+      slotId: `image-${index}`, role: 'reference_image' as const, sha256: String(index % 10).repeat(64),
+      mimeType: 'image/png', sizeBytes: 1024, metadata: { kind: 'image' as const, width: 1280, height: 720 },
+    });
+
+    // 官方要求全模态参考的 content 至少含一个 reference_* 素材——合同用 minimumTotal=1 表达，
+    // 客户端「一个都没选」的排队前校验对应的就是这一条。
+    const none = catalog.evaluate({ ...textIntent(), workflowKey: 'seedance.omni-reference.v1', media: [] });
+    expect(none.requestCheck.status).toBe('failed');
+    expect(none.requestCheck.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'WORKFLOW_MEDIA_COUNT_INVALID', path: 'media' }),
+    ]));
+
+    // 「首帧 / 首尾帧 / 全模态参考三类互斥」的落点：每个工作流只声明自己的角色，
+    // 往全模态参考里塞 first_frame 会被角色白名单拒掉。
+    const mixed = catalog.evaluate({
+      ...textIntent(), workflowKey: 'seedance.omni-reference.v1',
+      media: [{ ...referenceImage(1), slotId: 'frame-1', role: 'first_frame' as const }],
+    });
+    expect(mixed.requestCheck.status).toBe('failed');
+    expect(mixed.requestCheck.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'WORKFLOW_MEDIA_ROLE_INVALID', path: 'media[0].role' }),
+    ]));
+
+    // 每类素材的数量上限：参考图 30 张是上限本身，31 张才越界。
+    const overflowing = catalog.evaluate({
+      ...textIntent(), workflowKey: 'seedance.omni-reference.v1',
+      media: Array.from({ length: 31 }, (_, index) => referenceImage(index + 1)),
+    });
+    expect(overflowing.requestCheck.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'WORKFLOW_MEDIA_ROLE_COUNT_INVALID', path: 'media' }),
+    ]));
+    const exactlyThirty = catalog.evaluate({
+      ...textIntent(), workflowKey: 'seedance.omni-reference.v1',
+      media: Array.from({ length: 30 }, (_, index) => referenceImage(index + 1)),
+    });
+    expect(exactlyThirty.requestCheck.items).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'WORKFLOW_MEDIA_ROLE_COUNT_INVALID' }),
+    ]));
+
+    // 首尾帧的角色顺序固定为 first_frame → last_frame。
+    const frame = (role: 'first_frame' | 'last_frame', index: number) => ({
+      slotId: `${role}-${index}`, role, sha256: String(index).repeat(64), mimeType: 'image/png', sizeBytes: 1024,
+      metadata: { kind: 'image' as const, width: 1280, height: 720 },
+    });
+    const reversed = catalog.evaluate({
+      ...textIntent(), workflowKey: 'seedance.first-last-frame-to-video.v1',
+      generation: { ...textIntent().generation, ratio: 'adaptive' },
+      media: [frame('last_frame', 1), frame('first_frame', 2)],
+    });
+    expect(reversed.requestCheck.status).toBe('failed');
+    expect(reversed.requestCheck.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'WORKFLOW_MEDIA_ORDER_INVALID', path: 'media[0].role' }),
+    ]));
+  });
+
+  it('requires a non-empty prompt instead of accepting an empty request', () => {
+    // 官方对全模态参考把文本列为可选，我们更严：没有提示词直接拒。
+    expect(() => catalog.evaluate({ ...textIntent(), prompt: { positive: '   ' } })).toThrow(
+      expect.objectContaining<Partial<WorkflowContractError>>({ code: 'WORKFLOW_PROMPT_INVALID', path: 'prompt.positive' }),
+    );
+  });
+
   it('rejects combined reference video and audio durations above 30 seconds', () => {
     const media = [
       ...[16, 15].map((durationSeconds, index) => ({
