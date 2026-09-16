@@ -1160,8 +1160,45 @@
           "reason": null
         },
         "validation": {
-          "status": "not_run",
-          "records": []
+          "status": "passed",
+          "records": [
+            {
+              "workflowKey": "seedance.audio-reference-to-video.v1",
+              "model": "doubao-seedance-2-5-260628",
+              "acceptedAt": "2026-09-16",
+              "software": {
+                "contractRevision": "2026-09-15.4",
+                "contractDigest": "2e95034c85ad474935befa206d2b7721eb4c3748653a83c5f6a40fdf390e8ecc",
+                "specVersion": "workflow-production-v2"
+              },
+              "parameters": {
+                "duration": 5,
+                "ratio": "16:9",
+                "resolution": "720p",
+                "outputFormat": "mp4",
+                "generateAudio": true,
+                "watermark": false,
+                "media": "1 段参考音频（mp3、10.0 秒、160,957 字节、sha256 30985c51…）——纯音频，无输入视频"
+              },
+              "artifact": {
+                "taskId": "eb605c34-0c38-4a1d-b807-98fa52ddcd94",
+                "providerTaskId": "cgt-20260916162205-ze5ge",
+                "sha256": "95eed059538442e651ba345ace90bfad8f327264df46087e1e1dbab59a299f5f",
+                "bytes": 6585443,
+                "width": 1280,
+                "height": 720,
+                "frames": 121,
+                "durationSeconds": 5.0417
+              },
+              "billing": {
+                "reservedCny": "7.623000",
+                "settledCny": "7.623000",
+                "completionTokens": 108900,
+                "status": "usage_calculated"
+              },
+              "evidenceRef": "/tmp/video-flow-acceptance/evidence/r8/r8-audio-reference-5s-evidence.json"
+            }
+          ]
         }
       },
       "media": {
