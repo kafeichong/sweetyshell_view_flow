@@ -342,24 +342,20 @@ class MultiReferenceRequest:
                 "那会让模型判定成另一类任务，提交成功后异步失败。")}),
             "duration": (list(range(4, 31)),), "ratio": (["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"],),
             "resolution": (["480p", "720p", "1080p"],)}}
-    @classmethod
-    def VALIDATE_INPUTS(cls, reference_media=None):
-        """排队前就拦下"一个素材都没选"（官方：content 至少包含一个 reference_* 素材）。
-
-        放在校验阶段而不是执行阶段，是为了让用户点 Queue 时就看到可操作的提示，
-        而不是等任务跑到一半才失败。build() 里保留同样的检查作为兜底。
-        """
-        if not reference_media:
-            return ("至少需要一个参考素材：在参考图片 / 视频 / 音频节点的下拉里选一个文件"
-                    "（其余槽位可以留在「不给素材」）。")
-        return True
+    # **这里故意没有 VALIDATE_INPUTS**。ComfyUI 的校验发生在任何节点执行之前，由连线喂进来的
+    # 输入在那一刻还没有值：execution.py 的 get_input_data() 对链接输入走
+    # `mark_missing()` / `(None,)` 分支（注释写明"This might be a lazily-evaluated input"），
+    # 只有 widget 输入才会把真实值交给自定义校验。所以对 reference_media 做校验必然恒为"空"，
+    # 连给了一张图也会报错——踩过一次，别再往回加。"一个都没选"改由 build() 在执行阶段报出。
     RETURN_TYPES = ("VIDEO_FLOW_PREFLIGHT_REQUEST",)
     RETURN_NAMES = ("request",)
     FUNCTION = "build"
     CATEGORY = "Video Flow/Seedance"
     def build(self, reference_media, prompt, duration=5, ratio="16:9", resolution="720p"):
         if not prompt.strip() or len(prompt.strip()) > 4000: raise ValueError("提示词不能为空，且不超过 4000 字符")
-        if not reference_media: raise ValueError("至少需要一个参考图片、视频或音频")
+        if not reference_media:
+            raise ValueError("至少需要一个参考素材：在参考图片 / 视频 / 音频节点的下拉里选一个文件"
+                             "（其余槽位可以留在「不给素材」，不用删连线）")
         reference_media = _validated_reference_media(reference_media)
         return ({"intent": {"contractVersion": 2, "workflowKey": "seedance.omni-reference.v1", "prompt": {"positive": prompt.strip()},
             "generation": generation_request(duration, ratio, resolution),

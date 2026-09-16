@@ -310,19 +310,20 @@ def test_multi_reference_warns_that_edit_style_prompts_are_judged_as_another_tas
     assert '编辑' in prompt_spec[1]['tooltip'] and '延长' in prompt_spec[1]['tooltip']
 
 
-def test_reference_nodes_carry_descriptions_and_validate_before_queueing():
+def test_reference_nodes_carry_descriptions_and_do_not_validate_link_inputs():
     # 三个参考节点与请求节点都要有 DESCRIPTION（官方的节点级说明位），
     # 否则"可以留空"这件事只存在于代码里，用户看不到。
     for cls in (n.ReferenceImageInput, n.ReferenceVideoInput, n.ReferenceAudioInput, n.MultiReferenceRequest):
         assert cls.DESCRIPTION.strip()
 
-    # 空列表在排队前就被拦下，返回可操作的文案；有素材时放行。
-    message = n.MultiReferenceRequest.VALIDATE_INPUTS(reference_media=[])
-    assert isinstance(message, str)
-    assert '至少需要一个参考素材' in message and '不给素材' in message
-    assert n.MultiReferenceRequest.VALIDATE_INPUTS(
-        reference_media=[{'descriptor': {'role': 'reference_image'}}],
-    ) is True
+    # reference_media 是连线输入，ComfyUI 在**校验阶段**给链接输入传 None
+    # （execution.py 的 get_input_data → mark_missing 分支，因为那时还没有节点执行过），
+    # 所以这里绝不能有 VALIDATE_INPUTS：有它必然恒报"没有素材"，连给了一张图也一样。
+    assert 'VALIDATE_INPUTS' not in n.MultiReferenceRequest.__dict__
+
+    # "一个都没选"改在执行阶段报，文案要能把人指回正确的操作。
+    with pytest.raises(ValueError, match='至少需要一个参考素材'):
+        n.MultiReferenceRequest().build([], '提示词')
 
 
 def test_reference_media_inputs_enforce_official_item_limits(monkeypatch):
@@ -368,7 +369,7 @@ def test_multi_reference_request_accepts_fifty_items_and_rejects_invalid_collect
     request = n.MultiReferenceRequest().build(media, '使用全部参考素材', 30, '16:9', '1080p')[0]
     assert len(request['intent']['media']) == 50
 
-    with pytest.raises(ValueError, match='至少需要一个参考图片、视频或音频'):
+    with pytest.raises(ValueError, match='至少需要一个参考素材'):
         n.MultiReferenceRequest().build([], '没有参考素材')
     with pytest.raises(ValueError, match='参考素材总数最多 50 个'):
         n.MultiReferenceRequest().build(media + [media[0]], '素材超限')
