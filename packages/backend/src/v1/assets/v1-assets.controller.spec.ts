@@ -127,6 +127,7 @@ describe('V1AssetsController ownership', () => {
   it('persists an input asset before returning its upload ticket', async () => {
     const assets = {
       findOwned: jest.fn(),
+      alignPendingUpload: jest.fn(),
       registerInput: jest.fn().mockResolvedValue({ id: 'asset-1', objectKey: 'inputs/actor-a/file.png' }),
     };
     const presign = {
@@ -162,6 +163,7 @@ describe('V1AssetsController ownership', () => {
     const hash = 'a'.repeat(64);
     const assets = {
       findOwned: jest.fn(),
+      alignPendingUpload: jest.fn(),
       findByOwnerHash: jest.fn().mockResolvedValue({
         id: 'asset-existing',
         objectKey: 'inputs/actor-a/reused.png',
@@ -182,6 +184,9 @@ describe('V1AssetsController ownership', () => {
     expect(assets.findByOwnerHash).toHaveBeenCalledWith('actor-a', hash);
     // 不能新建 Asset，否则幂等会失效。
     expect(assets.registerInput).not.toHaveBeenCalled();
+    // 复用时要先把行上的 mime/size 对齐到新票据，否则 complete 拿 OSS 的新 Content-Type 跟行里
+    // 的旧值比，会恒定报"与票据不符"（踩过：ffprobe 升到 9.0 后同一个 mov 的判定从 mp4 变 quicktime）。
+    expect(assets.alignPendingUpload).toHaveBeenCalledWith('asset-existing', 'image/png', 10);
     expect(ticket).toMatchObject({ assetId: 'asset-existing' });
     expect(presign.createUploadTicket).toHaveBeenCalledWith(
       'asset-existing',
@@ -249,6 +254,7 @@ describe('V1AssetsController ownership', () => {
     const hash = 'b'.repeat(64);
     const assets = {
       findOwned: jest.fn(),
+      alignPendingUpload: jest.fn(),
       findByOwnerHash: jest.fn().mockResolvedValue(null),
       registerInput: jest.fn().mockResolvedValue({ id: 'asset-new', objectKey: 'inputs/actor-a/new.png' }),
     };

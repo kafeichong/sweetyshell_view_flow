@@ -126,6 +126,8 @@ export class V1AssetsController {
             inspectionStatus: existing.inspectionStatus,
           };
         }
+        // 先对齐，再签票据：票据里写的 mime 必须与资产行一致，否则 complete 必然报"与票据不符"。
+        await this.assets.alignPendingUpload(existing.id, mimeType, body.sizeBytes);
         return this.presign.createUploadTicket(
           existing.id,
           existing.objectKey,
