@@ -323,9 +323,33 @@
             "width": 528,
             "height": 798,
             "completionTokens": 39912
+          },
+          {
+            "taskId": "dc63f2c8-d34a-42ec-ae30-ffb6c69fa1e5",
+            "request": "4s/480p/3:4（3 图 + 10 秒输入视频）",
+            "frames": 97,
+            "width": 560,
+            "height": 752,
+            "completionTokens": 138591
+          },
+          {
+            "taskId": "1614cd62-21f2-440a-a493-0d60923e3e77",
+            "request": "5s/720p/adaptive（首尾帧）",
+            "frames": 121,
+            "width": 786,
+            "height": 1180,
+            "completionTokens": 109594
+          },
+          {
+            "taskId": "141babe3-906e-4b5a-998b-eaa6947d2ea6",
+            "request": "5s/720p/adaptive（首尾帧，同一 intent 的第二次出片）",
+            "frames": 121,
+            "width": 786,
+            "height": 1180,
+            "completionTokens": 109594
           }
         ],
-        "note": "五条真实结算全部等于『(输出时长 × 帧率 + 1) 帧 × 宽 × 高 / 1024』再向下截断（最后一条是 adaptive 输出、尺寸不在合同像素表内，同样成立）；本实现向上取整，因此最多比 Provider 多留 1 token（480p 9:16 一条即 58,046 对 58,045）。30 秒边界尚未实测，最低 token 口径不随本调整变动。"
+        "note": "八条真实结算全部等于『(输出时长 × 帧率 + 1) 帧 × 宽 × 高 / 1024』再向下截断（新增的一条是**含输入视频**的样本：`(10 + 4 + 1/24) 秒 × 560×752×24/1024 = 138,591.25` → Provider 记 138,591，说明输入视频秒数与『+1 帧』在含视频时同样成立）；本实现向上取整，因此最多比 Provider 多留 1 token。30 秒边界尚未实测，最低 token 口径不随本调整变动。"
       },
       "adaptiveOutputBound": {
         "status": "falsified_needs_margin",
@@ -387,7 +411,12 @@
         ],
         "note": "规则已直接对照官方快查表与官方价格计算器核对（2026-09-15）：计费口径 MAX(估算, 最低) 来自官方计算器内嵌公式，最低值来自官方表，而『输出时长 × 5/3 向上取整』等价于官方表自己存的输入时长下限 ceil(2×输出时长/3)（140/140 行吻合）。因此本实现的三部分均有官方依据，不再只是经验拟合。仍需注意：官方来源的输入时长都是整数秒（表为整数列、计算器为 2-30 下拉），未覆盖非整数秒，本实现按精确小数秒计算，这一点无官方依据。"
       },
-      "productionQuotePolicy": "reserve_the_max_of_formula_and_minimum"
+      "productionQuotePolicy": "reserve_the_max_of_formula_and_minimum",
+      "productionVerification": {
+        "verifiedOn": "2026-09-16",
+        "formulaPath": "已由真实结算验证：taskId dc63f2c8…（4s/480p/3:4，含 10 秒输入视频）公式值 138,591 > 下限 69,090，结算 138,591 等于公式的截断值。",
+        "minimumPath": "**尚未由真实结算验证**：至今没有任何一条真实任务触发过下限，因为它要求公式值低于下限（短输出 + 短输入视频，例如 4 秒输出配 2 秒输入视频：公式 59,290 < 下限 69,090）。"
+      }
     },
     "accountPrice": {
       "publicCatalogIsFinalBill": false,
@@ -834,8 +863,45 @@
           "reason": null
         },
         "validation": {
-          "status": "not_run",
-          "records": []
+          "status": "passed",
+          "records": [
+            {
+              "workflowKey": "seedance.omni-reference.v1",
+              "model": "doubao-seedance-2-5-260628",
+              "acceptedAt": "2026-09-16",
+              "software": {
+                "contractRevision": "2026-09-15.4",
+                "contractDigest": "2e95034c85ad474935befa206d2b7721eb4c3748653a83c5f6a40fdf390e8ecc",
+                "specVersion": "workflow-production-v2"
+              },
+              "parameters": {
+                "duration": 4,
+                "ratio": "3:4",
+                "resolution": "480p",
+                "outputFormat": "mp4",
+                "generateAudio": true,
+                "watermark": false,
+                "media": "3 张参考图（611x917 / 717x1051 / 1139x568）+ 1 段 10 秒参考视频（1280x720 30fps h264）"
+              },
+              "artifact": {
+                "taskId": "dc63f2c8-d34a-42ec-ae30-ffb6c69fa1e5",
+                "providerTaskId": "cgt-20260916101236-xwo5k",
+                "sha256": "9edcd014647c5105924d2acfffe3cc4387b4c8d5ebff6e6ee723e05e4e29b8e6",
+                "bytes": 2176508,
+                "width": 560,
+                "height": 752,
+                "frames": 97,
+                "durationSeconds": 4.064
+              },
+              "billing": {
+                "reservedCny": "5.820864",
+                "settledCny": "5.820822",
+                "completionTokens": 138591,
+                "status": "usage_calculated"
+              },
+              "evidenceRef": "/private/tmp/video-flow-comfy-acceptance/evidence/r8/r8-omni-reference-4s-input-video-evidence.json"
+            }
+          ]
         }
       },
       "media": {
