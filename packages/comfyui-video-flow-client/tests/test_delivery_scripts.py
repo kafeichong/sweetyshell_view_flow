@@ -173,6 +173,65 @@ def test_one_click_installer_installs_into_a_comfy_desktop_instance(tmp_path):
     assert (root / "custom_nodes/video_flow_client/client.py").is_file()
 
 
+def _client_source_copy(base: Path) -> Path:
+    """造一个最小的"客户端源目录"，只用来测试安装器本身的行为。
+
+    这里**不搬**仓库里的 `__init__.py` 等 Python 文件：开发期间它们正被别人改，
+    拷过来既可能语法不完整、又会让 pytest 把临时目录当包导入（踩过）。
+    安装器只负责按清单拷贝，不需要它们真的可执行。
+    """
+    import shutil
+
+    source = base / "source"
+    source.mkdir()
+    # 安装器按清单拷贝这些名字，但不执行它们——占位内容就够，且不会把开发中的文件带进来。
+    for name in ("client.py", "config.py", "execution_slot.py", "media_inspection.py",
+                 "nodes.py", "preflight_nodes.py", "receipts.py", "submission_state.py"):
+        (source / name).write_text("# test placeholder\n", encoding="utf-8")
+    (source / "__init__.py").write_text('CLIENT_VERSION = "2099-01-01.1"\n', encoding="utf-8")
+    for name in ("install.sh", "requirements.txt", "README.md"):
+        source.joinpath(name).write_bytes((CLIENT_DIR / name).read_bytes())
+    source.joinpath("install.sh").chmod((CLIENT_DIR / "install.sh").stat().st_mode)
+    for directory in ("workflows", "examples", "web"):
+        if (CLIENT_DIR / directory).is_dir():
+            shutil.copytree(CLIENT_DIR / directory, source / directory,
+                            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    return source
+
+
+def test_installer_warns_when_installing_from_a_dirty_checkout(tmp_path):
+    """从开发目录安装会把未提交的东西一起拷走——提示一下，别让人踩第二次。
+
+    踩过：并行开发中的界面文件被装进了本机 ComfyUI 的 web/ 目录。
+    """
+    source = _client_source_copy(tmp_path)
+    subprocess.run(["git", "init", "-q"], cwd=source, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=source, check=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-qm", "clean"],
+        cwd=source, check=True,
+    )
+
+    comfy_root = tmp_path / "ComfyUI"
+    (comfy_root / ".venv/bin").mkdir(parents=True)
+    _write_executable(comfy_root / ".venv/bin/python", "#!/bin/sh\nexit 0\n")
+    (comfy_root / "custom_nodes").mkdir()
+
+    # 干净检出（全部已跟踪）不该警告——否则提示会变成噪音，没人再看。
+    clean = subprocess.run(
+        [str(source / "install.sh"), str(comfy_root)], check=True, text=True, capture_output=True,
+    )
+    assert "未提交/未跟踪的文件" not in clean.stderr
+
+    # 工作区里多出一个未跟踪文件（就是踩过的那种）→ 警告并点名。
+    (source / "web/js/half_finished_panel.js").write_text("// wip\n", encoding="utf-8")
+    warned = subprocess.run(
+        [str(source / "install.sh"), str(comfy_root)], check=True, text=True, capture_output=True,
+    )
+    assert "未提交/未跟踪的文件" in warned.stderr
+    assert "half_finished_panel.js" in warned.stderr
+
+
 def test_diagnostics_script_reports_layout_without_leaking_the_token(tmp_path):
     home = tmp_path / "home"
     (home / ".video-flow").mkdir(parents=True)
