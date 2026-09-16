@@ -16,6 +16,18 @@ BACKUP_ROOT="$COMFYUI_ROOT/.video-flow-backups"
 test -x "$PYTHON_BIN" || { echo "error: ComfyUI Python 不存在: $PYTHON_BIN" >&2; exit 1; }
 test -d "$CUSTOM_NODES_DIR" || { echo "error: custom_nodes 不存在: $CUSTOM_NODES_DIR" >&2; exit 1; }
 
+# 交付物必须来自干净副本。从带未提交/未跟踪文件的开发目录安装，会把没做完的东西一起拷进
+# 别人的 ComfyUI——踩过一次：并行开发中的界面文件就这样被装进了本机 ComfyUI。
+# 用 git archive 导出的副本没有 .git，这条自动跳过。
+if command -v git >/dev/null 2>&1 && git -C "$SOURCE_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+  dirty="$(git -C "$SOURCE_DIR" status --porcelain -- . 2>/dev/null || true)"
+  if test -n "$dirty"; then
+    echo "⚠️  警告：这个客户端目录里有未提交/未跟踪的文件，它们会一起被安装到 ComfyUI：" >&2
+    printf '%s\n' "$dirty" | sed 's/^/      /' >&2
+    echo "      交付给他人请改用 git archive 导出的干净副本（见 README「交付」一节）。" >&2
+  fi
+fi
+
 cleanup() {
   if test -d "$TEMP_DIR"; then
     rm -rf -- "$TEMP_DIR"
