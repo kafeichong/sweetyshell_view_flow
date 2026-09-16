@@ -118,11 +118,12 @@ def test_every_template_widget_value_is_still_a_valid_choice(tmp_path, monkeypat
             index = 0
             for name, spec in node_class.INPUT_TYPES().get("required", {}).items():
                 kind, options = spec[0], (spec[1] if len(spec) > 1 else {})
-                is_widget = isinstance(kind, list) or kind in ("STRING", "INT", "FLOAT", "BOOLEAN")
+                is_widget = isinstance(kind, list) or kind in ("STRING", "INT", "FLOAT", "BOOLEAN", "COMBO")
                 if not is_widget:
                     continue  # 连线输入不占 widget 槽位
-                if index < len(values) and isinstance(kind, list):
-                    assert values[index] in kind, (
+                options_list = options.get("options") if kind == "COMBO" else kind
+                if index < len(values) and isinstance(options_list, list):
+                    assert values[index] in options_list, (
                         f"{path.name} 的 {node['type']}.{name} 存的是 {values[index]!r}，"
                         "但它不在选项列表里——导入时会被前端判成『输入值不可用』"
                     )
