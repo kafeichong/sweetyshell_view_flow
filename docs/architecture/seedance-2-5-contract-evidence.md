@@ -207,3 +207,21 @@ HTTP 示例明确图片角色 `first_frame` 和 `last_frame`，并使用：
 | `seedance.video-edit.v1` | A：`reference_video`、`edit`、`adaptive`、`duration=-1`、4–30 秒 | `disabled` | 视频 metadata 校验、当前账号真实验收 |
 | `seedance.video-extend.v1` | A：`reference_video`、`extend`、`adaptive` | `disabled` | 视频 metadata 校验、当前账号真实验收 |
 | `seedance.audio-reference-to-video.v1` | A：纯 `reference_audio`、音频格式/时长/数量限制 | `disabled` | 音频上传与 metadata 校验、当前账号真实验收 |
+
+## 12. 创建任务 API 核对：组合、互斥与返回值语义（2026-09-16）
+
+**要查 Provider 接口规则，顺序是：** ① 先看 `contracts/seedance-workflows.v2.json`（`media` / `contentRules` / `pricing`，每条规则都带 evidence id）；② 再看本地官方快照 `docs/arkdocs/*.md`；③ 最后才开官网。官网页面 **WebFetch 会被域名策略挡住**（`docs.volcengine.com`、`www.volcengine.com`、`bytedance.larkoffice.com` 都不行），要用**本机浏览器**打开后逐段读——本轮就是这么核对的。
+
+来源：[创建视频生成任务](https://docs.volcengine.com/docs/82379/1520757?lang=zh)（合同 evidence id `official-seedance-2.5-create-task-api`，本地快照 `docs/arkdocs/视频生成教程.md`）。
+
+| 规则 | 内容 |
+| --- | --- |
+| content 组合 | 官方枚举 8 种：纯文本；文本（可选）+ 图片 / 视频 / 音频；+ 图音 / 图视频 / 视频音频 / 图视频音频。**文本提示词对全模态参考是可选字段** |
+| 至少一个参考素材 | 全模态参考要求 content 中**至少有一个** `reference_image` / `reference_video` / `reference_audio`；三类可自由组合（图片 0-30、视频 0-10、音频 0-10） |
+| **三类场景互斥** | 图生视频-首帧、图生视频-首尾帧、全模态参考生视频**不可混用**：`first_frame` / `last_frame` 与 `reference_*` 不能出现在同一个 content 里。全模态参考只能在提示词里指定某张参考图充当首帧/尾帧 |
+| `omni_reference_task_type` | `auto`（默认，模型判定，冲突异步报错）/ `reference` / `edit` / `extend`；**显式指定会在提交时提前校验**，不符合立即报错且任务不创建 |
+| `duration` 返回值 | 接口返回的 `duration` = **实际总帧数 / 24，向下取整**；官方举例"最终生成 133 帧 → 5.54 秒 → 返回 5" |
+
+**为什么值得单独记**：最后一条是官方自己说明"帧数 ≠ 时长 × 帧率"，既解释了本项目在真实结算里实测到的"+1 帧"（见 `pricing.estimate.reservationAdjustment`），也说明计费按实际出片帧数计是官方口径；互斥规则则是客户端模板层面必须避开的坑（首尾帧模板与全模态模板不能互相混用角色）。
+
+上述规则已写入合同 `contentRules` 并带官方证据指针；客户端侧对应实现是「不给素材」空槽约定、每个输入的 `tooltip`、节点 `DESCRIPTION`、以及 `MultiReferenceRequest.VALIDATE_INPUTS` 的排队前校验（`packages/comfyui-video-flow-client/preflight_nodes.py`），并由 `tests/test_contract_alignment.py` 断言客户端本地上限与合同一致。
