@@ -83,23 +83,36 @@ def test_reference_image_template_is_the_single_image_4_to_30_second_workflow():
     assert duration == list(range(4, 31))
 
 
-def test_text_template_ships_a_worked_example_rather_than_a_lesson():
-    """默认提示词会**直接提交给模型**：它得是一段照着改就能用的完整示例。
+OPEN_TEMPLATE_REQUEST_NODES = {
+    "seedance-text-to-video-preflight-v1.comfy.json": "VideoFlowTextRequest",
+    "seedance-first-frame-to-video-preflight-v1.comfy.json": "VideoFlowFirstFrameRequest",
+    "seedance-first-last-frame-to-video-preflight-v1.comfy.json": "VideoFlowFirstLastFrameRequest",
+    "seedance-multi-reference-preflight-v1.comfy.json": "VideoFlowMultiReferenceRequest",
+}
+
+
+def test_open_templates_ship_worked_examples_rather_than_placeholders():
+    """默认提示词会**直接提交给模型**：每条都得是一段照着改就能用的完整示例。
 
     官方公式有四段（一句话概述 → 贯穿细节 → 时间戳分镜 → 结尾补充），默认值要把它走全，
     否则用户学不到分镜该怎么写；同时不能混进说明文字——用户忘了改就会连说明一起发出去。
     """
-    workflow = load_template(WORKFLOW_ROOT / "seedance-text-to-video-preflight-v1.comfy.json")
-    request = next(node for node in workflow["nodes"] if node["type"] == "VideoFlowTextRequest")
-    prompt = request["widgets_values"][0]
+    for filename, node_type in OPEN_TEMPLATE_REQUEST_NODES.items():
+        workflow = load_template(WORKFLOW_ROOT / filename)
+        prompt = next(node for node in workflow["nodes"] if node["type"] == node_type)["widgets_values"][0]
 
-    # 分镜：默认时长 5 秒，示例的时间戳要落在 5 秒内，用户不改成 30 秒也能直接跑。
-    assert "0s-3s" in prompt and "3s-5s" in prompt
-    # 镜头语言与结尾补充都要出现，让人看得到"这四段长什么样"。
-    assert "镜头" in prompt and "景深" in prompt
-    for instructional in ("写法", "公式", "建议", "tooltip", "【"):
-        assert instructional not in prompt, f"默认值里不能出现说明性文字或占位符：{instructional}"
-    assert len(prompt) <= 300, "示例要能在官方建议的 500 字内留出改写空间"
+        # 分镜：默认时长 5 秒，示例的时间戳要落在 5 秒内，用户不改时长也能直接跑。
+        assert "0s-3s" in prompt and "3s-5s" in prompt, filename
+        # 镜头语言与结尾补充都要出现，让人看得到"这四段长什么样"。
+        assert "镜头" in prompt and "景深" in prompt, filename
+        for instructional in ("写法", "公式", "建议", "tooltip", "【"):
+            assert instructional not in prompt, f"{filename} 默认值里不能出现说明性文字或占位符：{instructional}"
+        assert len(prompt) <= 300, f"{filename} 示例要能在官方建议的 500 字内留出改写空间"
+
+    # 全模态参考的示例要示范"怎么指代素材"——这是这条工作流最容易写错的地方。
+    multi = load_template(WORKFLOW_ROOT / "seedance-multi-reference-preflight-v1.comfy.json")
+    multi_prompt = next(node for node in multi["nodes"] if node["type"] == "VideoFlowMultiReferenceRequest")["widgets_values"][0]
+    assert "@图像1" in multi_prompt and "@视频1" in multi_prompt
 
 
 def test_omni_reference_template_ships_ready_made_slots_for_extra_media():
