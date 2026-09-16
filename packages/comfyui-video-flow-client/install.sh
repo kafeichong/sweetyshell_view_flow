@@ -94,9 +94,10 @@ else
   echo "    FFPROBE_NOT_AVAILABLE（预检之前就停住，不会产生费用）。补上它，任选一种："
   echo
   echo "    ① 装了 Homebrew（终端里跑）：      brew install ffmpeg"
-  echo "    ② 没装 Homebrew：去 https://evermeet.cx/ffmpeg/ 下载 ffprobe，"
-  echo "       解压后放到 ~/.video-flow/ffprobe（文件名就叫 ffprobe），然后："
+  echo "    ② 没装 Homebrew：去 https://evermeet.cx/ffmpeg/ 下载 ffprobe，解压后："
+  echo "         mkdir -p ~/.video-flow && mv ~/Downloads/ffprobe ~/.video-flow/ffprobe"
   echo "         chmod +x ~/.video-flow/ffprobe"
+  echo "         xattr -d com.apple.quarantine ~/.video-flow/ffprobe   # 下载来的会被系统拦，要去隔离"
   echo
   echo "    （② 不用配环境变量：客户端会自己去 ~/.video-flow/ 找。）"
   echo
