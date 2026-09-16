@@ -186,3 +186,25 @@ def test_video_and_audio_size_allow_inclusive_limits_while_image_limit_is_exclus
     with pytest.raises(media.MediaInspectionError, match="IMAGE_SIZE_INVALID"):
         media._validate("image", "image/png", 30 * 1024 * 1024, {"width": 640, "height": 480})
     media._validate("audio", "audio/wav", 15 * 1024 * 1024, {"durationSeconds": 2})
+
+
+def test_video_duration_comes_from_the_stream_not_the_container(tmp_path, monkeypatch):
+    """时长必须取流的 duration：容器时长随 ffprobe 版本变化，会让本机与后端对不上。
+
+    真事：同一个 mp4，容器 ffprobe 5.1.9 报 5.077333、8.0.1 报 5.041667，而流的时长两边
+    都是 5.041667。预检元数据按内容摘要逐字段比对，用容器时长就会被
+    PREFLIGHT_ACTUAL_CONTENT_MISMATCH 拒掉。
+    """
+    path = tmp_path / "clip.mp4"
+    path.write_bytes(b"fake")
+    monkeypatch.setattr(media, "_probe", lambda _path: {
+        "format": {"duration": "5.077333", "format_name": "mov,mp4,m4a,3gp,3g2,mj2", "tags": {"major_brand": "isom"}},
+        "streams": [
+            {"codec_type": "video", "width": 1280, "height": 720, "codec_name": "h264",
+             "duration": "5.041667", "avg_frame_rate": "24/1"},
+            {"codec_type": "audio", "codec_name": "aac", "duration": "5.041667"},
+        ],
+    })
+
+    item = media.inspect_media(path, "reference_video", "reference-video-1")
+    assert item["descriptor"]["metadata"]["durationSeconds"] == 5.041667

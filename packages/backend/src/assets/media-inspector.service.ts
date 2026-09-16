@@ -12,6 +12,7 @@ type ProbeStream = {
   width?: number;
   height?: number;
   codec_name?: string;
+  duration?: string;
   r_frame_rate?: string;
   avg_frame_rate?: string;
 };
@@ -54,7 +55,14 @@ export class MediaInspectorService {
     const streams = data.streams ?? [];
     const video = streams.find((stream) => stream.codec_type === 'video');
     const audio = streams.find((stream) => stream.codec_type === 'audio');
-    const duration = Number(data.format?.duration);
+    // 时长取**流**的 duration，优先视频流、其次音频流，最后才退回容器。
+    // 容器的 `format.duration` 在不同 ffprobe 版本间会给出不同的值（同一个 mp4：5.1.9 报
+    // 5.077333、8.0.1 报 5.041667），而预检元数据要按内容摘要比对——客户端与后端用的
+    // ffprobe 版本不同时，摘要就对不上，提交会被 PREFLIGHT_ACTUAL_CONTENT_MISMATCH 拒掉。
+    // 流的 duration 跨版本一致，而且官方限制说的也是视频本身的时长。
+    const streamDuration = Number(video?.duration ?? audio?.duration);
+    const containerDuration = Number(data.format?.duration);
+    const duration = Number.isFinite(streamDuration) && streamDuration > 0 ? streamDuration : containerDuration;
     const durationSeconds = Number.isFinite(duration) && duration > 0 ? rounded(duration) : undefined;
     const formatName = data.format?.format_name?.toLowerCase() ?? '';
     if (video && Number.isInteger(video.width) && Number.isInteger(video.height)) {

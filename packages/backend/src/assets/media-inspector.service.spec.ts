@@ -18,6 +18,23 @@ describe('MediaInspectorService', () => {
     });
   });
 
+  it('prefers the stream duration over the container duration, which varies by ffprobe version', async () => {
+    // 同一个 mp4：容器 ffprobe 5.1.9 报 5.077333、8.0.1 报 5.041667，而**流的时长**两边都是
+    // 5.041667。预检元数据要按内容摘要逐字段比对，用容器时长会让客户端与后端对不上，
+    // 提交被 PREFLIGHT_ACTUAL_CONTENT_MISMATCH 拒掉（2026-09-16 真实踩过）。
+    const inspect = new MediaInspectorService(async () => JSON.stringify({
+      format: { duration: '5.077333', format_name: 'mov,mp4,m4a,3gp,3g2,mj2', tags: { major_brand: 'isom' } },
+      streams: [
+        { codec_type: 'video', width: 1280, height: 720, codec_name: 'h264', duration: '5.041667', r_frame_rate: '24/1' },
+        { codec_type: 'audio', codec_name: 'aac', duration: '5.041667' },
+      ],
+    }));
+
+    await expect(inspect.inspect('https://oss.example/tea.mp4')).resolves.toMatchObject({
+      kind: 'video', durationSeconds: 5.041667,
+    });
+  });
+
   it('rejects an ffprobe response without a media stream', async () => {
     const inspect = new MediaInspectorService(async () => JSON.stringify({ format: {}, streams: [] }));
     await expect(inspect.inspect('https://oss.example/invalid')).rejects.toThrow('MEDIA_INSPECTION_FAILED');
