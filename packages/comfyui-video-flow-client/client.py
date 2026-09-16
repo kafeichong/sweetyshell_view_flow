@@ -87,6 +87,45 @@ def provider_failure_message(summary: dict[str, Any]) -> str:
     return "".join(parts) or "provider reported a failure"
 
 
+def server_error_detail(response) -> str:
+    """后端把拒绝原因写在 JSON body 里（`code` / `path` / `message`），
+
+    而 `response.raise_for_status()` 只会抛出"400 Bad Request"——原因就丢了。用户看到的应该是
+    "服务器拒绝：SUBMISSION_MEDIA_BINDINGS_MISMATCH（media）…"，而不是一句 HTTP 状态码。
+    """
+    try:
+        payload = response.json()
+    except Exception:  # noqa: BLE001 - 非 JSON 响应也要给点东西
+        return (response.text or "").strip()[:300]
+    if isinstance(payload, dict):
+        code = payload.get("code")
+        path = payload.get("path")
+        message = payload.get("message")
+        parts = [str(item) for item in (code, f"（{path}）" if path else None, message) if item]
+        if parts:
+            return " ".join(parts)
+    return json.dumps(payload, ensure_ascii=False)[:300]
+
+
+def raise_for_status_with_reason(response) -> None:
+    """抛出带后端原因的 HTTP 错误。
+
+    **异常类型保持 httpx.HTTPStatusError**：调用方靠它区分 404 / 401 / 400，换成别的类型会
+    把"任务不存在"之类的判断一起打断（踩过）。这里只把 body 里的原因并进消息。
+    """
+    if response.status_code < 400:
+        return
+    detail = server_error_detail(response)
+    if not detail:
+        response.raise_for_status()
+        return
+    raise httpx.HTTPStatusError(
+        f"{response.status_code} {response.reason_phrase}：{detail}",
+        request=response.request,
+        response=response,
+    )
+
+
 class TaskProviderFailed(TaskWaitError):
     def __init__(self, task_id: str, message: str):
         super().__init__(task_id, "PROVIDER_FAILED", message)
@@ -174,7 +213,7 @@ class VideoFlowClient:
             headers=self._headers(),
             json=body,
         )
-        response.raise_for_status()
+        raise_for_status_with_reason(response)
         return response.json()
 
     def upload_media(self, media: bytes | BinaryIO, *, filename: str, mime_type: str) -> dict[str, Any]:
@@ -191,7 +230,7 @@ class VideoFlowClient:
                 return self.complete_upload(ticket["assetId"])
             return ticket
         response = self.client.put(ticket["uploadUrl"], headers=ticket.get("uploadHeaders", {}), content=data)
-        response.raise_for_status()
+        raise_for_status_with_reason(response)
         return self.complete_upload(ticket["assetId"])
 
     def complete_upload(self, asset_id: str) -> dict[str, Any]:
@@ -199,7 +238,7 @@ class VideoFlowClient:
             f"{self.config.backend_url}/api/v1/assets/{asset_id}/complete",
             headers=self._headers(),
         )
-        response.raise_for_status()
+        raise_for_status_with_reason(response)
         return response.json()
 
     def create_task(
@@ -289,7 +328,7 @@ class VideoFlowClient:
             headers=self._headers(scoped_idempotency_key),
             json=request_body,
         )
-        response.raise_for_status()
+        raise_for_status_with_reason(response)
         return response.json()
 
     def receipt_namespace(self) -> str:
@@ -404,7 +443,7 @@ class VideoFlowClient:
             f"{self.config.backend_url}/api/v1/tasks/{task_id}",
             headers=self._headers(),
         )
-        response.raise_for_status()
+        raise_for_status_with_reason(response)
         return response.json()
 
     def preflight(self, intent: dict[str, Any]) -> dict[str, Any]:
@@ -414,7 +453,7 @@ class VideoFlowClient:
             headers=self._headers(),
             json=intent,
         )
-        response.raise_for_status()
+        raise_for_status_with_reason(response)
         return response.json()
 
     def check_preflight(self, preflight_id: str) -> dict[str, Any]:
@@ -423,7 +462,7 @@ class VideoFlowClient:
             f"{self.config.backend_url}/api/v1/tasks/preflight/{preflight_id}/check",
             headers=self._headers(),
         )
-        response.raise_for_status()
+        raise_for_status_with_reason(response)
         return response.json()
 
     def get_current_task_for_slot(self, execution_slot_id: str) -> dict[str, Any]:
@@ -432,7 +471,7 @@ class VideoFlowClient:
             f"{self.config.backend_url}/api/v1/tasks/slots/{encoded_slot_id}/current",
             headers=self._headers(),
         )
-        response.raise_for_status()
+        raise_for_status_with_reason(response)
         return response.json()
 
     def confirm_client_delivery(self, task_id: str) -> dict[str, Any]:
@@ -441,7 +480,7 @@ class VideoFlowClient:
             f"{self.config.backend_url}/api/v1/tasks/{encoded_task_id}/client-delivery",
             headers=self._headers(),
         )
-        response.raise_for_status()
+        raise_for_status_with_reason(response)
         return response.json()
 
     def get_download_url(self, asset_id: str) -> str:
@@ -449,7 +488,7 @@ class VideoFlowClient:
             f"{self.config.backend_url}/api/v1/assets/{asset_id}/download",
             headers=self._headers(),
         )
-        response.raise_for_status()
+        raise_for_status_with_reason(response)
         return response.json()["downloadUrl"]
 
     def get_task_result(self, task_id: str) -> dict[str, Any]:
@@ -457,7 +496,7 @@ class VideoFlowClient:
             f"{self.config.backend_url}/api/v1/assets/tasks/{task_id}/result",
             headers=self._headers(),
         )
-        response.raise_for_status()
+        raise_for_status_with_reason(response)
         return response.json()
 
     def download_task_result(
@@ -493,7 +532,7 @@ class VideoFlowClient:
         # OSS 签名 URL 是独立下载地址，不携带 Video Flow actor token。
         try:
             with self.client.stream("GET", str(download_url)) as response:
-                response.raise_for_status()
+                raise_for_status_with_reason(response)
                 with temporary.open("wb") as output:
                     for chunk in response.iter_bytes():
                         output.write(chunk)

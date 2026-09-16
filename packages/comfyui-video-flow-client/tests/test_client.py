@@ -892,3 +892,31 @@ def test_provider_failure_surfaces_the_reason_and_says_whether_retrying_helps():
     assert "真人" in message and "重试同一段不会成功" in message       # 可操作的那句
     assert "InputVideoSensitiveContentDetected" in message            # 平台原始原因
     assert "UNRETRYABLE_FAILURE" in message                            # 失败码
+
+
+def test_backend_rejection_reports_the_reason_instead_of_the_status_code():
+    """后端把拒绝原因写在 body 里（code / path / message），不能被 httpx 的 400 盖掉。
+
+    真事：延长任务提交时 POST /api/v1/tasks 返回 400，客户端只显示
+    "Client error '400 Bad Request'"，用户完全不知道服务器在拒什么。
+    """
+    def handler(_request):
+        return httpx.Response(400, json={
+            "code": "SUBMISSION_MEDIA_BINDINGS_MISMATCH",
+            "path": "media",
+            "message": "bindings do not match the preflight",
+        })
+
+    client = VideoFlowClient(
+        VideoFlowConfig("https://backend.test", "secret-token"),
+        httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    # 异常类型仍是 httpx.HTTPStatusError：调用方靠它区分 404/401/400。
+    with pytest.raises(httpx.HTTPStatusError) as error:
+        client._post_task("key-1", {"mode": "production"})
+
+    message = str(error.value)
+    assert "SUBMISSION_MEDIA_BINDINGS_MISMATCH" in message   # 服务器给的原因码
+    assert "media" in message                                 # 出问题的字段
+    assert "400" in message                                   # 仍然保留状态码
