@@ -253,8 +253,26 @@ def _reference_choices(suffixes):
 
 
 def _reference_spec(suffixes, **extra):
-    """下拉规格 = 选项列表 + 悬停提示（提示是官方的 per-input 文案位）。"""
+    """图片参考的下拉规格：老式「选项列表 + 附加键」写法。
+
+    与 ComfyUI 自带的 `LoadImage.image` 一致（它用 `{"image_upload": true}`）。**别改成
+    V3 的 ("COMBO", {...}) 写法**——图片上传按钮是老式写法下验证可用的，没必要动。
+    """
     return (_reference_choices(suffixes), {"tooltip": REFERENCE_SLOT_TOOLTIP, **extra})
+
+
+def _reference_upload_spec(suffixes, upload_key):
+    """视频/音频参考的下拉规格：V3 的 ("COMBO", {...}) 写法 + 上传按钮。
+
+    `upload_key` 取 ComfyUI 自带加载节点的同款标志（`LoadVideo.file` 用 `video_upload`、
+    `LoadAudio.audio` 用 `audio_upload`）。没有它，用户**只能从 ComfyUI/input 目录里挑**，
+    没法把别处的文件传进来——这正是"视频不能上传只能选择"的原因。
+    """
+    return (
+        "COMBO",
+        {"options": _reference_choices(suffixes), "multiselect": False,
+         upload_key: True, "tooltip": REFERENCE_SLOT_TOOLTIP},
+    )
 
 
 # 这几个数字与合同 `media` 一节同源：合同是服务端复验用的真值，客户端这一份只为
@@ -318,7 +336,7 @@ class ReferenceVideoInput:
     @classmethod
     def INPUT_TYPES(cls):
         return {
-            "required": {"video": _reference_spec(('.mp4', '.mov'))},
+            "required": {"video": _reference_upload_spec(('.mp4', '.mov'), "video_upload")},
             "optional": {"reference_media": ("VIDEO_FLOW_LOCAL_MEDIA_LIST",)},
         }
     DESCRIPTION = ("把上游节点的 reference_media 接进来，再追加这段参考视频。"
@@ -339,7 +357,7 @@ class ReferenceAudioInput:
     @classmethod
     def INPUT_TYPES(cls):
         return {
-            "required": {"audio": _reference_spec(('.wav', '.mp3'))},
+            "required": {"audio": _reference_upload_spec(('.wav', '.mp3'), "audio_upload")},
             "optional": {"reference_media": ("VIDEO_FLOW_LOCAL_MEDIA_LIST",)},
         }
     DESCRIPTION = ("把上游节点的 reference_media 接进来，再追加这段参考音频。"
