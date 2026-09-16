@@ -299,6 +299,17 @@ def test_unused_choice_comes_first_with_tooltip_and_never_on_fixed_count_image_n
             assert n.UNUSED_MEDIA_CHOICE not in spec[0]
 
 
+def test_multi_reference_warns_that_edit_style_prompts_are_judged_as_another_task_type():
+    # 官方明确：模型仍会结合提示词判定任务类型，与提交时指定的不一致就异步失败。
+    # 客户端拦不住语义，只能在用户看得到的地方把写法说清楚。
+    description = n.MultiReferenceRequest.DESCRIPTION
+    prompt_spec = n.MultiReferenceRequest.INPUT_TYPES()['required']['prompt']
+
+    assert '编辑' in description and '延长' in description and '异步失败' in description
+    assert 'tooltip' in prompt_spec[1]
+    assert '编辑' in prompt_spec[1]['tooltip'] and '延长' in prompt_spec[1]['tooltip']
+
+
 def test_reference_nodes_carry_descriptions_and_validate_before_queueing():
     # 三个参考节点与请求节点都要有 DESCRIPTION（官方的节点级说明位），
     # 否则"可以留空"这件事只存在于代码里，用户看不到。
