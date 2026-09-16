@@ -196,37 +196,52 @@ def _file_choices(suffixes, empty_label):
     return sorted(str(p.relative_to(root)) for p in root.rglob('*') if p.is_file() and p.suffix.lower() in suffixes) or [empty_label]
 
 
-UNUSED_MEDIA_CHOICE = "（不使用）"
+UNUSED_MEDIA_CHOICE = "（不给素材）"
+
+REFERENCE_SLOT_TOOLTIP = (
+    "选一个文件就追加进参考集合；选「不给素材」表示这个槽位不用，不用删连线。"
+    "整套至少要有一个参考素材。图片最多 30 张、视频最多 10 段、音频最多 10 段，合计不超过 50 个。"
+)
 
 
 def _reference_choices(suffixes):
-    """参考素材下拉：先列实际文件，**末尾**追加"（不使用）"。
+    """参考素材下拉：**第一位是"（不给素材）"**，后面才是实际文件。
 
-    放末尾是为了让默认值更好用——槽位里存的是占位符（比如"请选择图片"）时，文件一旦
-    存在该值就不在列表里，ComfyUI 会回落到第一个真实文件；而选中的"（不使用）"因为
-    本身就在列表里，会原样保留。
+    放第一位是有意的，因为 ComfyUI 的 COMBO 以列表第一项为默认值——这样"没动过 =
+    没用上"，新加的节点、以及模板里多摆的槽位默认都是空，不会悄悄带上第一个文件。
+    选中它的节点不读文件、不追加，只把上游列表原样传下去，因此空槽既不需要右键旁路
+    节点，也不需要删连线。上限仍由 _append_reference_media 按官方口径拦截。
 
-    选中"（不使用）"的节点不读文件、不追加，只把上游列表原样传下去：创意的多余槽位
-    晾着即可，不需要右键旁路节点，也不需要自己删连线。上限仍由
-    _append_reference_media 按官方口径拦截。
+    官方（火山方舟创建视频生成任务 API）对全模态参考的要求是 content 里**至少有一个**
+    role 为 reference_image / reference_video / reference_audio 的素材，图片 0-30 张、
+    视频 0-10 段、音频 0-10 段可自由组合；所以只有"一个都没选"才是错的，
+    由 MultiReferenceRequest.VALIDATE_INPUTS 在排队前拦下。
     """
     import folder_paths
     root = Path(folder_paths.get_input_directory())
     files = sorted(str(p.relative_to(root)) for p in root.rglob('*') if p.is_file() and p.suffix.lower() in suffixes)
-    return files + [UNUSED_MEDIA_CHOICE]
+    return [UNUSED_MEDIA_CHOICE] + files
 
 
+def _reference_spec(suffixes, **extra):
+    """下拉规格 = 选项列表 + 悬停提示（提示是官方的 per-input 文案位）。"""
+    return (_reference_choices(suffixes), {"tooltip": REFERENCE_SLOT_TOOLTIP, **extra})
+
+
+# 这几个数字与合同 `media` 一节同源：合同是服务端复验用的真值，客户端这一份只为
+# 在本地尽早给出提示。仓库内的 tests/test_contract_alignment.py 会断言两者相等。
 REFERENCE_MEDIA_LIMITS = {
     "reference_image": (30, "参考图片最多 30 张"),
     "reference_video": (10, "参考视频最多 10 段"),
     "reference_audio": (10, "参考音频最多 10 段"),
 }
+REFERENCE_MEDIA_TOTAL_LIMIT = 50
 
 
 def _validated_reference_media(reference_media):
     media = list(reference_media or [])
-    if len(media) > 50:
-        raise ValueError("参考素材总数最多 50 个")
+    if len(media) > REFERENCE_MEDIA_TOTAL_LIMIT:
+        raise ValueError(f"参考素材总数最多 {REFERENCE_MEDIA_TOTAL_LIMIT} 个")
     for role, (maximum, message) in REFERENCE_MEDIA_LIMITS.items():
         if sum(item.get("descriptor", {}).get("role") == role for item in media) > maximum:
             raise ValueError(message)
@@ -243,8 +258,8 @@ def _append_reference_media(reference_media, filename, role):
     maximum, message = REFERENCE_MEDIA_LIMITS[role]
     if role_count >= maximum:
         raise ValueError(message)
-    if len(media) >= 50:
-        raise ValueError("参考素材总数最多 50 个")
+    if len(media) >= REFERENCE_MEDIA_TOTAL_LIMIT:
+        raise ValueError(f"参考素材总数最多 {REFERENCE_MEDIA_TOTAL_LIMIT} 个")
     media.append(inspect_product(filename, role, f"{role.replace('_', '-')}-{role_count + 1}"))
     return _validated_reference_media(media)
 
@@ -253,9 +268,11 @@ class ReferenceImageInput:
     @classmethod
     def INPUT_TYPES(cls):
         return {
-            "required": {"image": (_reference_choices(('.png', '.jpg', '.jpeg', '.webp')), {"image_upload": True})},
+            "required": {"image": _reference_spec(('.png', '.jpg', '.jpeg', '.webp'), image_upload=True)},
             "optional": {"reference_media": ("VIDEO_FLOW_LOCAL_MEDIA_LIST",)},
         }
+    DESCRIPTION = ("把上游节点的 reference_media 接进来，再追加这张参考图。"
+                   "槽位可以留在「不给素材」——不需要删除连线，也不需要旁路节点。")
     RETURN_TYPES = ("VIDEO_FLOW_LOCAL_MEDIA_LIST",)
     RETURN_NAMES = ("reference_media",)
     FUNCTION = "inspect"
@@ -272,9 +289,11 @@ class ReferenceVideoInput:
     @classmethod
     def INPUT_TYPES(cls):
         return {
-            "required": {"video": (_reference_choices(('.mp4', '.mov')),)},
+            "required": {"video": _reference_spec(('.mp4', '.mov'))},
             "optional": {"reference_media": ("VIDEO_FLOW_LOCAL_MEDIA_LIST",)},
         }
+    DESCRIPTION = ("把上游节点的 reference_media 接进来，再追加这段参考视频。"
+                   "槽位可以留在「不给素材」；单个视频 2–30 秒，所有参考视频总时长不超过 30 秒。")
     RETURN_TYPES = ("VIDEO_FLOW_LOCAL_MEDIA_LIST",)
     RETURN_NAMES = ("reference_media",)
     FUNCTION = "inspect"
@@ -291,9 +310,11 @@ class ReferenceAudioInput:
     @classmethod
     def INPUT_TYPES(cls):
         return {
-            "required": {"audio": (_reference_choices(('.wav', '.mp3')),)},
+            "required": {"audio": _reference_spec(('.wav', '.mp3'))},
             "optional": {"reference_media": ("VIDEO_FLOW_LOCAL_MEDIA_LIST",)},
         }
+    DESCRIPTION = ("把上游节点的 reference_media 接进来，再追加这段参考音频。"
+                   "槽位可以留在「不给素材」；单个音频 2–30 秒，所有参考音频总时长不超过 30 秒。")
     RETURN_TYPES = ("VIDEO_FLOW_LOCAL_MEDIA_LIST",)
     RETURN_NAMES = ("reference_media",)
     FUNCTION = "inspect"
@@ -307,11 +328,24 @@ class ReferenceAudioInput:
 
 
 class MultiReferenceRequest:
+    DESCRIPTION = ("全模态参考成片要求：接上任意组合的参考图片 / 视频 / 音频。"
+                   "官方要求**至少有一个**参考素材，三类可自由组合；指定的比例与时长对参考生视频没有额外限制。")
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {"reference_media": ("VIDEO_FLOW_LOCAL_MEDIA_LIST",), "prompt": ("STRING", {"multiline": True}),
             "duration": (list(range(4, 31)),), "ratio": (["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"],),
             "resolution": (["480p", "720p", "1080p"],)}}
+    @classmethod
+    def VALIDATE_INPUTS(cls, reference_media=None):
+        """排队前就拦下"一个素材都没选"（官方：content 至少包含一个 reference_* 素材）。
+
+        放在校验阶段而不是执行阶段，是为了让用户点 Queue 时就看到可操作的提示，
+        而不是等任务跑到一半才失败。build() 里保留同样的检查作为兜底。
+        """
+        if not reference_media:
+            return ("至少需要一个参考素材：在参考图片 / 视频 / 音频节点的下拉里选一个文件"
+                    "（其余槽位可以留在「不给素材」）。")
+        return True
     RETURN_TYPES = ("VIDEO_FLOW_PREFLIGHT_REQUEST",)
     RETURN_NAMES = ("request",)
     FUNCTION = "build"
