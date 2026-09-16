@@ -32,3 +32,9 @@ docker-compose.override.yaml
 # 临时文件
 *.tmp
 *.swp
+
+# 测试和开发临时文件
+.playwright-mcp/
+.test-token
+scripts/test_*.sh
+scripts/create_test_*.ts
