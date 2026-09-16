@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -100,10 +101,40 @@ def _inspect_image(path: Path) -> tuple[str, dict[str, Any]] | None:
         raise MediaInspectionError("MEDIA_INSPECTION_FAILED") from error
 
 
+# 找不到 ffprobe 时的兜底查找位置。Comfy Desktop 从 GUI 启动，进程 PATH 只有系统默认值，
+# **不含 /opt/homebrew/bin**，所以只靠 shutil.which 会在"明明装了 ffmpeg"的机器上报错
+# （踩过一次：节点报 FFPROBE_NOT_AVAILABLE，但 /opt/homebrew/bin/ffprobe 就在那儿）。
+FFPROBE_CANDIDATES = (
+    "/opt/homebrew/bin/ffprobe",   # macOS / Apple Silicon 的 Homebrew
+    "/usr/local/bin/ffprobe",      # macOS / Intel 的 Homebrew
+    "/opt/local/bin/ffprobe",      # MacPorts
+    "/usr/bin/ffprobe",            # 常见发行版自带
+)
+
+
+def _is_executable(path: str) -> bool:
+    return os.path.isfile(path) and os.access(path, os.X_OK)
+
+
+def ffprobe_executable() -> str | None:
+    """按顺序找一个可用的 ffprobe：环境变量 → PATH → 上面那几个常见位置。"""
+    override = os.environ.get("VIDEO_FLOW_FFPROBE")
+    if override:
+        return override if _is_executable(override) else None
+    found = shutil.which("ffprobe")
+    if found:
+        return found
+    return next((candidate for candidate in FFPROBE_CANDIDATES if _is_executable(candidate)), None)
+
+
 def _probe(path: Path) -> dict[str, Any]:
-    executable = shutil.which("ffprobe")
+    executable = ffprobe_executable()
     if not executable:
-        raise MediaInspectionError("FFPROBE_NOT_AVAILABLE")
+        raise MediaInspectionError(
+            "FFPROBE_NOT_AVAILABLE: 需要 ffprobe（ffmpeg 自带）。已查找 PATH 与 "
+            + "、".join(FFPROBE_CANDIDATES)
+            + "；也可以用环境变量 VIDEO_FLOW_FFPROBE 指定绝对路径。",
+        )
     try:
         completed = subprocess.run(
             [executable, "-v", "error", "-show_format", "-show_streams", "-of", "json", str(path)],

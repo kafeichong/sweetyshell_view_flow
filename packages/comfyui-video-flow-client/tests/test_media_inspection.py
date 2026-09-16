@@ -124,9 +124,37 @@ def test_non_image_inspection_reports_missing_ffprobe_explicitly(tmp_path, monke
     path = tmp_path / "audio.wav"
     path.write_bytes(b"RIFF-not-enough")
     monkeypatch.setattr(media.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(media, "FFPROBE_CANDIDATES", ())
+    monkeypatch.delenv("VIDEO_FLOW_FFPROBE", raising=False)
 
     with pytest.raises(media.MediaInspectionError, match="FFPROBE_NOT_AVAILABLE"):
         media.inspect_media(path, "reference_audio", "audio-1")
+
+
+def test_ffprobe_lookup_falls_back_to_known_install_locations(tmp_path, monkeypatch):
+    # GUI 启动的 ComfyUI 进程 PATH 里没有 /opt/homebrew/bin，只查 PATH 会误报"没装 ffprobe"。
+    fake = tmp_path / "ffprobe"
+    fake.write_text("#!/bin/sh\n")
+    fake.chmod(0o755)
+    monkeypatch.setattr(media.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(media, "FFPROBE_CANDIDATES", (str(fake),))
+    monkeypatch.delenv("VIDEO_FLOW_FFPROBE", raising=False)
+
+    assert media.ffprobe_executable() == str(fake)
+
+
+def test_ffprobe_lookup_prefers_an_explicit_override(tmp_path, monkeypatch):
+    chosen = tmp_path / "custom-ffprobe"
+    chosen.write_text("#!/bin/sh\n")
+    chosen.chmod(0o755)
+    monkeypatch.setattr(media.shutil, "which", lambda _name: "/usr/bin/ffprobe")
+    monkeypatch.setenv("VIDEO_FLOW_FFPROBE", str(chosen))
+
+    assert media.ffprobe_executable() == str(chosen)
+
+    # 指到了不存在的路径要当作"没有"，而不是静默回落到别的 ffprobe。
+    monkeypatch.setenv("VIDEO_FLOW_FFPROBE", str(tmp_path / "missing"))
+    assert media.ffprobe_executable() is None
 
 
 def test_validate_media_collection_rejects_video_and_audio_totals_above_30_seconds():
