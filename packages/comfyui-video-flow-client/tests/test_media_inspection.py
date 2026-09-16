@@ -220,3 +220,20 @@ def test_video_duration_comes_from_the_stream_not_the_container(tmp_path, monkey
 
     item = media.inspect_media(path, "reference_video", "reference-video-1")
     assert item["descriptor"]["metadata"]["durationSeconds"] == 5.041667
+
+@pytest.mark.parametrize("brand,expected", [
+    ("qt  ", True),           # ffprobe 8.x：只给主品牌
+    ("isom;qt  ", True),      # ffprobe 9.x：把品牌拼成 `;` 列表——同一个文件
+    ("isom", False),
+    ("mp42", False),
+    ("", False),
+])
+def test_quicktime_brand_survives_ffprobe_brand_lists(brand, expected):
+    """判 QuickTime 要按 `;` 拆开比，不能只看开头。
+
+    踩过（同事机真实发生）：随包的 ffprobe 是 9.0.1，同一个 mov 文件它给
+    `major_brand = "isom;qt  "`，而服务端 8.x 给 `"qt  "`。客户端用 `startswith("qt")`
+    就把前者判成 mp4，与服务端的 quicktime 对不上，正式提交被按 mime 不符拒掉。
+    """
+    assert media._is_quicktime_brand({"tags": {"major_brand": brand}}) is expected
+    assert media._is_quicktime_brand({}) is False
