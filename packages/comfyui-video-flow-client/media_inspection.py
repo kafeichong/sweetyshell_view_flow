@@ -155,7 +155,11 @@ def _inspect_av(path: Path) -> tuple[str, str, dict[str, Any]]:
     audio = next((stream for stream in streams if stream.get("codec_type") == "audio"), None)
     format_data = probe.get("format") if isinstance(probe.get("format"), dict) else {}
     format_name = str(format_data.get("format_name", "")).lower()
-    duration = _number(format_data.get("duration"))
+    # 时长取**流**的 duration，而不是容器的：同一个 mp4，容器 ffprobe 5.1.9 报 5.077333、
+    # 8.0.1 报 5.041667，而流的时长两边都是 5.041667。元数据要按内容摘要与后端逐字段比对，
+    # 用容器时长会让本机与后端对不上，提交被 PREFLIGHT_ACTUAL_CONTENT_MISMATCH 拒掉（踩过）。
+    stream_duration = _number((video or audio or {}).get("duration"))
+    duration = stream_duration if stream_duration else _number(format_data.get("duration"))
     if video:
         if "mov" not in format_name and "mp4" not in format_name:
             raise MediaInspectionError("VIDEO_CONTAINER_INVALID")
