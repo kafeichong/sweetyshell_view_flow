@@ -83,6 +83,17 @@ app.registerExtension({
       // 「标签 | 控件」一行，button 会被当成右侧那个小控件，左边半行是点不到的标签文字——用户
       // 反馈"按钮很小很窄，要瞄准"就是这个。DOM widget 让我们拿到整个元素，宽度撑满、高度给足。
       // 这也正是 ComfyUI 自己对音频的做法（前端 AUDIO_UI：addDOMWidget + options.canvasOnly=false）。
+      // 画布上的自绘按钮和侧边栏的参数行都会调它——两条路共用同一个入口。
+      const chooseFile = () => {
+        pickFile(async (file) => {
+          try {
+            await upload(this, widget, file);
+          } catch (error) {
+            report(`音频上传失败：${error?.message ?? error}`);
+          }
+        });
+      };
+
       const button = document.createElement("button");
       button.type = "button";
       button.textContent = BUTTON_LABEL;
@@ -97,17 +108,14 @@ app.registerExtension({
         "background:var(--comfy-input-bg,#2a2a2a)",
         "color:var(--input-text,#dddddd)",
       ].join(";");
-      button.addEventListener("click", () => {
-        pickFile(async (file) => {
-          try {
-            await upload(this, widget, file);
-          } catch (error) {
-            report(`音频上传失败：${error?.message ?? error}`);
-          }
-        });
-      });
+      button.addEventListener("click", chooseFile);
 
       const domWidget = this.addDOMWidget(BUTTON_NAME, "button", button);
+      // 侧边栏「参数」是**另一套渲染**：它不挂我们这个元素，只按 widget 的 name/label/callback
+      // 画一个自己的按钮。所以只挂元素上的 click 会得到"画布上能点、侧边栏点了没反应"；label
+      // 不设的话侧边栏还会直接把 widget 名 `upload_audio` 当按钮文字显示出来。
+      domWidget.label = BUTTON_LABEL;
+      domWidget.callback = chooseFile;
       domWidget.serialize = false;
       domWidget.options.serialize = false;
       // 不带 canvasOnly：新界面的 widgetRegistry 用 `!options.canvasOnly && !!widget.type`
