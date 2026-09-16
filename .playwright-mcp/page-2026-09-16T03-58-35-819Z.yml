@@ -1,0 +1,121 @@
+- generic [active] [ref=f2e1]:
+  - main [ref=f2e9]:
+    - generic [ref=f2e11]:
+      - text: .. .. ..
+      - generic:
+        - generic [ref=f2e14]:
+          - group [ref=f2e18]:
+            - button "Unsaved Workflow • 关闭" [pressed] [ref=f2e19] [cursor=pointer]:
+              - generic [ref=f2e21]:
+                - generic [ref=f2e22]: Unsaved Workflow
+                - generic [ref=f2e23]:
+                  - generic [ref=f2e24]: •
+                  - button "关闭" [ref=f2e25]:
+                    - generic [ref=f2e26]: 
+          - button "创建空白工作流" [ref=f2e27] [cursor=pointer]:
+            - generic [ref=f2e28]: 
+          - button "登录" [ref=f2e30] [cursor=pointer]
+        - generic:
+          - navigation [ref=f2e33]:
+            - generic [ref=f2e34]:
+              - generic [ref=f2e35]:
+                - generic [ref=f2e36] [cursor=pointer]
+                - button "资产（a）" [ref=f2e41] [cursor=pointer]
+                - button "节点库（n）" [ref=f2e45] [cursor=pointer]
+                - button "模型库（m）" [ref=f2e49] [cursor=pointer]
+                - button "工作流（w）" [ref=f2e53] [cursor=pointer]
+                - button "应用" [ref=f2e57] [cursor=pointer]
+                - button "模板" [ref=f2e61] [cursor=pointer]
+              - generic [ref=f2e65]:
+                - button "帮助中心" [ref=f2e66] [cursor=pointer]:
+                  - generic [ref=f2e67]: 
+                - button "底部面板" [ref=f2e70] [cursor=pointer]
+                - button "键盘快捷键 (Ctrl + Shift + k)" [ref=f2e74] [cursor=pointer]
+                - button "设置 (Ctrl + ,)" [ref=f2e78] [cursor=pointer]
+          - generic:
+            - generic:
+              - generic:
+                - generic:
+                  - generic:
+                    - generic:
+                      - group "工作流操作" [ref=f2e82]:
+                        - generic [ref=f2e83]:
+                          - button "进入应用模式" [ref=f2e84] [cursor=pointer]:
+                            - generic: 应用
+                          - button "图形模式，工作流操作" [ref=f2e87] [cursor=pointer]:
+                            - generic [ref=f2e89]: 图形
+                      - text: 
+                  - generic:
+                    - generic:
+                      - button "管理扩展功能" [ref=f2e93] [cursor=pointer]
+                      - generic [ref=f2e97]:
+                        - region [ref=f2e100]:
+                          - generic [ref=f2e102]:
+                            - generic [ref=f2e103]: .. .. ..
+                            - generic [ref=f2e104]:
+                              - generic "批次数量" [ref=f2e105]:
+                                - generic [ref=f2e106]:
+                                  - textbox "批次数量" [ref=f2e107]: "1"
+                                  - generic [ref=f2e108]:
+                                    - button "增加" [ref=f2e109] [cursor=pointer]
+                                    - button "减小" [disabled]
+                              - button "运行" [ref=f2e110] [cursor=pointer]
+                              - button "运行" [ref=f2e112] [cursor=pointer]
+                            - button "取消当前任务" [disabled]
+                            - button "0 个活动任务 展开任务队列" [pressed] [ref=f2e113] [cursor=pointer]:
+                              - generic [ref=f2e114]: 0 个活动任务
+                              - generic [ref=f2e115]: 展开任务队列
+                        - button "开关属性面板" [ref=f2e117] [cursor=pointer]
+                    - generic [ref=f2e120]:
+                      - generic [ref=f2e121]:
+                        - generic [ref=f2e122]: 任务队列
+                        - generic [ref=f2e123]:
+                          - generic [ref=f2e124]: 清理队列
+                          - button "清除已执行" [disabled]
+                        - button "更多设置" [ref=f2e126] [cursor=pointer]
+                      - generic [ref=f2e128]:
+                        - generic [ref=f2e130]:
+                          - button "全部" [ref=f2e131] [cursor=pointer]
+                          - button "已完成" [ref=f2e132] [cursor=pointer]
+                        - generic [ref=f2e134]:
+                          - button "筛选任务" [ref=f2e135] [cursor=pointer]
+                          - button "排序任务" [ref=f2e137] [cursor=pointer]
+                          - button "显示资产面板" [ref=f2e139] [cursor=pointer]
+              - generic:
+                - toolbar "画布工具栏" [ref=f2e177]:
+                  - button "画布模式" [ref=f2e178] [cursor=pointer]
+                  - button "适应视图 (.)" [ref=f2e184] [cursor=pointer]
+                  - button "缩放控制" [ref=f2e186] [cursor=pointer]:
+                    - generic [ref=f2e187]: 90%
+                  - button "显示小地图 (ALT + SHIFT + M)" [ref=f2e191] [cursor=pointer]
+                  - button "隐藏链接" [ref=f2e193] [cursor=pointer]
+                - text: 
+      - generic:
+        - generic "The text to be encoded." [ref=f2e196]:
+          - textbox "text" [ref=f2e197]: anime RPG game style, cute anime girl with gigantic fennec ears and a big fluffy fox tail with long wavy blonde hair and large blue eyes blonde colored eyelashes wearing a pink sweater a large oversized gold trimmed black winter coat and a long blue maxi skirt and a red scarf, she is sitting beside a campfire in the wilderness at night playing guitar with a milky way galaxy sky
+        - generic "The text to be encoded." [ref=f2e198]:
+          - textbox "text" [ref=f2e199]: low quality, bad anatomy, extra digits, missing digits, extra limbs, missing limbs
+    - text: 
+  - generic:
+    - generic [ref=f2e200] [cursor=pointer]:
+      - generic [ref=f2e201]: 💳
+      - generic [ref=f2e202]: 消费历史
+    - generic [ref=f2e203]:
+      - generic [ref=f2e204]:
+        - heading "💳 消费与历史" [level=2] [ref=f2e205]
+        - button "✕" [ref=f2e206] [cursor=pointer]
+      - generic [ref=f2e207]:
+        - generic [ref=f2e209]:
+          - generic [ref=f2e210]:
+            - heading "💰 消费概览" [level=3] [ref=f2e211]
+            - button "🔄" [ref=f2e212] [cursor=pointer]
+          - generic [ref=f2e213]:
+            - generic [ref=f2e214]: 未配置 API Token
+            - button "重试" [ref=f2e215] [cursor=pointer]
+        - generic [ref=f2e217]:
+          - generic [ref=f2e218]:
+            - heading "📝 最近任务" [level=3] [ref=f2e219]
+            - button "🔄" [ref=f2e220] [cursor=pointer]
+          - generic [ref=f2e221]:
+            - generic [ref=f2e222]: 未配置 API Token
+            - button "重试" [ref=f2e223] [cursor=pointer]
