@@ -185,8 +185,9 @@ def _client_source_copy(base: Path) -> Path:
     source = base / "source"
     source.mkdir()
     # 安装器按清单拷贝这些名字，但不执行它们——占位内容就够，且不会把开发中的文件带进来。
-    for name in ("client.py", "config.py", "execution_slot.py", "media_inspection.py",
-                 "nodes.py", "preflight_nodes.py", "receipts.py", "submission_state.py"):
+    for name in ("api_proxy.py", "client.py", "config.py", "execution_slot.py",
+                 "media_inspection.py", "nodes.py", "preflight_nodes.py", "receipts.py",
+                 "submission_state.py"):
         (source / name).write_text("# test placeholder\n", encoding="utf-8")
     (source / "__init__.py").write_text('CLIENT_VERSION = "2099-01-01.1"\n', encoding="utf-8")
     for name in ("install.sh", "requirements.txt", "README.md"):
