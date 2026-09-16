@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 
 try:
-    from .client import VideoFlowClient
+    from .client import VideoFlowClient, server_error_detail
     from .execution_slot import normalize_execution_slot_id
     from .media_inspection import inspect_media, read_verified_media, validate_media_collection
     from .receipts import ReceiptStore, credential_namespace
@@ -21,7 +21,7 @@ try:
         recover_current,
     )
 except ImportError:
-    from client import VideoFlowClient
+    from client import VideoFlowClient, server_error_detail
     from execution_slot import normalize_execution_slot_id
     from media_inspection import inspect_media, read_verified_media, validate_media_collection
     from receipts import ReceiptStore, credential_namespace
@@ -35,12 +35,14 @@ except ImportError:
 
 
 def require_server_success(response):
+    """预检失败时把服务端给的原因完整带出来。
+
+    只读 `message` 会丢掉 `code`（例如 `WORKFLOW_NOT_ENABLED`）——那是用户报障、我们定位
+    时最有用的一项。与 client.raise_for_status_with_reason 用同一套提取逻辑。
+    """
     if response.status_code >= 400:
-        try:
-            message = response.json().get('message', '服务器未通过检查')
-        except (ValueError, AttributeError):
-            message = '服务器未返回有效检查报告'
-        raise ValueError(f"服务器预检未通过（HTTP {response.status_code}）：{message}")
+        detail = server_error_detail(response) or '服务器未通过检查'
+        raise ValueError(f"服务器预检未通过（HTTP {response.status_code}）：{detail}")
 
 
 def fingerprint(value):
@@ -408,12 +410,24 @@ class MultiReferenceRequest:
             "media": [item["descriptor"] for item in reference_media]}, "media": reference_media},)
 
 
+# 编辑任务与"从零生成"的写法不同：官方要求明确修改范围、说明 A→B 的变化过程，
+# 并支持用时间戳指定生效时段；比例固定 adaptive、时长由输入视频决定，输出用 mov。
+EDIT_PROMPT_TOOLTIP = (
+    "写法：说清「改什么、从什么变成什么」，并保持画面其余部分不变——"
+    "官方示例：「将两人武打素版视频 @视频1 替换为冷兵器对决前的空手试探风」。"
+    "可以用时间戳指定改动生效的时段（如「0s-3s：旧杯子逐渐变成新杯子」）。"
+    "时长由输入视频决定（这里没有时长选项），输出固定 mov。"
+)
+
+
 class VideoEditRequest:
+    DESCRIPTION = ("视频编辑：接一段参考视频，用提示词改画面。比例跟随输入视频、时长由输入决定，"
+                   "默认值是一段照官方写法写好的完整示例。")
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {
             "reference_media": ("VIDEO_FLOW_LOCAL_MEDIA_LIST",),
-            "prompt": ("STRING", {"multiline": True}),
+            "prompt": ("STRING", {"multiline": True, "tooltip": EDIT_PROMPT_TOOLTIP}),
             "resolution": (["480p", "720p", "1080p"],),
         }}
     RETURN_TYPES = ("VIDEO_FLOW_PREFLIGHT_REQUEST",)
@@ -494,11 +508,13 @@ class VideoExtendRequest:
 
 
 class AudioReferenceRequest:
+    DESCRIPTION = ("音频参考成片：接 1–2 段参考音频，让画面跟随音频的节奏与情绪。"
+                   "默认值是一段照官方公式写好的完整示例。")
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {
             "reference_media": ("VIDEO_FLOW_LOCAL_MEDIA_LIST",),
-            "prompt": ("STRING", {"multiline": True}),
+            "prompt": ("STRING", {"multiline": True, "tooltip": PROMPT_WRITING_TOOLTIP}),
             "duration": (list(range(4, 31)),),
             "ratio": (["21:9", "16:9", "4:3", "1:1", "3:4", "9:16", "adaptive"],),
             "resolution": (["480p", "720p", "1080p"],),
