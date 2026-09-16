@@ -15,6 +15,14 @@ import { api } from "../../scripts/api.js";
 //
 // 按钮**不能**带 canvasOnly：Nodes 2.0 的 widgetRegistry 用
 // `!options.canvasOnly && !!widget.type` 决定渲不渲染，带了就只有经典画布看得见。
+//
+// 两条使用路径，只有一条通：
+// - **画布上**（主路径）：自绘的 DOM 按钮，宽高我们说了算，正常工作。
+// - **右侧边栏「参数」里**：那一行由 ComfyUI 自己渲染，点它**没有反应**。查过：前端里负责
+//   这类按钮的 `WidgetButton` 组件源码是 `handleClick = () => widget.callback?.()`，也就是
+//   它本该走 callback——但用"改页面标题"的探针实测，点标题、点按钮都不触发。说明那个面板
+//   走的不是这个组件，实际分发路径没定位到。`widget.callback` 这里仍然挂着（成本为零，
+//   哪个面板真按 callback 触发就自然能用）。**要传音频请用画布上的按钮。**
 const UPLOAD_ENDPOINT = "/upload/image";
 const ACCEPTED_TYPES = ".wav,.mp3,audio/*";
 const BUTTON_LABEL = "选择音频文件上传";
