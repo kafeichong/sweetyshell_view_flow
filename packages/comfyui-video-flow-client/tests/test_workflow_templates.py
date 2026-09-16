@@ -83,11 +83,16 @@ def test_reference_image_template_is_the_single_image_4_to_30_second_workflow():
     assert duration == list(range(4, 31))
 
 
+# 每条工作流的默认提示词都必须是"照官方公式写好的完整示例"，不只是开放的那几条——
+# 模板会随客户端一起交付，留一句空话在里面等于教不会用户怎么写。
 OPEN_TEMPLATE_REQUEST_NODES = {
     "seedance-text-to-video-preflight-v1.comfy.json": "VideoFlowTextRequest",
     "seedance-first-frame-to-video-preflight-v1.comfy.json": "VideoFlowFirstFrameRequest",
     "seedance-first-last-frame-to-video-preflight-v1.comfy.json": "VideoFlowFirstLastFrameRequest",
     "seedance-multi-reference-preflight-v1.comfy.json": "VideoFlowMultiReferenceRequest",
+    "seedance-product-preflight-v1.comfy.json": "VideoFlowProductRequest",
+    "seedance-video-edit-preflight-v1.comfy.json": "VideoFlowVideoEditRequest",
+    "seedance-audio-reference-preflight-v1.comfy.json": "VideoFlowAudioReferenceRequest",
 }
 
 
@@ -144,8 +149,10 @@ def test_open_templates_ship_worked_examples_rather_than_placeholders():
 
         # 分镜：默认时长 5 秒，示例的时间戳要落在 5 秒内，用户不改时长也能直接跑。
         assert "0s-3s" in prompt and "3s-5s" in prompt, filename
-        # 镜头语言与结尾补充都要出现，让人看得到"这四段长什么样"。
-        assert "镜头" in prompt and "景深" in prompt, filename
+        # 收尾细节按工作流区分：从零生成的写机位/景深/氛围；**编辑是改原片**，
+        # 它的收尾要求是"其余部分与原视频一致"，不该硬套景深。
+        closing = "与原视频一致" if "video-edit" in filename else "景深"
+        assert "镜头" in prompt and closing in prompt, filename
         for instructional in ("写法", "公式", "建议", "tooltip", "【"):
             assert instructional not in prompt, f"{filename} 默认值里不能出现说明性文字或占位符：{instructional}"
         assert len(prompt) <= 300, f"{filename} 示例要能在官方建议的 500 字内留出改写空间"
@@ -218,7 +225,8 @@ def test_video_edit_template_uses_video_collection_and_fixed_edit_request():
 
     assert nodes["VideoFlowExecutionPolicy"]["widgets_values"] == ["preview"]
     assert nodes["VideoFlowReferenceVideoInput"]["widgets_values"] == [preflight_nodes.UNUSED_MEDIA_CHOICE]
-    assert nodes["VideoFlowVideoEditRequest"]["widgets_values"] == ["编辑参考视频", "720p"]
+    edit_values = nodes["VideoFlowVideoEditRequest"]["widgets_values"]
+    assert edit_values[0].startswith("把参考视频里的") and edit_values[1:] == ["720p"]
     links = {(source, target, kind) for _, source, _, target, _, kind in workflow["links"]}
     assert (
         nodes["VideoFlowReferenceVideoInput"]["id"],
@@ -255,7 +263,8 @@ def test_audio_reference_template_chains_multiple_audio_inputs():
 
     assert nodes["VideoFlowExecutionPolicy"]["widgets_values"] == ["preview"]
     assert len(audio_nodes) == 2
-    assert nodes["VideoFlowAudioReferenceRequest"]["widgets_values"] == ["参考音频生成画面", 5, "16:9", "720p"]
+    audio_values = nodes["VideoFlowAudioReferenceRequest"]["widgets_values"]
+    assert audio_values[0].startswith("画面跟随这段音频") and audio_values[1:] == [5, "16:9", "720p"]
     links = {(source, target, kind) for _, source, _, target, _, kind in workflow["links"]}
     assert (
         audio_nodes[0]["id"], audio_nodes[1]["id"], "VIDEO_FLOW_LOCAL_MEDIA_LIST",
