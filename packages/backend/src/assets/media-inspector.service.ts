@@ -28,6 +28,15 @@ function frameRate(value?: string): number | undefined {
   return Number.isFinite(result) && result > 0 ? rounded(result) : undefined;
 }
 
+// mp3 的时长靠帧计数，不同 ffprobe 版本会对**同一个文件**给出不同的值（实测同一个 10 秒
+// mp3：容器里的 5.1.9 报 10.03102、本机 8.0.1 报 10.0）。预检元数据是按内容摘要与服务端
+// 逐字段比对的，两边版本不同就会在正式提交时撞 PREFLIGHT_ACTUAL_CONTENT_MISMATCH——
+// 2026-09-16 首次提交纯音频任务时真实踩到。所以音频时长统一按 0.1 秒归一；它不进入计费
+// 公式（只用于官方 2–30 秒的限制），这个粒度足够。视频时长不归一：它跨版本一致，且进计费。
+function stableAudioDuration(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
 function rounded(value: number): number {
   return Number(value.toFixed(6));
 }
@@ -97,7 +106,7 @@ export class MediaInspectorService {
       const detectedAudioMime = formatName.includes('wav') ? 'audio/wav' : formatName.includes('mp3') ? 'audio/mpeg' : null;
       if (!detectedAudioMime) throw new Error('MEDIA_FORMAT_UNSUPPORTED');
       assertExpectedMime(detectedAudioMime, expectedMime);
-      return { kind: 'audio', durationSeconds, ...(audio.codec_name ? { audioCodec: audio.codec_name.toLowerCase() } : {}) };
+      return { kind: 'audio', durationSeconds: stableAudioDuration(durationSeconds), ...(audio.codec_name ? { audioCodec: audio.codec_name.toLowerCase() } : {}) };
     }
     throw new Error('MEDIA_INSPECTION_FAILED');
   }

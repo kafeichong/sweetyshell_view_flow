@@ -35,6 +35,20 @@ describe('MediaInspectorService', () => {
     });
   });
 
+  it('normalizes an audio duration to a tenth of a second, which mp3 frame counting varies by version', async () => {
+    // 同一个 mp3：容器里的 ffprobe 5.1.9 报 10.03102、本机 8.0.1 报 10.0（mp3 的时长靠帧计数，
+    // 版本间算法不同）。音频时长按 0.1 秒归一，两边的摘要才对得上；它不进入计费公式，
+    // 只用于官方 2–30 秒的限制，这个粒度足够（2026-09-16 首次提交纯音频任务时真实踩到）。
+    const inspect = new MediaInspectorService(async () => JSON.stringify({
+      format: { duration: '10.03102', format_name: 'mp3' },
+      streams: [{ codec_type: 'audio', codec_name: 'mp3', duration: '10.03102' }],
+    }));
+
+    await expect(inspect.inspect('https://oss.example/song.mp3')).resolves.toEqual({
+      kind: 'audio', durationSeconds: 10, audioCodec: 'mp3',
+    });
+  });
+
   it('rejects an ffprobe response without a media stream', async () => {
     const inspect = new MediaInspectorService(async () => JSON.stringify({ format: {}, streams: [] }));
     await expect(inspect.inspect('https://oss.example/invalid')).rejects.toThrow('MEDIA_INSPECTION_FAILED');
