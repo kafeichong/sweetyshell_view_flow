@@ -169,10 +169,22 @@ class ProductRequest:
         return ({"intent": intent, "media": media},)
 
 
+# 提示词写法提示。官方（Seedance 2.5 提示词指南）给的公式是：
+# 素材指代 → 一句话概述（主体+地点+事件+题材/风格+特殊运镜）→ 具体情节（用时间戳或
+# 「镜头 N」切分）→ 结尾补充（机位/环境/声音/氛围），并明确"尽量使用正向描述"；
+# 反向描述只支持字幕与音频两类。长度上官方建议中文不超过 500 字（过长会漏元素）。
+PROMPT_WRITING_TOOLTIP = (
+    "写法：主体+地点+事件+风格+运镜 → 分镜（用时间戳或「镜头 N」逐段写）→ 结尾补机位/环境/声音/氛围。"
+    "景别写远景/全景/中景/近景/特写，运镜写推/拉/摇/移/跟/环绕等，这些都是模型认识的词。"
+    "中文建议 ≤500 字，过长模型会漏元素；「不要字幕」「无 bgm」这类反向描述只对字幕和音频有效，其余请写正向。"
+)
+
+
 class TextRequest:
+    DESCRIPTION = "文生视频成片要求：只需要提示词，不需要素材。默认值里带【】的段是骨架，替换成你要的内容即可。"
     @classmethod
     def INPUT_TYPES(cls):
-        return {"required": {"prompt": ("STRING", {"multiline": True}),
+        return {"required": {"prompt": ("STRING", {"multiline": True, "tooltip": PROMPT_WRITING_TOOLTIP}),
             "duration": (list(range(4, 31)),), "ratio": (["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"],),
             "resolution": (["480p", "720p", "1080p"],)}}
     RETURN_TYPES = ("VIDEO_FLOW_PREFLIGHT_REQUEST",)
