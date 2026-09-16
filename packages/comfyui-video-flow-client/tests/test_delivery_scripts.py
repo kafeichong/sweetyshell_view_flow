@@ -90,6 +90,89 @@ def test_client_version_is_declared_and_reported_by_the_installer(tmp_path):
     assert version in completed.stdout
 
 
+def _fake_comfy_root(base: Path) -> Path:
+    """造一个"看起来像 ComfyUI 根目录"的目录：有 custom_nodes 和可执行的 venv python。"""
+    root = base / "ComfyUI"
+    (root / ".venv/bin").mkdir(parents=True)
+    _write_executable(root / ".venv/bin/python", "#!/bin/sh\nexit 0\n")
+    (root / "custom_nodes").mkdir()
+    return root
+
+
+def _write_desktop_manifest(home: Path, install_path: Path):
+    """Comfy Desktop 的安装记录：真正的根是 installPath 的子目录 ComfyUI/。"""
+    manifest = home / "Library/Application Support/Comfy Desktop/installations.json"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text(f'[{{"id": "inst-1", "installPath": "{install_path}"}}]', encoding="utf-8")
+
+
+def test_find_root_prefers_explicit_override_and_never_silently_falls_back(tmp_path):
+    finder = CLIENT_DIR / "find_comfyui_root.sh"
+    root = _fake_comfy_root(tmp_path)
+
+    found = subprocess.run(
+        [str(finder)], check=True, text=True, capture_output=True,
+        env={**os.environ, "VIDEO_FLOW_COMFYUI_ROOT": str(root)},
+    )
+    assert found.stdout.strip() == str(root)
+
+    # 显式指定的路径无效时必须失败，而不是悄悄换用别的目录——否则会把客户端装错地方。
+    missing = subprocess.run(
+        [str(finder)], text=True, capture_output=True,
+        env={**os.environ, "VIDEO_FLOW_COMFYUI_ROOT": str(tmp_path / "nope")},
+    )
+    assert missing.returncode == 1
+
+
+def test_find_root_reads_the_comfy_desktop_install_record(tmp_path):
+    finder = CLIENT_DIR / "find_comfyui_root.sh"
+    home = tmp_path / "home"
+    home.mkdir()
+    root = _fake_comfy_root(tmp_path / "desktop-install")
+    _write_desktop_manifest(home, root.parent)
+
+    found = subprocess.run(
+        [str(finder)], check=True, text=True, capture_output=True,
+        env={
+            **os.environ,
+            "HOME": str(home),
+            # 把常见位置换成不存在的路径，确保命中的是 Desktop 记录，而不是开发机上的真实安装。
+            "VIDEO_FLOW_COMFYUI_CANDIDATES": str(tmp_path / "not-here"),
+        },
+    )
+    assert found.stdout.strip() == str(root)
+
+    nothing = subprocess.run(
+        [str(finder)], text=True, capture_output=True,
+        env={**os.environ, "HOME": str(tmp_path / "empty-home"), "VIDEO_FLOW_COMFYUI_CANDIDATES": str(tmp_path / "not-here")},
+    )
+    assert nothing.returncode == 1
+
+
+def test_one_click_installer_installs_into_a_comfy_desktop_instance(tmp_path):
+    """同事那台就是 Comfy Desktop：安装器要能自己找到 installPath/ComfyUI。"""
+    home = tmp_path / "home"
+    home.mkdir()
+    root = _fake_comfy_root(tmp_path / "desktop-install")
+    _write_desktop_manifest(home, root.parent)
+    token_source = tmp_path / "actor-token"
+    token_source.write_text("vf_test_token\n", encoding="utf-8")
+
+    subprocess.run(
+        [str(CLIENT_DIR / "install_creative.command")],
+        check=True, text=True, capture_output=True,
+        env={
+            **os.environ,
+            "HOME": str(home),
+            "VIDEO_FLOW_NONINTERACTIVE": "1",
+            "VIDEO_FLOW_TOKEN_FILE": str(token_source),
+            "VIDEO_FLOW_COMFYUI_CANDIDATES": str(tmp_path / "not-here"),
+        },
+    )
+
+    assert (root / "custom_nodes/video_flow_client/client.py").is_file()
+
+
 def test_installer_never_touches_other_custom_nodes(tmp_path):
     comfy_root = tmp_path / "ComfyUI"
     python_path = comfy_root / ".venv/bin/python"
