@@ -223,7 +223,8 @@
         "extend"
       ],
       "default": "auto",
-      "explicitValueEffect": "显式指定时，接口在**提交任务时提前校验**该任务类型的特殊参数限制，不符合立即报错、任务不创建；auto 时由模型判定，判定冲突会异步报错 InvalidParameter.TaskTypeConstraint。"
+      "explicitValueEffect": "显式指定时，接口在**提交任务时提前校验**该任务类型的特殊参数限制，不符合立即报错、任务不创建；auto 时由模型判定，判定冲突会异步报错 InvalidParameter.TaskTypeConstraint。",
+      "promptIntentRisk": "模型仍会结合提示词判定任务类型：提示词写成编辑或延长意图时，实际判定可能与本节指定的值不一致，任务在**提交成功之后**异步失败（InvalidParameter.TaskTypeMismatch，官方只对成功生成的视频计费）。客户端据此在提示词输入项上给出写法提示。"
     },
     "durationReturnSemantics": {
       "formula": "查询接口返回的 duration = 实际总帧数 / 24（向下取整）",

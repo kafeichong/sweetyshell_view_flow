@@ -329,10 +329,17 @@ class ReferenceAudioInput:
 
 class MultiReferenceRequest:
     DESCRIPTION = ("全模态参考成片要求：接上任意组合的参考图片 / 视频 / 音频。"
-                   "官方要求**至少有一个**参考素材，三类可自由组合；指定的比例与时长对参考生视频没有额外限制。")
+                   "官方要求**至少有一个**参考素材，三类可自由组合。"
+                   "提示词请写成「参考 / 生成」意图：写「把视频里的 X 换成 Y」这类编辑措辞、"
+                   "或「把视频延长 N 秒」，模型会把任务判定成编辑 / 延长，与我们提交的任务类型冲突，"
+                   "任务会在提交成功之后异步失败（钱不白花，但白等一场）——"
+                   "要编辑请用视频编辑模板，要延长请用视频延长模板。")
     @classmethod
     def INPUT_TYPES(cls):
-        return {"required": {"reference_media": ("VIDEO_FLOW_LOCAL_MEDIA_LIST",), "prompt": ("STRING", {"multiline": True}),
+        return {"required": {"reference_media": ("VIDEO_FLOW_LOCAL_MEDIA_LIST",),
+            "prompt": ("STRING", {"multiline": True, "tooltip": (
+                "写「参考 / 生成」意图；不要写「把 X 改成 Y」这类编辑措辞或「延长 N 秒」——"
+                "那会让模型判定成另一类任务，提交成功后异步失败。")}),
             "duration": (list(range(4, 31)),), "ratio": (["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"],),
             "resolution": (["480p", "720p", "1080p"],)}}
     @classmethod
