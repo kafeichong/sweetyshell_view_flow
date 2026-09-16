@@ -17,6 +17,8 @@ import { api } from "../../scripts/api.js";
 const NODE_CLASS = "VideoFlowPolicyPreview";
 const RESULT_KEY = "video_flow_video";
 const WIDGET_NAME = "result_video";
+// 预览框高度。固定值 + `object-fit: contain`，横竖屏都在框内按比例居中，永远不会撑破节点。
+const PREVIEW_HEIGHT = 260;
 
 // 发起运行的那个图。`execution_start` 是点运行那一刻发出的，此时活动标签就是"要跑的那个"，
 // 之后用户随便切都影响不到它。
@@ -40,7 +42,10 @@ function playerWidget(node) {
   video.loop = true;
   video.muted = true;
   video.playsInline = true;
-  video.style.cssText = "width:100%;max-height:260px;border-radius:6px;background:#000";
+  // 尺寸交给容器（100% + `object-fit: contain`），自己**不设固定像素**：DOM widget 的容器
+  // 跟着画布缩放走，写死像素会和它对不上，视频就溢出节点外框。盒子多高由下面的 PREVIEW_HEIGHT
+  // 经 `widget.computeSize` 定——盒子太小的时候竖屏成片会被压成一条，等于看不见（用户报过）。
+  video.style.cssText = "display:block;width:100%;height:100%;object-fit:contain;border-radius:6px;background:#000";
 
   const widget = node.addDOMWidget(WIDGET_NAME, "video", video);
   widget.serialize = false;
@@ -68,8 +73,12 @@ app.registerExtension({
       if (!target || target.comfyClass !== NODE_CLASS) return;
 
       const widget = playerWidget(target);
-      widget.videoEl.src = videoUrl(items[0]);
-      target.setSize(target.computeSize());
+      const video = widget.videoEl;
+      // 只定**节点**的尺寸：节点撑到至少 360 宽、外加一条 PREVIEW_HEIGHT 的预览框。
+      const width = Math.max(target.size?.[0] ?? 0, 360);
+      widget.computeSize = () => [width, PREVIEW_HEIGHT];
+      video.src = videoUrl(items[0]);
+      target.setSize([width, target.computeSize()[1]]);
       target.setDirtyCanvas?.(true, true);
     });
   },
