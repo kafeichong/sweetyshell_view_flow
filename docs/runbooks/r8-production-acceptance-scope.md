@@ -289,3 +289,26 @@ packages/comfyui-video-flow-client/workflows/<工作流>-preflight-v1.comfy.json
 4. 费用状态仍是推算（`cost.status=usage_calculated`、`billedCny=null`）。
 
 **跑完之后要做的**：把真实 `taskId` / `providerTaskId` / SHA-256 / 帧数 / 预占与结算写进 `validation.records`（`status` 改 `passed`）；含视频的样本要**单独核对最低用量是否真的生效**（对比 `billedTokens`、`minimumTokens` 与 Provider 返回的 `completion_tokens`）。
+
+## 12. 第五条工作流的长期开放：视频延长（2026-09-16）
+
+授权人按 §8–§11 的同一口径开放 `seedance.video-extend.v1`（客户端模板 `seedance-video-extend-preflight-v1.comfy.json`）。
+
+| 项 | 值 |
+| --- | --- |
+| 授权人 / 日期 | kafeichong / 2026-09-16 |
+| 工作流 | `seedance.video-extend.v1`（其余三类保持 `enabled=false`：参考图、视频编辑、音频参考） |
+| 可用 Actor | `creative-pilot`、`creative-zhuyang` |
+| **允许的参数范围** | 合同允许的全部组合：480p / 720p / 1080p × **adaptive（固定，画幅跟随输入视频）** × 4–30 秒（延长时长）× **mov**（客户端固定，官方要求延长输出用 MOV） |
+| 素材要求 | **至少 1 段参考视频**（≤10 段、总时长 ≤30 秒），另可带参考图/音频 |
+| 金额上限 | 沿用各 actor 自身的 `dailyLimitCny`（`creative-pilot` 100 / `creative-zhuyang` 300 元/日） |
+| 时间窗 | **长期有效，另行通知** |
+| 放行时的状态 | `implementation=ready`、`admission.enabled=true`、`validation=not_run`（真实出片记录等这轮跑完再补） |
+
+**必须同时记下的差距与待确认项**：
+
+1. **这条工作流没有真实出片**（R8 矩阵第 8 行）。跑通的是隔离环境的 R6.7：三段参考视频串联、Worker 编译、Fake Provider 收到 `omni_reference_task_type=extend`、产物落盘可解析。
+2. **本轮要确认一个语义**：官方「视频延长」范例里，输入一段视频、"续写 5 秒"，而**"拼接后的视频"是单独列出的成品**——也就是说**接口可能只返回延长出来的那一段**，需要用户自己拼到原视频后面。实测时必须记录"输出片长 vs 输入视频时长"，据实写入 `validation.records`；如果确实只返回延长段，创意手册要写明拼接这一步。
+3. **计费走含输入视频那一档**：单价 42 元/百万，公式值 `(输入视频秒数 + 延长秒数 + 1 帧)` × 像素 × 帧率 / 1024，并受最低用量下限约束（下限路径至今没有真实结算触发过，见 §11）。
+
+**跑完之后要做的**：把真实 `taskId` / `providerTaskId` / 产物 SHA-256 / 帧数 / 片段时长 / 预占与结算写进 `validation.records`（`status` 改 `passed`），并单独记下上面第 2 条确认到的结论。

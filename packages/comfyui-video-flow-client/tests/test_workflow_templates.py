@@ -115,6 +115,24 @@ def test_open_templates_ship_worked_examples_rather_than_placeholders():
     assert "@图像1" in multi_prompt and "@视频1" in multi_prompt
 
 
+def test_extend_template_teaches_continuation_not_a_storyboard():
+    """延长是"接着原视频续写"，官方范例里没有时间戳——写成分镜反而对不上。
+
+    示例时长还要与模板默认的延长时长一致，否则用户照抄示例会得到另一段长度。
+    """
+    workflow = load_template(WORKFLOW_ROOT / "seedance-video-extend-preflight-v1.comfy.json")
+    request = next(node for node in workflow["nodes"] if node["type"] == "VideoFlowVideoExtendRequest")
+    prompt, duration = request["widgets_values"][0], request["widgets_values"][1]
+
+    assert prompt.startswith("在 @视频1 的基础上"), prompt[:20]
+    assert "延长" in prompt
+    assert "0s-" not in prompt and "3s-" not in prompt, "延长不写时间戳分镜"
+    assert "镜头" in prompt and "景深" in prompt
+    assert f"{duration} 秒" in prompt, "示例里的秒数要和默认时长一致"
+    for instructional in ("写法", "公式", "建议", "tooltip", "【"):
+        assert instructional not in prompt, f"默认值里不能出现说明性文字：{instructional}"
+
+
 def test_omni_reference_template_ships_ready_made_slots_for_extra_media():
     workflow = load_template(WORKFLOW_ROOT / "seedance-multi-reference-preflight-v1.comfy.json")
     nodes = workflow["nodes"]
@@ -175,7 +193,8 @@ def test_video_extend_template_chains_multiple_videos_and_exposes_output_duratio
 
     assert nodes["VideoFlowExecutionPolicy"]["widgets_values"] == ["preview"]
     assert len(video_nodes) == 3
-    assert nodes["VideoFlowVideoExtendRequest"]["widgets_values"] == ["向后延长 @video1", 11, "720p"]
+    request_values = nodes["VideoFlowVideoExtendRequest"]["widgets_values"]
+    assert request_values[0].startswith("在 @视频1 的基础上") and request_values[1:] == [5, "720p"]
     links = {(source, target, kind) for _, source, _, target, _, kind in workflow["links"]}
     assert (
         video_nodes[0]["id"], video_nodes[1]["id"], "VIDEO_FLOW_LOCAL_MEDIA_LIST",

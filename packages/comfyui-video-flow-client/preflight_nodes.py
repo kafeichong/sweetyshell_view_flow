@@ -419,12 +419,24 @@ class VideoEditRequest:
         }, "media": reference_media},)
 
 
+# 延长是"接着原视频续写"，写法与从零生成不同：官方示例是
+# 「在 @视频1 的基础上续写 5 秒的视频，<续写部分的内容>」，不用时间戳分镜。
+EXTEND_PROMPT_TOOLTIP = (
+    "写法：在 @视频1 的基础上（向前/向后）续写 N 秒，接着描述续写部分的内容——"
+    "官方示例：「在 @视频1 的基础上续写 5 秒的视频，讲一只蜜蜂飞来落在画上……」。"
+    "不要写「0s-3s」这类时间戳（那是从零生成时的分镜写法）。"
+    "比例与时长跟随输入视频，画幅由输入决定，所以这里没有比例选项。"
+)
+
+
 class VideoExtendRequest:
+    DESCRIPTION = ("视频延长：接一段参考视频，向后或向前延长 N 秒。"
+                   "输出比例自动跟随输入视频；默认值是一段照官方写法写好的完整示例，改成你的内容即可。")
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {
             "reference_media": ("VIDEO_FLOW_LOCAL_MEDIA_LIST",),
-            "prompt": ("STRING", {"multiline": True}),
+            "prompt": ("STRING", {"multiline": True, "tooltip": EXTEND_PROMPT_TOOLTIP}),
             "duration": (list(range(4, 31)),),
             "resolution": (["480p", "720p", "1080p"],),
         }}
