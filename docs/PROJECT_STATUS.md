@@ -8,6 +8,24 @@
 
 ## 0. 本轮交付判断
 
+### 2026-09-17：新增创意人员账号 `creative-yuyo`（yuyo），规则与朱阳一致
+
+授权人 kafeichong 要求为创意同事 yuyo 开一个独立账号，规则与 2026-09-16 的 `creative-zhuyang` 完全一致。
+
+| 项 | 值 |
+| --- | --- |
+| Actor ID | `creative-yuyo`（沿用 `creative-pilot` 的 `creative-*` 命名） |
+| 显示名 | yuyo |
+| 状态 | `active` |
+| 额度 | `dailyLimitCny = 300`、`monthlyLimitCny = 3000`（服务端强制） |
+| 生产白名单 | `VIDEO_FLOW_PRODUCTION_ACTORS=creative-pilot,creative-zhuyang,creative-yuyo`（生产 `.env`，改前备份 `.env.bak-20260917091909`，后端已 `--force-recreate` 重建） |
+| 创建方式 | `POST /api/v1/admin/credentials` + `PATCH .../limits`（Admin Guard，`scripts/video_flow_credential.sh issue`） |
+| 开通自检 | 新 token 调目录接口 **200**（8 类工作流）；免费预检 `requestCheck=passed`、**`canSubmit=true` 且无 blockers**（白名单已生效，不会被 `PRODUCTION_NOT_ALLOWED` 拦；报价 `7.623000` 与当前公式口径一致） |
+
+**token 不写入任何仓库文件**：接口只在创建时返回一次明文（库里只存哈希），已按 600 权限存到操作机 `~/.video-flow/creative-yuyo.token`，由管理员当面或安全渠道交给本人。
+
+**撤销方式**：`PATCH /api/v1/admin/credentials/creative-yuyo/revoke` → 从生产 `.env` 的白名单里移除该 actor → `docker compose up -d --force-recreate video-backend`。注意：**再次调用创建接口会轮换 token**（旧 token 立即失效），补发凭证走的是同一条路。
+
 ### 2026-09-16：剩余两条工作流放行并部署；纯音频首轮真实验收通过；修掉 mp3 时长跨版本缺陷
 
 授权人（kafeichong）给出"剩余两条全部放行"的授权，口径同 §8–§12：**长期开放、全部参数、长期有效**。合同里 `seedance.audio-reference-to-video.v1` 与 `seedance.video-edit.v1` 从 `implementation=incomplete / admission=false` 改为 `ready / enabled=true`，两处付费放行闸门（backend spec、scripts 合同不变量测试）同步声明，runbook 新增 §13 记录授权。提交 `c948d19` 已推 `main` 并部署到生产（`docker compose build/up video-backend video-worker`，零 migration）——**至此除已退休的单参考图外，八类工作流全部开放**。
