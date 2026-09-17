@@ -39,7 +39,11 @@ jobs:
         working-directory: packages/backend
         run: npm install
       - name: Install contract test dependencies
-        run: pip install -r packages/worker/requirements.txt pytest
+        # **用 requirements-dev.txt**：里面有 pytest-asyncio，而 scripts/tests 与 worker
+        # 的用例大量是 async def。此前这里只装 requirements.txt + pytest，于是这些用例
+        # 在 CI 里全部以 "async def functions are not natively supported" 失败——
+        # 本地 venv 装着 pytest-asyncio，所以本地全绿、CI 全红，很难看出是环境差异。
+        run: pip install -r packages/worker/requirements-dev.txt
       - name: Refuse to run with real provider credentials
         # 合同环境不得持有真实凭证：有就失败，而不是"碰巧没用到"。
         run: |
@@ -66,8 +70,8 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
-          cache-dependency-path: packages/worker/requirements.txt
-      - run: pip install -r requirements.txt pytest
+          cache-dependency-path: packages/worker/requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
       # -rs 列出每条 skip 的原因：需要外部服务的用例应当只有这些，
       # 出现别的 skip 时能立刻看出来。
       - run: python -m pytest -q -rs
@@ -83,7 +87,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: pip install -r packages/worker/requirements.txt pytest
+      - run: pip install -r packages/worker/requirements-dev.txt
+      - name: Install ffmpeg
+        # scripts/tests 里有用例真的调 ffprobe 去认字节流的编码。runner 默认没有它，
+        # 缺失会以 FileNotFoundError: 'ffprobe' 的形式挂掉——看起来像代码坏了，其实是环境。
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
       # pytest 不收集 .mjs：下面这两条合同不变量测试（付费放行闸门、三份合同字节一致）
       # 靠这一行才进 CI，此前只在交付记录里以手工命令存在——改合同的人漏跑就没有任何拦阻。
       - run: node --test scripts/tests/*.test.mjs

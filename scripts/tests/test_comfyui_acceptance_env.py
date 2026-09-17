@@ -47,7 +47,8 @@ def test_prepare_creates_isolated_token_and_local_workflow_copies(tmp_path):
     assert result.token_file.stat().st_mode & 0o777 == 0o600
     assert result.workflow_dir != source_root
     copies = sorted(result.workflow_dir.glob("*.comfy.json"))
-    assert len(copies) == 8
+    # 断言"拷全了"，而不是"拷了 8 份"：份数会随工作流开合变，写死只会制造下一次假失败。
+    assert len(copies) == len(source_hashes) and copies
     for path in copies:
         workflow = json.loads(path.read_text(encoding="utf-8"))
         config = next(node for node in workflow["nodes"] if node["type"] == "VideoFlowConfig")
