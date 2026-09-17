@@ -8,6 +8,40 @@
 
 ## 0. 本轮交付判断
 
+### 2026-09-17：私域素材库通路已接通，`asset://` 在真实账号上验证通过（分支 `feat/ark-asset-library`，**未部署**）
+
+**要解决的问题**：方舟 Seedance 2.5/2.0 **不接受含真人人脸的参考素材直传**（输入审核会拦），官方唯一合规通路是素材先入方舟私域素材库、生成时用 `asset://<asset ID>` 指代。此前本系统**没有任何一处能产生 `asset://`**，合同里的 `media.humanFacePolicy` 只记录了这条边界、零代码读取。
+
+**为什么不能走捷径**：把方舟素材下载回来转存我方 OSS、再把我方地址传给方舟，等于又变回"直传人脸参考图"，照样被拦。**`asset://` 必须原样到达方舟。**
+
+**已实现（后端完整，客户端未做）**：
+
+| 层 | 改动 |
+| --- | --- |
+| 合同 | 顶层 `media.assetLibrary`：`uriScheme`、**允许用素材库的角色白名单**、`projectName`、`assetIdPattern`、`unverifiedRoles`、`productionVerification`。`humanFacePolicy.note` 同步更新 |
+| Backend | descriptor 加可选键 `arkAssetId`（加法，不是判别式联合）；`mediaDescriptor()` 按合同白名单拦角色；`ArkAssetLibraryService`（AK/SK 签名 + GetAsset/ListAssets）；`ArkAssetIngestService`（登记）；`GET/POST /v1/assets/ark`；`Asset` 表 5 个 ark 列 + 全局唯一；内部下载接口对 ark 素材返回 `asset://` |
+| Worker | **零改动**——它拿到的仍然是一个字符串地址 |
+
+**真实账号验证（2026-09-17）**：
+
+1. **登记链路（免费）**：用 800×1600 的虚拟人像图跑通 GetAsset → 取回 512,219 字节 → ffprobe 检查 → 写我方桶 → **回读 sha256 与登记值一致**。
+2. **`asset://` 生成（付费 6.111000 元）**：直接调方舟生成接口，参考素材 `asset://asset-20260917115246-cgmtw`，4 秒 / 720p / 9:16。Provider 任务 `cgt-20260917160935-fuec7` **成功**，成片 720×1280 / **97 帧** / 4.064 秒。用量 `87,300 tokens` 与 `97 × 720×1280 ÷ 1024` **逐位吻合**——「+1 帧」口径在素材库素材上同样成立。
+
+**仍未验证（都已写进合同，不要当成已成立）**：
+
+- `asset://` 用在 `reference_video` / `reference_audio` 上（官方写了，但只测过图像）；
+- **`first_frame` / `last_frame` 能否用 `asset://`**——官方**没有任何示例**，合同把它们列在 `unverifiedRoles` 并一律拒绝（`MEDIA_ARK_ROLE_UNSUPPORTED`），**要放开必须先有一份真实证据**；
+- **本系统自己的完整链路**：上面两条都是**绕过我方预检/提交/Worker 直接调方舟**做的。那三段各有单测覆盖（后端 321 passed、跨包合同 21 passed），但**没有串起来真跑过一次**。
+
+**关键设计点（都写在代码注释里）**：ark 素材在**事务外**向方舟复验状态与 ProjectName，**事务内只读缓存并强制 120 秒新鲜度**——在事务里发 HTTP 会把行锁持有一个网络往返；登记路径的并发靠 `arkAssetId` 唯一约束裁决、失败方回读胜者，而不是把 advisory lock 跨网络持有。
+
+**顺带修掉的两个既有缺陷**（与本功能无关，但挡住了验证）：
+
+- `scripts/run_mvp_contract.sh` 的种子素材没盖 `inspector_version`，而正式提交有 `ASSET_INSPECTION_STALE` 闸门会拒——闸门 09-16 18:11 落地、脚本 09-15 14:55 最后改动，**跨包合同因此红了一整天**（main 的 CI 也在红）。版本号改为从 `media-inspector-version.ts` 读，不写死。
+- 两个合同不变量测试（付费放行闸门、三份合同字节一致）此前**不在 CI 里**——pytest 不收集 `.mjs`，全靠手工跑。
+
+**边界**：分支 `feat/ark-asset-library` 上 10 个提交，**未部署、未合并**。同一工作目录里还有并行会话未提交的消费/Token 管理 WIP（其 `nest build` 目前是坏的），因此本次工作全部在独立 worktree 中完成与验证。
+
 ### 2026-09-17：新增创意人员账号 `creative-yuyo`（yuyo），规则与朱阳一致
 
 授权人 kafeichong 要求为创意同事 yuyo 开一个独立账号，规则与 2026-09-16 的 `creative-zhuyang` 完全一致。

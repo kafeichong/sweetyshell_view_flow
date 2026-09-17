@@ -205,6 +205,14 @@
       ],
       "unverifiedRolesNote": "官方文档只对 reference_* 三个角色给了 asset:// 示例；首帧/尾帧能否接受素材 URI 没有任何官方依据，**未经真实验证前一律拒绝**（MEDIA_ARK_ROLE_UNSUPPORTED），不要凭推测放开。",
       "projectNameNote": "素材所属项目必须与生成用 API Key 所属项目一致，否则素材用不了。2026-09-17 真实核对：素材组全部在 default，生成 Key 也在 default。",
+      "productionVerification": {
+        "verifiedOn": "2026-09-17",
+        "referenceImagePath": "**已由真实账号验证**：参考素材用 asset://asset-20260917115246-cgmtw（私域虚拟人像库 800×1600 的图），4 秒 / 720p / 9:16 / 有声 / 无水印。providerTaskId cgt-20260917160935-fuec7 成功，成片 720×1280 / 97 帧 / 4.064 秒 / 3,907,153 字节。用量 87,300 tokens 与 `97 帧 × 720×1280 ÷ 1024` 逐位吻合（97 = 4×24+1，「+1 帧」口径在素材库素材上同样成立），按公开刊例价为 6.111000 元。",
+        "referenceVideoAndAudioPaths": "**尚未验证**：官方把 asset:// 同时写在 content.<模态>_url.url 的三种模态上，但真实账号只测过图像这一条。要用视频/音频参考前应先补一次验证。",
+        "firstFrameAndLastFramePaths": "**尚未验证**：官方没有给任何示例（见 unverifiedRoles），服务端目前一律拒绝。要放开必须先有一份真实证据，不要凭推测改。",
+        "registrationPath": "登记链路（GetAsset → 取回字节 → 检查 → 写我方对象存储 → 回读 sha256 一致）已在真实账号上跑通，用 800×1600 的图验证；该步不落库、不产生生成费用。",
+        "scopeNote": "以上验证是**直接调方舟接口**做的，绕过了本系统的预检/提交/Worker 链路——那三段各有单测覆盖但尚未串起来真跑过。"
+      },
       "evidence": [
         "official-ark-private-asset-library",
         "official-ark-portrait-paths"
