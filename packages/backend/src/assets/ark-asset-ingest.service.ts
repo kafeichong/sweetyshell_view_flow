@@ -13,6 +13,17 @@ const MEDIA_KIND_BY_ASSET_TYPE: Record<string, MediaMetadata['kind']> = {
   Video: 'video',
   Audio: 'audio',
 };
+const ARK_ASSET_TYPE_BY_MEDIA_TYPE: Record<string, string> = {
+  image: 'Image',
+  video: 'Video',
+  audio: 'Audio',
+};
+
+/** 对象键 `inputs/<actor>/<uuid>-名字.png` → 给人看的「名字」。 */
+function displayName(objectKey: string): string {
+  const base = objectKey.split('/').pop() ?? objectKey;
+  return base.replace(/^[0-9a-f-]{36}-/i, '').replace(/\.[^.]+$/, '') || base;
+}
 
 // 取字节的上限：与合同里各模态的上限同量级，防的是"素材库里那条记录指向一个想撑爆内存的地址"。
 // 一次性读进 Buffer 而不是流式：素材库目前的主用途是人像图（几百 KB），代价可接受。
@@ -109,6 +120,56 @@ export class ArkAssetIngestService {
       }
       throw error;
     }
+  }
+
+  /**
+   * 把**我方已经收下的一份素材**推给方舟入库，返回它在那边的素材 ID。
+   *
+   * 这是「从客户端上传素材到素材库」的那条路：字节已经在我们的对象存储里（客户端走
+   * 既有的上传票据放的），这里只需要给方舟一个取得到的地址。实测方舟在 CreateAsset
+   * 那一刻就拉取，所以签名用默认的短有效期即可。
+   *
+   * 幂等：已经入过库的直接返回，不会重复建素材、白占配额。
+   */
+  async publish(ownerId: string, assetId: string, options: { groupId?: string } = {}) {
+    const asset = await this.prisma.asset.findFirst({
+      where: { id: assetId, ownerId, role: 'input', inspectionStatus: 'verified' },
+    });
+    if (!asset) {
+      throw new ArkIngestError(
+        'ARK_PUBLISH_ASSET_NOT_FOUND',
+        '这份素材不在你名下、或还没通过检查，不能入库。',
+      );
+    }
+    if (asset.arkAssetId) return asset; // 已经入过库
+    const assetType = ARK_ASSET_TYPE_BY_MEDIA_TYPE[String(asset.mediaType)];
+    if (!assetType || !asset.objectKey) {
+      throw new ArkIngestError('ARK_PUBLISH_ASSET_UNSUPPORTED', '这份素材的类型不支持入库。');
+    }
+
+    // 一个素材组代表一个形象（真人人像库更是强制：一个组唯一绑定一个人），所以默认
+    // **一次上传建一个组**，让同一个人后续加的妆造有地方放。
+    const groupId = options.groupId?.trim()
+      || await this.ark.createAssetGroup(displayName(asset.objectKey), '由 Video Flow 上传');
+
+    const arkAssetId = await this.ark.createAsset({
+      groupId,
+      url: this.presign.createDownloadUrl(asset.objectKey).downloadUrl,
+      assetType,
+      name: displayName(asset.objectKey),
+    });
+    const active = await this.ark.waitForAssetActive(arkAssetId);
+
+    await this.prisma.asset.updateMany({
+      where: { id: asset.id },
+      data: {
+        arkAssetId,
+        arkGroupId: active.groupId || groupId,
+        arkAssetStatus: active.status,
+        arkAssetStatusCheckedAt: new Date(),
+      },
+    });
+    return { ...asset, arkAssetId, arkGroupId: active.groupId || groupId, arkAssetStatus: active.status };
   }
 
   private async findExisting(ownerId: string, arkAssetId: string) {

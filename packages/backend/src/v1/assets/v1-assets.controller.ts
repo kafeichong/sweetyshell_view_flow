@@ -147,6 +147,33 @@ export class V1AssetsController {
   }
 
   /**
+   * 把一份**已经在本人名下**的素材推给方舟素材库入库。
+   *
+   * 客户端先走既有的上传票据把文件放到我方存储，再调这里——这样"从 ComfyUI 上传素材
+   * 到素材库"复用的仍是同一条上传链路，不额外开一条收字节的口子。
+   *
+   * 入过库的素材之后就能用 `asset://` 送进生成请求；含真人人脸的素材**只有**这条路能走。
+   */
+  @Post('ark/publish')
+  async publishArkAsset(
+    @CurrentActor() actor: { actorId: string },
+    @Body() body: { assetId?: string; groupId?: string },
+  ) {
+    const assetId = typeof body?.assetId === 'string' ? body.assetId.trim() : '';
+    if (!assetId) throw new BadRequestException('assetId is required');
+    try {
+      const asset = await this.arkIngest.publish(actor.actorId, assetId, { groupId: body?.groupId });
+      return {
+        assetId: asset.id,
+        arkAssetId: asset.arkAssetId,
+        arkGroupId: asset.arkGroupId,
+      };
+    } catch (error) {
+      throw this.arkError(error);
+    }
+  }
+
+  /**
    * 素材库的错误码要原样带给用户：`ARK_ASSET_NOT_ACTIVE`（还没处理完）与
    * `ARK_ASSET_PROJECT_MISMATCH`（项目不对）让用户做的事完全不同。
    * 但**不要把方舟的原始报文透出去**——里面可能有带签名的地址。

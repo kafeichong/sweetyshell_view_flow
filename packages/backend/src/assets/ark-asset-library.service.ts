@@ -3,6 +3,7 @@ import { readFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
+import { ASSET_LIBRARY } from './asset-library-contract';
 
 // 火山方舟「私域素材库」的 Access Key 通道。与视频生成用的 API Key 是**两套鉴权**：
 // 生成走 bearer token，素材库走 AK/SK 签名（服务名 ark、动作走 2024-01-01 版本）。
@@ -53,6 +54,56 @@ export class ArkAssetLibraryService {
       MaxResults: options.maxResults ?? 20,
     });
     return (result.Items ?? []).map(toSummary);
+  }
+
+  async createAssetGroup(name: string, description: string): Promise<string> {
+    const result = await this.call<{ Id?: string }>('CreateAssetGroup', {
+      Name: name,
+      Description: description,
+      ProjectName: ASSET_LIBRARY.projectName,
+    });
+    if (!result.Id) throw new ServiceUnavailableException('ARK_ASSET_LIBRARY_ERROR:CreateAssetGroupNoId');
+    return result.Id;
+  }
+
+  /**
+   * 把一份可访问的对象交给方舟入库。
+   *
+   * `url` 用**默认的短有效期**即可：2026-09-17 真实账号实测表明方舟在创建那一刻就拉取
+   * 对象（Processing → Active 用了 6.1 秒）。**不要**因为"这是异步接口"就去签一个长期
+   * 地址——那等于给一张人脸图开一个长期可读的口子，而实测根本没有这个必要。
+   */
+  async createAsset(input: { groupId: string; url: string; assetType: string; name: string }): Promise<string> {
+    const result = await this.call<{ Id?: string }>('CreateAsset', {
+      GroupId: input.groupId,
+      URL: input.url,
+      AssetType: input.assetType,
+      Name: input.name,
+      ProjectName: ASSET_LIBRARY.projectName,
+    });
+    if (!result.Id) throw new ServiceUnavailableException('ARK_ASSET_LIBRARY_ERROR:CreateAssetNoId');
+    return result.Id;
+  }
+
+  /**
+   * 轮询到 Active 或 Failed，或者超时。
+   *
+   * 官方**没有给全状态枚举**，所以"不认识的状态"一律当作"还没好"继续等——绝不能把未知
+   * 当成 Active 放行：那样用户会拿一份尚未入库的素材去生成，方舟拦下，钱白花。
+   */
+  async waitForAssetActive(assetId: string, timeoutMs = 120_000): Promise<ArkAssetSummary> {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const asset = await this.getAsset(assetId, ASSET_LIBRARY.projectName);
+      if (asset.status === 'Active') return asset;
+      if (asset.status === 'Failed') {
+        throw new ServiceUnavailableException('ARK_ASSET_LIBRARY_ERROR:AssetProcessingFailed');
+      }
+      if (Date.now() >= deadline) {
+        throw new ServiceUnavailableException(`ARK_ASSET_LIBRARY_ERROR:AssetStillProcessing:${asset.status}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+    }
   }
 
   private readCredentials(): ArkCredentials | null {

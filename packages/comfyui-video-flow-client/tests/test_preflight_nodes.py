@@ -891,6 +891,8 @@ def test_every_file_picking_widget_offers_an_upload(tmp_path, monkeypatch):
 
     # 首帧/首尾帧×2/产品图 + 参考音频/参考图/参考视频：少一个就说明漏了
     assert pickers == [
+        # 上传入库的那个槽位真的在选本机文件，所以它**是**文件选择器，必须有上传标志。
+        'VideoFlowArkUploadInput.image',
         'VideoFlowFirstFrameInput.image',
         'VideoFlowFirstLastFrameInput.first_image',
         'VideoFlowFirstLastFrameInput.last_image',
@@ -1122,3 +1124,46 @@ def test_confirmed_submission_binds_a_library_asset_without_uploading_anything(t
     # 绑定的是登记时那一条我方 Asset，槽位来自 descriptor。
     payload = json.loads(record_holder['submitted'])
     assert payload['media'] == [{'slotId': 'reference-image-1', 'assetId': 'ours-1'}]
+
+
+def test_ark_upload_publishes_the_local_file_and_returns_a_usable_asset(tmp_path, monkeypatch):
+    """本机文件 → 我方存储 → 推给方舟入库，产出的槽位直接能接请求节点。
+
+    含真人人脸的参考素材只能走素材库，没有这个入口创意就得先去控制台传一次。
+    """
+    import sys
+    import httpx
+    from client import VideoFlowClient
+
+    path = tmp_path / 'look.png'
+    Image.new('RGB', (500, 500)).save(path)
+    monkeypatch.setitem(sys.modules, 'folder_paths', SimpleNamespace(
+        get_input_directory=lambda: str(tmp_path),
+        get_annotated_filepath=lambda _: str(path),
+    ))
+
+    seen = []
+
+    def handle(req):
+        seen.append((req.method, req.url.path))
+        if req.url.path.endswith('/upload-ticket'):
+            # 内容寻址：同一个文件第二次 Queue 会命中这里，不会再传一次。
+            return httpx.Response(201, json={'assetId': 'a1', 'alreadyUploaded': True, 'inspectionStatus': 'verified'})
+        if req.url.path.endswith('/assets/ark/publish'):
+            return httpx.Response(201, json={'assetId': 'a1', 'arkAssetId': ARK_ASSET_ID, 'arkGroupId': 'g1'})
+        raise AssertionError(f'不该打到 {req.url.path}')
+
+    monkeypatch.setattr(n, 'VideoFlowClient', lambda cfg: VideoFlowClient(cfg, httpx.Client(transport=httpx.MockTransport(handle))))
+
+    media = n.ArkUploadInput().inspect('look.png', None)[0]
+
+    assert media[0]['ark_asset_id'] == ARK_ASSET_ID
+    assert media[0]['asset_id'] == 'a1'
+    assert media[0]['descriptor']['arkAssetId'] == ARK_ASSET_ID
+    # descriptor 的字段来自**本机检查**，服务端会用自己的检查逐字段比对——两边同源才对得上。
+    assert media[0]['descriptor']['sha256'] == n.inspect_product('look.png')['descriptor']['sha256']
+    assert any(p.endswith('/assets/ark/publish') for _, p in seen), seen
+
+
+def test_ark_upload_passes_through_when_unused():
+    assert n.ArkUploadInput().inspect(n.UNUSED_MEDIA_CHOICE, None) == ([],)

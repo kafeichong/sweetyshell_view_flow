@@ -490,6 +490,22 @@ class VideoFlowClient:
         raise_for_status_with_reason(response)
         return response.json()
 
+    def publish_ark_asset(self, asset_id: str, group_id: str = "") -> dict[str, Any]:
+        """把我方已收下的一份素材推给方舟素材库入库。
+
+        幂等：已经入过库的返回同一条。入库后它才能用 `asset://` 送进生成请求。
+        """
+        payload: dict[str, Any] = {"assetId": asset_id}
+        if group_id:
+            payload["groupId"] = group_id
+        response = self.client.post(
+            f"{self.config.backend_url}/api/v1/assets/ark/publish",
+            headers=self._headers(),
+            json=payload,
+        )
+        raise_for_status_with_reason(response)
+        return response.json()
+
     def get_current_task_for_slot(self, execution_slot_id: str) -> dict[str, Any]:
         encoded_slot_id = quote(execution_slot_id, safe="")
         response = self.client.get(

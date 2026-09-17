@@ -166,3 +166,76 @@ describe('ArkAssetIngestService', () => {
     expect(presign.putObject).not.toHaveBeenCalled();
   });
 });
+
+describe('ArkAssetIngestService publish', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  const OURS = {
+    id: 'ours-1', ownerId: 'actor-1', role: 'input', mediaType: 'image',
+    objectKey: 'inputs/actor-1/11111111-2222-3333-4444-555555555555-我的形象.png',
+    mimeType: 'image/png', sizeBytes: BigInt(9), arkAssetId: null, arkGroupId: null, arkAssetStatus: null,
+  };
+
+  function buildPublish(assetOverrides: Record<string, unknown> = {}) {
+    const asset = { ...OURS, ...assetOverrides };
+    const prisma = {
+      asset: { findFirst: jest.fn().mockResolvedValue(asset), updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+    };
+    const ark = {
+      createAssetGroup: jest.fn().mockResolvedValue('group-new'),
+      createAsset: jest.fn().mockResolvedValue('asset-new'),
+      waitForAssetActive: jest.fn().mockResolvedValue({
+        id: 'asset-new', name: '我的形象', assetType: 'Image', status: 'Active',
+        groupId: 'group-new', projectName: 'default', url: null,
+      }),
+    };
+    const presign = { createDownloadUrl: jest.fn().mockReturnValue({ downloadUrl: 'https://oss/signed', expiresIn: 300 }) };
+    const service = new ArkAssetIngestService(prisma as never, ark as never, {} as never, presign as never);
+    return { service, prisma, ark, presign, asset };
+  }
+
+  it('hands Ark a signed url for an asset we already hold, then polls it to Active', async () => {
+    const { service, ark, presign, prisma } = buildPublish();
+
+    const published = await service.publish('actor-1', 'ours-1');
+
+    expect(presign.createDownloadUrl).toHaveBeenCalledWith(expect.stringContaining('inputs/actor-1/'));
+    expect(ark.createAsset).toHaveBeenCalledWith(expect.objectContaining({
+      groupId: 'group-new', url: 'https://oss/signed', assetType: 'Image', name: '我的形象',
+    }));
+    expect(ark.waitForAssetActive).toHaveBeenCalledWith('asset-new');
+    expect(prisma.asset.updateMany).toHaveBeenCalledWith({
+      where: { id: 'ours-1' },
+      data: expect.objectContaining({ arkAssetId: 'asset-new', arkGroupId: 'group-new', arkAssetStatus: 'Active' }),
+    });
+    expect(published).toMatchObject({ arkAssetId: 'asset-new' });
+  });
+
+  it('is idempotent: an already-published asset is not published twice', async () => {
+    // 重复入库会白占配额、还会在素材库里灌重复素材，而且不好清理。
+    const { service, ark, presign } = buildPublish({ arkAssetId: 'asset-already' });
+
+    await expect(service.publish('actor-1', 'ours-1')).resolves.toMatchObject({ arkAssetId: 'asset-already' });
+    expect(ark.createAsset).not.toHaveBeenCalled();
+    expect(presign.createDownloadUrl).not.toHaveBeenCalled();
+  });
+
+  it('refuses to publish someone else’s or unverified material', async () => {
+    const { service, ark } = buildPublish();
+    (service as any).prisma.asset.findFirst.mockResolvedValue(null);
+
+    await expect(service.publish('actor-1', 'ours-1')).rejects.toMatchObject({ code: 'ARK_PUBLISH_ASSET_NOT_FOUND' });
+    expect(ark.createAsset).not.toHaveBeenCalled();
+  });
+
+  it('does not claim success while Ark still says the asset is processing', async () => {
+    // 把"还在处理"当成能用了，用户会拿一份尚未入库的素材去生成，方舟拦下，钱白花。
+    const { service, ark, prisma } = buildPublish();
+    ark.waitForAssetActive.mockRejectedValue(
+      new (class extends Error { code = 'ARK_ASSET_LIBRARY_ERROR:AssetStillProcessing:Processing' })('still processing'),
+    );
+
+    await expect(service.publish('actor-1', 'ours-1')).rejects.toMatchObject({ code: 'ARK_ASSET_LIBRARY_ERROR:AssetStillProcessing:Processing' });
+    expect(prisma.asset.updateMany).not.toHaveBeenCalled();
+  });
+});
