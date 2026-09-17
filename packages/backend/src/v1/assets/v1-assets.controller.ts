@@ -131,9 +131,12 @@ export class V1AssetsController {
     if (!arkAssetId) throw new BadRequestException('arkAssetId is required');
     try {
       const asset = await this.arkIngest.materialize(actor.actorId, arkAssetId);
+      // 返回的字段刚好够客户端拼出一个 descriptor：它必须和我方 Asset 行的值逐字段一致，
+      // 否则正式提交会被 PREFLIGHT_ACTUAL_CONTENT_MISMATCH 拒掉。sha256 尤其不能少。
       return {
         assetId: asset.id,
         arkAssetId: asset.arkAssetId,
+        sha256: asset.fileHash,
         mimeType: asset.mimeType,
         sizeBytes: Number(asset.sizeBytes),
         metadata: asset.mediaMetadata,
