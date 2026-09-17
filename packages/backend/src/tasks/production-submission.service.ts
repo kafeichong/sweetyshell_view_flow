@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { ArkAssetLibraryService } from '../assets/ark-asset-library.service';
+import { ASSET_LIBRARY } from '../assets/asset-library-contract';
 import { AssetPresignService } from '../assets/asset-presign.service';
 import { MEDIA_INSPECTOR_VERSION } from '../assets/media-inspector-version';
 import { PrismaService } from '../prisma.service';
@@ -37,7 +39,16 @@ type AssetRow = {
   mimeType: string | null;
   mediaMetadata: unknown;
   inspectorVersion: string | null;
+  /** 非空表示这是私域素材库素材：字节在方舟手里，生成时送 asset:// 而不是我方签名地址。 */
+  arkAssetId: string | null;
+  arkAssetStatus: string | null;
+  arkAssetStatusCheckedAt: Date | null;
 };
+
+// 提交时会跑两遍素材校验：事务外那一遍可以发网络请求，事务里那一遍**绝不能**——
+// 在事务里发 HTTP 会把行锁持有一个网络往返，方舟抖动就变成数据库事务失败。
+// 所以事务内只读事务外刚写下的状态缓存，并用这个上限判定它还新不新鲜。
+const ARK_STATUS_MAX_AGE_MS = 120_000;
 
 type AssetStore = {
   asset: {
@@ -89,6 +100,7 @@ export class ProductionSubmissionService {
     private readonly preflight: PreflightService,
     private readonly presign: AssetPresignService,
     private readonly budget: TaskBudgetService,
+    private readonly arkLibrary: ArkAssetLibraryService,
   ) {}
 
   async submit(actorId: string, idempotencyKey: string, input: unknown) {
@@ -243,9 +255,20 @@ export class ProductionSubmissionService {
       const matches = asset.fileHash === descriptor.sha256
         && asset.sizeBytes !== null && Number(asset.sizeBytes) === descriptor.sizeBytes
         && asset.mimeType?.toLowerCase() === descriptor.mimeType
-        && workflowDigest(asset.mediaMetadata) === workflowDigest(descriptor.metadata);
+        && workflowDigest(asset.mediaMetadata) === workflowDigest(descriptor.metadata)
+        // 两边都归一成 null 再比：缺键与 null 指的是同一件事（"这份素材不在素材库里"），
+        // 直接用 undefined === null 会把普通素材全判成不一致。
+        && (asset.arkAssetId ?? null) === (descriptor.arkAssetId ?? null);
       if (!matches) throw new ProductionSubmissionError('PREFLIGHT_ACTUAL_CONTENT_MISMATCH', `media.${descriptor.slotId}`);
-      if (verifyBytes) {
+      if (asset.arkAssetId) {
+        // 素材库素材的字节在方舟手里，我方 OSS 那份只是登记时取回来的副本——复验它的字节
+        // 证明不了方舟那边还认这份素材。改成问方舟本人：还活着吗？在同一个项目里吗？
+        if (verifyBytes) {
+          await this.confirmArkAsset(asset, descriptor);
+        } else {
+          this.assertArkStatusFresh(asset, descriptor);
+        }
+      } else if (verifyBytes) {
         try {
           await this.presign.verifyObjectContent(asset.objectKey, descriptor.sha256, descriptor.sizeBytes);
         } catch {
@@ -255,6 +278,69 @@ export class ProductionSubmissionService {
       result.push({ descriptor, asset });
     }
     return result;
+  }
+
+  /**
+   * 事务外那一遍：问方舟这份素材还在不在、还在不在同一个项目里，并把结果写回缓存列，
+   * 供事务内那一遍读。
+   */
+  private async confirmArkAsset(asset: AssetRow, descriptor: MediaDescriptor) {
+    const path = `media.${descriptor.slotId}`;
+    const arkAssetId = asset.arkAssetId!;
+    let remote;
+    try {
+      remote = await this.arkLibrary.getAsset(arkAssetId, ASSET_LIBRARY.projectName);
+    } catch {
+      // 查不到就不放行：方舟会拦下未入库的素材，那样等于白花一次钱。
+      throw new ProductionSubmissionError(
+        'ARK_ASSET_UNREACHABLE',
+        path,
+        `无法向方舟确认素材 ${arkAssetId} 的状态，本次提交不放行（素材库暂时不可用时宁可挡住，`
+        + `也不要让一次注定被拦的生成白花钱）。请稍后重试。`,
+      );
+    }
+    if (remote.status !== 'Active') {
+      throw new ProductionSubmissionError(
+        'ARK_ASSET_NOT_ACTIVE',
+        path,
+        `素材 ${arkAssetId} 在方舟侧的状态是 ${remote.status || '未知'}，只有 Active 才能用于生成。`
+        + `素材被删掉、或还在处理中都会这样；请到素材库里确认后重新登记。`,
+      );
+    }
+    if (remote.projectName !== ASSET_LIBRARY.projectName) {
+      // 这一条断言一次抓住"素材传到了别的项目""AK 换了账号"整类事故。
+      throw new ProductionSubmissionError(
+        'ARK_ASSET_PROJECT_MISMATCH',
+        path,
+        `素材 ${arkAssetId} 属于项目 ${remote.projectName}，而生成用的是 ${ASSET_LIBRARY.projectName}。`
+        + `方舟按项目隔离素材，跨项目根本用不了——不在这里查出来，就要等到生成任务才失败。`,
+      );
+    }
+    await this.prisma.asset.updateMany({
+      where: { id: asset.id },
+      data: { arkAssetStatus: remote.status, arkAssetStatusCheckedAt: new Date() },
+    });
+    asset.arkAssetStatus = remote.status;
+    asset.arkAssetStatusCheckedAt = new Date();
+  }
+
+  /**
+   * 事务内那一遍：**绝不发网络请求**——在事务里发 HTTP 会把行锁持有一个网络往返，
+   * 方舟抖动就变成数据库事务失败。只读事务外刚写下的缓存，并强制它还新鲜。
+   *
+   * 这条是防 fail-open 的：素材可能在预检之后、提交之前被人从素材库里删掉，
+   * 光看缓存会以为它还活着。
+   */
+  private assertArkStatusFresh(asset: AssetRow, descriptor: MediaDescriptor) {
+    const checkedAt = asset.arkAssetStatusCheckedAt?.getTime() ?? 0;
+    if (asset.arkAssetStatus !== 'Active' || Date.now() - checkedAt > ARK_STATUS_MAX_AGE_MS) {
+      throw new ProductionSubmissionError(
+        'ARK_ASSET_STATUS_NOT_FRESH',
+        `media.${descriptor.slotId}`,
+        `素材 ${asset.arkAssetId} 的方舟侧状态没有在本次提交前确认过`
+        + `（缓存于 ${checkedAt ? new Date(checkedAt).toISOString() : '从未'}）。请重新提交。`,
+      );
+    }
   }
 
   private idempotentResult(existing: any, requestDigest: string) {
