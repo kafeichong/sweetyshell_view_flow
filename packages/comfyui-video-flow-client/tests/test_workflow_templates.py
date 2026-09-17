@@ -311,3 +311,21 @@ def test_portrait_template_takes_the_head_slot_from_the_asset_library():
     # 让所有在途任务的冻结快照失配，这条是最容易被"顺手加一个"破坏的地方。
     request = next(node for node in workflow["nodes"] if node["type"].endswith("Request"))
     assert request["type"] == "VideoFlowMultiReferenceRequest"
+
+    # **上传槽位必须在**：没有它，创意新做的形象在这个模板里就没有入库入口，
+    # 只能自己去加节点——而"创意自助入库"正是这条通路的设计前提。
+    # （踩过：第一版模板漏了它。）
+    assert types.count("VideoFlowArkUploadInput") == 1
+
+    # 上传槽位接在**链尾**。链序决定 @图像N 的编号，而默认提示词是按编号写的：
+    # 主用法（库选人像=@图像1 + 产品图=@图像2）的编号必须不受影响。
+    chain = []
+    cursor = request
+    while cursor is not None:
+        chain.append(cursor["type"])
+        upstream = cursor.get("inputs") and cursor["inputs"][0].get("link")
+        cursor = nodes[next(l[1] for l in workflow["links"] if l[0] == upstream)] if upstream else None
+    assert chain == [
+        "VideoFlowMultiReferenceRequest", "VideoFlowArkUploadInput",
+        "VideoFlowReferenceImageInput", "VideoFlowArkAssetInput",
+    ], chain
