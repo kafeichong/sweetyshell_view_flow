@@ -45,6 +45,11 @@ services:
       OSS_ACCESS_KEY_SECRET: ${OSS_ACCESS_KEY_SECRET}
       OSS_BUCKET: ${OSS_BUCKET}
       OSS_REGION: ${OSS_REGION}
+      # 私域素材库的 Access Key。与生成用的 API Key 是**两套鉴权**：素材库走 AK/SK 签名。
+      # 不配就是 fail-closed——客户端会显示"素材库读取失败"，而不是拿空凭证去调方舟。
+      # 密钥只落 Backend，**不进 Worker、不进客户端**。
+      ARK_ASSET_ACCESS_KEY_ID: ${ARK_ASSET_ACCESS_KEY_ID:-}
+      ARK_ASSET_ACCESS_KEY_SECRET: ${ARK_ASSET_ACCESS_KEY_SECRET:-}
       # T09: Backend 与 Worker 的事件各写各的子目录；报表读 Worker 子目录。
       VIDEO_FLOW_AUDIT_DIR: /app/audit/backend
       VIDEO_FLOW_WORKER_AUDIT_DIR: /app/audit/worker
