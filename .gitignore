@@ -10,8 +10,11 @@ package-lock.json
 # Python
 __pycache__/
 *.pyc
-venv/
-.venv/
+venv
+.venv
+# 注意**不带斜杠**：带斜杠只匹配目录，而 `ln -s` 出来的 venv 软链不是目录，
+# 于是 `git add -A` 会把它连同目标绝对路径一起提交进仓库（2026-09-17 真实踩到，
+# 两个 venv 都成了指向本机的自环死链，还跟着进了 main）。
 .pytest_cache/
 
 # 本地联调凭证，禁止提交
