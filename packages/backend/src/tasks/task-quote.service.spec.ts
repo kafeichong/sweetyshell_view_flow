@@ -54,7 +54,7 @@ describe('TaskQuoteService', () => {
       status: 'estimated',
       estimatedCny: '7.623000',
       reserveCny: '7.623000',
-      pricingVersion: 'seedance-2.5-public-catalog-2026-09-15',
+      pricingVersion: 'seedance-2.5-public-catalog-2026-09-17',
       basis: {
         output: { durationSeconds: 5, width: 1280, height: 720, frameRate: 24 },
         inputVideoSeconds: '0.000000',
@@ -214,7 +214,7 @@ describe('TaskQuoteService', () => {
     // 公式值 169 帧 = 152,100 低于最低值 9×21600=194,400，按最低值计费。
     expect(twoSeconds).toMatchObject({
       status: 'estimated',
-      pricingVersion: 'seedance-2.5-public-catalog-2026-09-15',
+      pricingVersion: 'seedance-2.5-public-catalog-2026-09-17',
       reserveCny: '8.164800',
       missing: [],
       basis: {

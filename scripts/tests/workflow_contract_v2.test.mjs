@@ -149,6 +149,33 @@ test('v2 contract captures mixed reference media and official per-kind limits', 
   assert.equal(contract.media.maximumReferenceCount, 50);
 });
 
+test('the private asset library declares only officially verified roles', async () => {
+  const contract = await loadContract();
+  const library = contract.media.assetLibrary;
+
+  // 素材库素材走 asset:// 而不是直传 URL：含真人人脸的参考素材只能这样送进去，
+  // 直传会被方舟输入审核拦下。这条声明是**可执行**的——Backend 的 mediaDescriptor()
+  // 按 roles 白名单拦角色，不在名单里的会被 MEDIA_ARK_ROLE_UNSUPPORTED 拒，
+  // 用户在建槽位时就能看到，而不是提交后花钱才被方舟打回。
+  assert.equal(library.uriScheme, 'asset://');
+  assert.ok(library.projectName, '素材必须显式带项目名：与生成用 API Key 不同项目时素材根本用不了');
+
+  // 官方只对 reference_* 三个角色给了 asset:// 示例，所以只放开这三个。
+  assert.deepEqual([...library.roles].sort(), ['reference_audio', 'reference_image', 'reference_video']);
+
+  // 关键护栏：没有官方依据的角色要**显式记下来**，而且绝不能混进 roles。
+  // 少了这条，将来有人凭推测把 first_frame 放开，用户要花一次钱才发现被方舟拒。
+  assert.ok(library.unverifiedRoles.length > 0, '首帧/尾帧的未验证状态要留痕，别默默消失');
+  for (const role of library.unverifiedRoles) {
+    assert.ok(!library.roles.includes(role), `${role} 没有官方依据，不该出现在 assetLibrary.roles 里`);
+  }
+
+  for (const evidenceId of library.evidence) {
+    assert.ok(contract.evidence[evidenceId], `assetLibrary references unknown evidence ${evidenceId}`);
+    assert.match(contract.evidence[evidenceId].url, /^https:\/\/docs\.volcengine\.com\//);
+  }
+});
+
 test('only the workflows declared for controlled acceptance are open', async () => {
   const contract = await loadContract();
 

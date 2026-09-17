@@ -16,6 +16,16 @@ export type MediaDescriptor = {
     videoCodec?: string;
     audioCodec?: string;
   };
+  /**
+   * 方舟私域素材库里那份素材的 ID（形如 `asset-20260917115246-cgmtw`）。
+   *
+   * 带这个键表示该素材走 `asset://<id>` 送进方舟，而不是我方 OSS 的签名 URL——
+   * 含真人人脸的参考素材**只能**这样送，直传会被方舟输入审核拦下，所以这不是优化项。
+   *
+   * 其余六个键照旧填真值（那份文件在入库时由我方检查器看过），所以服务端
+   * `production-submission` 的逐字段比对不用为它开特例。
+   */
+  arkAssetId?: string;
 };
 
 export type WorkflowIntent = {
@@ -100,6 +110,19 @@ export type WorkflowContractCatalog = {
   contractRevision: string;
   provider: string;
   model: { id: string };
+  /**
+   * 合同 `media` 一节里**被代码读取**的部分。只声明这一块：其余字段（各类素材的
+   * 上限与格式）另有 `assets/media-policy.ts` 的常量把守，声明进来反而会出现两个口径。
+   */
+  media: {
+    assetLibrary: {
+      uriScheme: string;
+      roles: MediaRole[];
+      projectName: string;
+      assetIdPattern: string;
+      unverifiedRoles: MediaRole[];
+    };
+  };
   workflows: WorkflowContractDefinition[];
   evidence: Record<string, unknown>;
 };

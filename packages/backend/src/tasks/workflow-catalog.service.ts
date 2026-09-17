@@ -13,6 +13,11 @@ import { validateSeedanceMediaMetadata, validateSeedanceMediaTotals } from '../a
 
 const contract = require('./resources/seedance-workflows.v2.json') as WorkflowContractCatalog;
 
+// 私域素材库：允许用 asset:// 的角色白名单与 asset ID 形状都来自合同，不在这里另写一份。
+// 合同是单一事实源——官方没有示例的角色（首帧/尾帧）就不在 roles 里，从而被这里拒掉。
+const ASSET_LIBRARY = contract.media.assetLibrary;
+const ASSET_LIBRARY_ID_PATTERN = new RegExp(ASSET_LIBRARY.assetIdPattern);
+
 const ROLE_KIND: Record<MediaRole, MediaKind> = {
   reference_image: 'image',
   first_frame: 'image',
@@ -173,7 +178,7 @@ export class WorkflowCatalogService {
   private mediaDescriptor(entry: unknown, index: number, items: CheckItem[]): MediaDescriptor {
     const path = `media[${index}]`;
     const raw = objectAt(entry, path);
-    exactKeys(raw, ['slotId', 'role', 'sha256', 'mimeType', 'sizeBytes', 'metadata'], path);
+    exactKeys(raw, ['slotId', 'role', 'sha256', 'mimeType', 'sizeBytes', 'metadata', 'arkAssetId'], path);
     const metadata = objectAt(raw.metadata, `${path}.metadata`);
     exactKeys(metadata, ['kind', 'width', 'height', 'durationSeconds', 'frameRate', 'videoCodec', 'audioCodec'], `${path}.metadata`);
     const role = raw.role as MediaRole;
@@ -184,12 +189,26 @@ export class WorkflowCatalogService {
     if (typeof raw.sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(raw.sha256)) throw new WorkflowContractError('WORKFLOW_MEDIA_HASH_INVALID', `${path}.sha256`);
     if (typeof raw.mimeType !== 'string' || !raw.mimeType.includes('/')) throw new WorkflowContractError('WORKFLOW_MEDIA_MIME_INVALID', `${path}.mimeType`);
     if (!Number.isSafeInteger(raw.sizeBytes) || (raw.sizeBytes as number) <= 0) throw new WorkflowContractError('WORKFLOW_MEDIA_SIZE_INVALID', `${path}.sizeBytes`);
+    // 素材库素材：带 arkAssetId 就走 asset://，不走我方 OSS 签名 URL。含真人人脸的参考
+    // 素材只能这样送（直传会被方舟输入审核拦），所以这不是可选优化。
+    let arkAssetId: string | undefined;
+    if (raw.arkAssetId !== undefined) {
+      if (typeof raw.arkAssetId !== 'string' || !ASSET_LIBRARY_ID_PATTERN.test(raw.arkAssetId.trim())) {
+        throw new WorkflowContractError('MEDIA_ARK_ASSET_ID_INVALID', `${path}.arkAssetId`);
+      }
+      // 角色白名单来自合同：官方只对 reference_* 给了 asset:// 示例，首帧/尾帧没有依据。
+      // 拦在这里，用户拿到的是"这个槽位不能用素材库素材"，而不是提交后花了钱才被方舟打回。
+      if (!ASSET_LIBRARY.roles.includes(role)) {
+        throw new WorkflowContractError('MEDIA_ARK_ROLE_UNSUPPORTED', `${path}.role`);
+      }
+      arkAssetId = raw.arkAssetId.trim();
+    }
     if (ROLE_KIND[role] !== kind) items.push(failed('MEDIA_ROLE_KIND_MISMATCH', `${path}.metadata.kind`));
     if (!(raw.mimeType as string).toLowerCase().startsWith(`${ROLE_KIND[role]}/`)) items.push(failed('MEDIA_MIME_KIND_MISMATCH', `${path}.mimeType`));
 
     return clone({
       slotId: raw.slotId.trim(), role, sha256: raw.sha256.toLowerCase(), mimeType: raw.mimeType.toLowerCase(), sizeBytes: raw.sizeBytes,
-      metadata,
+      metadata, arkAssetId,
     }) as MediaDescriptor;
   }
 
