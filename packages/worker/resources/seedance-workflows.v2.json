@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "contractId": "seedance-workflows.v2",
-  "contractRevision": "2026-09-15.4",
+  "contractRevision": "2026-09-17.1",
   "provider": "volcengine-ark",
   "model": {
     "key": "seedance-2.5",
@@ -188,7 +188,36 @@
     },
     "humanFacePolicy": {
       "directReferenceUploadSupported": false,
-      "note": "Use an officially permitted model output, virtual-person asset, or separately verified authorized-person asset. A Video Flow assetId is not an Ark authorization asset."
+      "note": "含真人人脸的参考图/视频直传会被方舟输入审核拦下。可用官方允许的三条路：本账号模型产物、私域素材库素材（见 media.assetLibrary，走 asset:// 而不是直传 URL）、或另行认证的授权真人素材。**Video Flow 的 assetId 与方舟的 asset ID 是两套互不相通的标识**，前者只是我方素材表的主键。"
+    },
+    "assetLibrary": {
+      "uriScheme": "asset://",
+      "roles": [
+        "reference_image",
+        "reference_video",
+        "reference_audio"
+      ],
+      "projectName": "default",
+      "assetIdPattern": "^asset-[A-Za-z0-9-]{1,128}$",
+      "unverifiedRoles": [
+        "first_frame",
+        "last_frame"
+      ],
+      "unverifiedRolesNote": "官方文档只对 reference_* 三个角色给了 asset:// 示例；首帧/尾帧能否接受素材 URI 没有任何官方依据，**未经真实验证前一律拒绝**（MEDIA_ARK_ROLE_UNSUPPORTED），不要凭推测放开。",
+      "projectNameNote": "素材所属项目必须与生成用 API Key 所属项目一致，否则素材用不了。2026-09-17 真实核对：素材组全部在 default，生成 Key 也在 default。",
+      "productionVerification": {
+        "verifiedOn": "2026-09-17",
+        "referenceImagePath": "**已由真实账号验证**：参考素材用 asset://asset-20260917115246-cgmtw（私域虚拟人像库 800×1600 的图），4 秒 / 720p / 9:16 / 有声 / 无水印。providerTaskId cgt-20260917160935-fuec7 成功，成片 720×1280 / 97 帧 / 4.064 秒 / 3,907,153 字节。用量 87,300 tokens 与 `97 帧 × 720×1280 ÷ 1024` 逐位吻合（97 = 4×24+1，「+1 帧」口径在素材库素材上同样成立），按公开刊例价为 6.111000 元。",
+        "referenceVideoAndAudioPaths": "**尚未验证**：官方把 asset:// 同时写在 content.<模态>_url.url 的三种模态上，但真实账号只测过图像这一条。要用视频/音频参考前应先补一次验证。",
+        "firstFrameAndLastFramePaths": "**尚未验证**：官方没有给任何示例（见 unverifiedRoles），服务端目前一律拒绝。要放开必须先有一份真实证据，不要凭推测改。",
+        "registrationPath": "登记链路（GetAsset → 取回字节 → 检查 → 写我方对象存储 → 回读 sha256 一致）已在真实账号上跑通，用 800×1600 的图验证；该步不落库、不产生生成费用。",
+        "createAssetFromOurStoragePath": "**已由真实账号验证**：把我方对象存储的签名地址交给 CreateAsset，方舟**在创建那一刻就拉取**对象——Processing → Active 用了 6.1 秒，回传地址落在方舟自己的桶上。这条正是「以后从客户端上传素材入库」要走的路。**推论（重要）**：签名用默认的短有效期即可，**不要**因为\"CreateAsset 是异步的\"就去签一个小时的地址——那是给一张人脸图开长期可读的口子，而实测根本没有这个必要。",
+        "scopeNote": "以上验证是**直接调方舟接口**做的，绕过了本系统的预检/提交/Worker 链路——那三段各有单测覆盖但尚未串起来真跑过。"
+      },
+      "evidence": [
+        "official-ark-private-asset-library",
+        "official-ark-portrait-paths"
+      ]
     }
   },
   "contentRules": {
@@ -1402,6 +1431,20 @@
       "locator": "任务类型与判定条件（全模态生视频任务行）、50 个全模态参考素材输入",
       "verifiedOn": "2026-09-16",
       "verification": "read_the_official_page_directly"
+    },
+    "official-ark-private-asset-library": {
+      "url": "https://docs.volcengine.com/docs/82379/2333565?lang=zh",
+      "localSnapshot": "docs/arkdocs/私域虚拟人像素材资产库使用指南.md",
+      "locator": "素材资产库结构说明、Assets API 接口列表、CreateAsset/GetAsset 示例、项目（Project）隔离说明、提示词如何指代素材",
+      "verifiedOn": "2026-09-17",
+      "verification": "read_official_doc_snapshot_and_called_the_api_with_a_real_ak_sk"
+    },
+    "official-ark-portrait-paths": {
+      "url": "https://docs.volcengine.com/docs/82379/2608626?lang=zh",
+      "localSnapshot": "docs/arkdocs/Doubao Seedance 便利创作含肖像视频.md",
+      "locator": "三条含肖像素材通路总览、使用预置虚拟人像、使用已授权真人素材（content.<模态>_url.url 填 asset://<asset ID>）",
+      "verifiedOn": "2026-09-17",
+      "verification": "read_official_doc_snapshot"
     }
   }
 }

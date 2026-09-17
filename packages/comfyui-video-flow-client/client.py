@@ -465,6 +465,47 @@ class VideoFlowClient:
         raise_for_status_with_reason(response)
         return response.json()
 
+    def list_ark_assets(self) -> list[dict[str, Any]]:
+        """私域素材库里当前账号可用的素材。
+
+        只读；方舟的签名地址**不会**下发到客户端，这里只有元信息。
+        """
+        response = self.client.get(
+            f"{self.config.backend_url}/api/v1/assets/ark",
+            headers=self._headers(),
+        )
+        raise_for_status_with_reason(response)
+        return response.json().get("assets", [])
+
+    def register_ark_asset(self, ark_asset_id: str) -> dict[str, Any]:
+        """把素材库里的一份素材登记成我方 Asset，返回构造 descriptor 所需的字段。
+
+        幂等：同一份素材重复登记会返回同一条我方 Asset，不会重复取字节。
+        """
+        response = self.client.post(
+            f"{self.config.backend_url}/api/v1/assets/ark",
+            headers=self._headers(),
+            json={"arkAssetId": ark_asset_id},
+        )
+        raise_for_status_with_reason(response)
+        return response.json()
+
+    def publish_ark_asset(self, asset_id: str, group_id: str = "") -> dict[str, Any]:
+        """把我方已收下的一份素材推给方舟素材库入库。
+
+        幂等：已经入过库的返回同一条。入库后它才能用 `asset://` 送进生成请求。
+        """
+        payload: dict[str, Any] = {"assetId": asset_id}
+        if group_id:
+            payload["groupId"] = group_id
+        response = self.client.post(
+            f"{self.config.backend_url}/api/v1/assets/ark/publish",
+            headers=self._headers(),
+            json=payload,
+        )
+        raise_for_status_with_reason(response)
+        return response.json()
+
     def get_current_task_for_slot(self, execution_slot_id: str) -> dict[str, Any]:
         encoded_slot_id = quote(execution_slot_id, safe="")
         response = self.client.get(

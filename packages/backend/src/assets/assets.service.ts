@@ -22,6 +22,13 @@ export interface RegisterAssetInput {
   sizeBytes?: number;
   fileHash?: string;
   inspectionStatus?: string;
+  /** 私域素材库素材：见 schema.prisma 里 Asset 的 ark* 列。普通上传件不带这些字段。 */
+  arkAssetId?: string;
+  arkGroupId?: string;
+  arkAssetStatus?: string;
+  arkAssetStatusCheckedAt?: Date;
+  mediaMetadata?: MediaMetadata;
+  inspectorVersion?: string;
 }
 
 export interface RegisterAssetOutput extends RegisterAssetInput {}

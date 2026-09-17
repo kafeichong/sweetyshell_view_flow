@@ -3,7 +3,7 @@ import { createContractHarness } from './contract-harness';
 import { Prisma } from '@prisma/client';
 import { inspectedImageFixture, referenceImageWorkflowRequest } from './workflow-fixtures';
 
-const PRICING_VERSION = 'seedance-2.5-public-catalog-2026-09-15';
+const PRICING_VERSION = 'seedance-2.5-public-catalog-2026-09-17';
 const VERIFIED_MODEL = 'doubao-seedance-2-5-260628';
 
 type Harness = Awaited<ReturnType<typeof createContractHarness>>;

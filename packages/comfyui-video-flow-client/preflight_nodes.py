@@ -10,6 +10,7 @@ from pathlib import Path
 
 try:
     from .client import VideoFlowClient, server_error_detail
+    from .config import VideoFlowConfig
     from .execution_slot import normalize_execution_slot_id
     from .media_inspection import inspect_media, read_verified_media, validate_media_collection
     from .receipts import ReceiptStore, credential_namespace
@@ -22,6 +23,7 @@ try:
     )
 except ImportError:
     from client import VideoFlowClient, server_error_detail
+    from config import VideoFlowConfig
     from execution_slot import normalize_execution_slot_id
     from media_inspection import inspect_media, read_verified_media, validate_media_collection
     from receipts import ReceiptStore, credential_namespace
@@ -43,6 +45,24 @@ def require_server_success(response):
     if response.status_code >= 400:
         detail = server_error_detail(response) or '服务器未通过检查'
         raise ValueError(f"服务器预检未通过（HTTP {response.status_code}）：{detail}")
+
+
+def admission_blockers(record):
+    """把服务端给的准入 blockers 写成一行行原因码，供报错指名道姓。
+
+    只说"当前不满足正式提交条件"等于没说：真正有用的是 `WORKFLOW_NOT_ENABLED`
+    （这条工作流根本没开放，找管理员）还是 `QUOTE_UNAVAILABLE`（报价算不出来，改参数）。
+    服务端在 blocker 的 `message` 里放的是平台原因码，与 `code` 相同时不重复写。
+    """
+    blockers = (record.get('productionAdmission') or {}).get('blockers')
+    if not blockers:
+        return []
+    lines = []
+    for blocker in blockers:
+        code = blocker.get('code') or blocker.get('message') or ''
+        message = blocker.get('message') or ''
+        lines.append(f"{code}({message})" if message and message != code else str(code))
+    return lines
 
 
 def fingerprint(value):
@@ -349,6 +369,200 @@ def _append_reference_media(reference_media, filename, role):
         raise ValueError(f"参考素材总数最多 {REFERENCE_MEDIA_TOTAL_LIMIT} 个")
     media.append(inspect_product(filename, role, f"{role.replace('_', '-')}-{role_count + 1}"))
     return _validated_reference_media(media)
+
+
+ARK_UNUSED_CHOICE = "（不用素材库素材）"
+ARK_LIST_UNAVAILABLE_PREFIX = "（素材库读取失败"
+# 只列图片：含真人人脸的素材**只能**走素材库（直传会被方舟输入审核拦），而目前真实验证过的
+# 只有图片这一条通路（视频/音频官方有文档但没实测）。放开未验证的角色会让用户花一次钱
+# 才发现被拒，所以先不列。
+ARK_SUPPORTED_ASSET_TYPE = "Image"
+# 槽位提示。**别把「（不给素材）」和「请选择」写进来**：客户端测试用这两个子串识别
+# "文件选择器"，撞上就会被要求带上传标志（而这个槽位不该有）。
+ARK_SLOT_TOOLTIP = (
+    "从方舟私域素材库挑一份素材（虚拟人像等）。清单由服务端给出，本地不读文件。"
+    "留在「不用素材库素材」表示这个槽位不用，不用删连线。"
+    "含真人人脸的参考素材**只能**走这里——直传会被方舟输入审核拦下。"
+)
+ARK_CHOICES_TTL_SECONDS = 30.0
+_ARK_CHOICES_CACHE = {"at": 0.0, "options": None}
+
+
+def _ark_client():
+    """素材库要用一个客户端，而下拉的选项是在 `INPUT_TYPES()` 里取的——那时候拿不到
+    画布上那个 Config 节点，只能从环境变量构造一个。用模块级的名字，测试才好替换。"""
+    return VideoFlowClient(VideoFlowConfig.from_env())
+
+
+def ark_asset_choices():
+    """素材库下拉的选项。
+
+    哨兵**永远第一项、永远在**：模板里存过的值必须永远有效，否则导入那张画布时前端会
+    判成「输入值不可用」。读不到素材库时也只多一项说明，不改变哨兵的位置——
+    下拉是可选项，网络出问题不该让整张画布不能用。
+
+    带 30 秒缓存：ComfyUI 会频繁调 `INPUT_TYPES()`，不该每次都打后端。
+    """
+    now = time.monotonic()
+    if _ARK_CHOICES_CACHE["options"] is not None and now - _ARK_CHOICES_CACHE["at"] < ARK_CHOICES_TTL_SECONDS:
+        return _ARK_CHOICES_CACHE["options"]
+    try:
+        assets = _ark_client().list_ark_assets()
+        usable = [
+            item for item in assets
+            if item.get("assetType") == ARK_SUPPORTED_ASSET_TYPE and item.get("status") == "Active"
+        ]
+        options = [ARK_UNUSED_CHOICE] + [
+            f"{item.get('name') or '未命名'} · {item.get('id')}" for item in usable
+        ]
+    except Exception as error:  # noqa: BLE001 - 任何失败都只能降级成"读不到"，不能抛
+        options = [ARK_UNUSED_CHOICE, f"{ARK_LIST_UNAVAILABLE_PREFIX}，稍后重试：{error}）"]
+    _ARK_CHOICES_CACHE.update(at=now, options=options)
+    return options
+
+
+def _ark_asset_id_of(choice):
+    """从下拉项里取回素材 ID。
+
+    下拉项是给人看的（`名称 · asset-…`），但 ID 的形状是合同钉死的，按分隔符取最后一段即可。
+    """
+    candidate = choice.rsplit(" · ", 1)[-1].strip()
+    if not candidate.startswith("asset-"):
+        raise ValueError("这个槽位里存的不是素材库素材，请重新选一个")
+    return candidate
+
+
+def _append_ark_reference_media(reference_media, ark_asset_id):
+    media = _validated_reference_media(reference_media)
+    role = "reference_image"
+    role_count = sum(1 for item in media if item.get("descriptor", {}).get("role") == role)
+    maximum, message = REFERENCE_MEDIA_LIMITS[role]
+    if role_count >= maximum:
+        raise ValueError(message)
+    if len(media) >= REFERENCE_MEDIA_TOTAL_LIMIT:
+        raise ValueError(f"参考素材总数最多 {REFERENCE_MEDIA_TOTAL_LIMIT} 个")
+
+    # 登记把字节取回来检查并留一份副本，这几个字段就是**我方 Asset 行的真值**——
+    # descriptor 必须与它逐字段一致，否则正式提交会被 PREFLIGHT_ACTUAL_CONTENT_MISMATCH 拒掉。
+    registered = _ark_client().register_ark_asset(ark_asset_id)
+    for key in ("sha256", "mimeType", "sizeBytes", "metadata", "arkAssetId", "assetId"):
+        if registered.get(key) in (None, ""):
+            raise ValueError(f"服务器登记素材时没有返回 {key}，这个槽位没法用")
+    media.append({
+        # 这两项是"这份素材不在本机上"的标记：正式提交时跳过上传，直接绑定它。
+        "ark_asset_id": registered["arkAssetId"],
+        "asset_id": registered["assetId"],
+        "filename": registered["arkAssetId"],
+        "descriptor": {
+            "slotId": f"{role.replace('_', '-')}-{role_count + 1}",
+            "role": role,
+            "sha256": registered["sha256"],
+            "mimeType": registered["mimeType"],
+            "sizeBytes": registered["sizeBytes"],
+            "metadata": registered["metadata"],
+            "arkAssetId": registered["arkAssetId"],
+        },
+    })
+    return _validated_reference_media(media)
+
+
+def _append_published_media(reference_media, filename):
+    """把本机的一份文件上传到方舟私域素材库，产出可以直接用的素材库素材。
+
+    复用既有的上传链路：本机文件 → 我方对象存储（上传票据）→ 推给方舟入库。
+    之后生成时用的是 `asset://`，含真人人脸的素材**只有**这条路能走。
+    """
+    media = _validated_reference_media(reference_media)
+    role = "reference_image"
+    role_count = sum(1 for item in media if item.get("descriptor", {}).get("role") == role)
+    maximum, message = REFERENCE_MEDIA_LIMITS[role]
+    if role_count >= maximum:
+        raise ValueError(message)
+    if len(media) >= REFERENCE_MEDIA_TOTAL_LIMIT:
+        raise ValueError(f"参考素材总数最多 {REFERENCE_MEDIA_TOTAL_LIMIT} 个")
+
+    inspected = inspect_product(filename, role, f"{role.replace('_', '-')}-{role_count + 1}")
+    client = _ark_client()
+    # 已有内容寻址：同一个文件重复 Queue 会复用同一条 Asset；publish 也是幂等的，
+    # 所以再次 Queue 不会在素材库里灌出重复素材。
+    uploaded = client.upload_media(
+        read_verified_media(inspected),
+        filename=inspected["filename"],
+        mime_type=inspected["descriptor"]["mimeType"],
+    )
+    published = client.publish_ark_asset(uploaded["assetId"])
+    if not published.get("arkAssetId"):
+        raise ValueError("服务器没有返回入库后的素材 ID，这个槽位没法用")
+
+    media.append({
+        "ark_asset_id": published["arkAssetId"],
+        "asset_id": uploaded["assetId"],
+        "filename": inspected["filename"],
+        "descriptor": {**inspected["descriptor"], "arkAssetId": published["arkAssetId"]},
+    })
+    return _validated_reference_media(media)
+
+
+class ArkUploadInput:
+    """把本机文件上传到方舟私域素材库，产出一份可以直接用的素材库素材。
+
+    为什么入库这一步在客户端也要有入口：含真人人脸的参考素材**只能**走素材库
+    （直传 URL 会被方舟输入审核拦下），没有这个入口，创意就只能先去控制台传一次。
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {"image": _reference_spec(('.png', '.jpg', '.jpeg', '.webp'), image_upload=True)},
+            "optional": {"reference_media": ("VIDEO_FLOW_LOCAL_MEDIA_LIST",)},
+        }
+    DESCRIPTION = ("把本机这张图**上传到方舟私域素材库**，再追加进参考集合。"
+                   "上传后它会出现在「素材库素材」的下拉里，之后可以直接复用；"
+                   "生成时走 asset://——含真人人脸的素材只有这样送才不会被拦。"
+                   "留在「不给素材」表示这个槽位不用。")
+    RETURN_TYPES = ("VIDEO_FLOW_LOCAL_MEDIA_LIST",)
+    RETURN_NAMES = ("reference_media",)
+    FUNCTION = "inspect"
+    CATEGORY = "Video Flow/Seedance"
+    @classmethod
+    def IS_CHANGED(cls, **kwargs): return float('nan')
+    def inspect(self, image, reference_media=None):
+        if image == UNUSED_MEDIA_CHOICE:
+            return (_validated_reference_media(reference_media),)
+        return (_append_published_media(reference_media, image),)
+
+
+class ArkAssetInput:
+    """从方舟私域素材库挑一份素材（虚拟人像等），而不是从本机 input 目录里挑。
+
+    含真人人脸的参考素材**只能**这样送：直传 URL 会被方舟输入审核拦下。
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            # **不收画布上的 Config**：下拉的选项必须在节点定义时就取好，而那一刻拿不到
+            # Config 节点的值，只能走环境变量。要是这里再收一个 Config，就会出现"列表来自
+            # 环境变量、登记走画布配置"的分裂。两边都用 from_env()，至少是一致的。
+            "required": {"ark_asset": (ark_asset_choices(), {"tooltip": ARK_SLOT_TOOLTIP})},
+            "optional": {"reference_media": ("VIDEO_FLOW_LOCAL_MEDIA_LIST",)},
+        }
+    DESCRIPTION = ("把上游节点的 reference_media 接进来，再追加一份**素材库素材**"
+                   "（在方舟控制台或上传入口入库过的虚拟人像等）。槽位可以留在"
+                   "「不用素材库素材」；列里每份素材的元信息由服务端给出，本地不读文件，"
+                   "也不会上传——字节在登记那一步就已经进了我方存储。")
+    RETURN_TYPES = ("VIDEO_FLOW_LOCAL_MEDIA_LIST",)
+    RETURN_NAMES = ("reference_media",)
+    FUNCTION = "inspect"
+    CATEGORY = "Video Flow/Seedance"
+    @classmethod
+    def IS_CHANGED(cls, **kwargs): return float('nan')
+    def inspect(self, ark_asset, reference_media=None):
+        if ark_asset == ARK_UNUSED_CHOICE:
+            return (_validated_reference_media(reference_media),)
+        if ark_asset.startswith(ARK_LIST_UNAVAILABLE_PREFIX):
+            raise ValueError(f"读不到素材库，这个槽位用不了：{ark_asset}")
+        return (_append_ark_reference_media(reference_media, _ark_asset_id_of(ark_asset)),)
 
 
 class ReferenceImageInput:
@@ -760,6 +974,12 @@ class CreateTask:
         uploaded_media = []
         for index, media in enumerate(local_media):
             expected = request['intent']['media'][index]
+            if media.get('ark_asset_id'):
+                # 素材库素材：字节在登记那一步就已经进了我方存储，这里**没有本地文件可读**，
+                # 也不该再传一次。直接绑定登记时给的那条 Asset；服务端会向方舟复验它还活着、
+                # 并且在同一个项目里。
+                uploaded_media.append({'slotId': expected['slotId'], 'assetId': media['asset_id']})
+                continue
             data = read_verified_media(media)
             uploaded = client.upload_media(data, filename=media['filename'], mime_type=media['descriptor']['mimeType'])
             uploaded_media.append({'slotId': expected['slotId'], 'assetId': uploaded['assetId']})
@@ -877,10 +1097,11 @@ CLASSES = {"VideoFlowExecutionPolicy": ExecutionPolicy, "VideoFlowProductInput":
     "VideoFlowFirstLastFrameInput": FirstLastFrameInput, "VideoFlowFirstFrameRequest": FirstFrameRequest,
     "VideoFlowFirstLastFrameRequest": FirstLastFrameRequest, "VideoFlowReferenceImageInput": ReferenceImageInput,
     "VideoFlowReferenceVideoInput": ReferenceVideoInput, "VideoFlowReferenceAudioInput": ReferenceAudioInput,
+    "VideoFlowArkAssetInput": ArkAssetInput, "VideoFlowArkUploadInput": ArkUploadInput,
     "VideoFlowMultiReferenceRequest": MultiReferenceRequest, "VideoFlowVideoEditRequest": VideoEditRequest,
     "VideoFlowVideoExtendRequest": VideoExtendRequest,
     "VideoFlowAudioReferenceRequest": AudioReferenceRequest,
     "VideoFlowRequestPreflight": RequestPreview,
     "VideoFlowConfirmedCreate": CreateTask, "VideoFlowPolicyWait": WaitTask, "VideoFlowPolicyDownload": DownloadResult,
     "VideoFlowPolicyPreview": PolicyPreview}
-NAMES = dict(zip(CLASSES, ["运行方式｜Preview / Production", "产品图｜选择与本地检查", "成片要求｜产品参考图生视频", "文生视频要求｜Prompt 生视频", "首帧图｜选择与本地检查", "首尾帧图｜选择与本地检查", "首帧成片要求｜首帧图生视频", "首尾帧成片要求｜两帧图生视频", "参考图片｜追加到全模态集合", "参考视频｜追加到全模态集合", "参考音频｜追加到全模态集合", "全模态参考成片要求", "视频编辑要求｜保持原时长", "视频延长要求｜4–30 秒", "音频参考成片要求", "请求预检｜本地信息与服务器规则", "正式提交｜恢复优先，按槽顺序生成", "等待云端任务完成", "下载并保存成片", "成片预览｜本地播放"]))
+NAMES = dict(zip(CLASSES, ["运行方式｜Preview / Production", "产品图｜选择与本地检查", "成片要求｜产品参考图生视频", "文生视频要求｜Prompt 生视频", "首帧图｜选择与本地检查", "首尾帧图｜选择与本地检查", "首帧成片要求｜首帧图生视频", "首尾帧成片要求｜两帧图生视频", "参考图片｜追加到全模态集合", "参考视频｜追加到全模态集合", "参考音频｜追加到全模态集合", "素材库素材｜追加到全模态集合", "上传素材到素材库", "全模态参考成片要求", "视频编辑要求｜保持原时长", "视频延长要求｜4–30 秒", "音频参考成片要求", "请求预检｜本地信息与服务器规则", "正式提交｜恢复优先，按槽顺序生成", "等待云端任务完成", "下载并保存成片", "成片预览｜本地播放"]))

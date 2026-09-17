@@ -4,7 +4,7 @@ import { inspectedImageFixture, referenceImageWorkflowRequest } from './workflow
 
 // 计费规则与 task-cost.ts 登记的一致：价格版本 + 模型都要匹配，
 // 否则终态只会进人工核查，不会套一个错公式结算。
-const PRICING_VERSION = 'seedance-2.5-public-catalog-2026-09-15';
+const PRICING_VERSION = 'seedance-2.5-public-catalog-2026-09-17';
 const VERIFIED_MODEL = 'doubao-seedance-2-5-260628';
 const RATE_PER_MILLION = 70;
 

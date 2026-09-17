@@ -31,10 +31,22 @@ export class V1WorkerController {
     return this.tasks.update(taskId, body as any);
   }
 
+  /**
+   * 给 Provider 一个能取到这份素材的地址。
+   *
+   * 这个接口的语义就是"取素材的地址"，而私域素材库素材的答案不是签名 URL，是
+   * `asset://<asset ID>`——方舟按这个协议去自己的素材库里取，**只有**这样送才不会被
+   * 输入审核拦下（含真人人脸的素材直传必被拦）。让 Backend 在这里把两种形态统一掉，
+   * Worker 就不需要知道"素材库"这个概念：它拿到的仍然是一个字符串地址，原样塞进
+   * payload 即可。"Worker 不自己造地址、Backend 是地址的唯一权威"这条不变量也保住了。
+   */
   @Get('assets/:assetId/download')
   async resolveAsset(@Param('assetId') assetId: string) {
     const asset = await this.assets.findUploadedById(assetId);
     if (!asset) throw new NotFoundException('Asset not found');
+    if (asset.arkAssetId) {
+      return { downloadUrl: `asset://${asset.arkAssetId}`, expiresIn: null };
+    }
     return this.presign.createDownloadUrl(asset.objectKey);
   }
 
