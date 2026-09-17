@@ -103,6 +103,23 @@ describe('MediaInspectorService', () => {
     });
   });
 
+  // ffprobe 9.0 起 `major_brand` 会给分号拼起来的品牌列表（同一个文件 8.x 是 `qt`、9.x 是
+  // `isom;qt`）。只看开头会把后者判成 mp4，与客户端对不上——同事机上真实踩到：随包的 ffprobe
+  // 是 9.0.1、服务端是 8.x，同一份素材两边判出不同 mime，正式提交被 400 拒掉。
+  it.each([
+    ['qt  ', 'video/quicktime'],
+    ['isom;qt  ', 'video/quicktime'],
+    ['isom', 'video/mp4'],
+    ['mp42', 'video/mp4'],
+  ])('reads the container brand list %j as %s', async (majorBrand, mimeType) => {
+    const service = new MediaInspectorService(async () => JSON.stringify({
+      format: { format_name: 'mov,mp4,m4a,3gp,3g2,mj2', tags: { major_brand: majorBrand } },
+      streams: [{ codec_type: 'video', width: 720, height: 576, codec_name: 'h264', avg_frame_rate: '30/1', duration: '5' }],
+    }));
+
+    await expect(service.inspect('https://signed/clip.mp4', mimeType)).resolves.toMatchObject({ kind: 'video' });
+  });
+
   it.each([
     ['heic', 'image/heic'],
     ['mif1', 'image/heif'],

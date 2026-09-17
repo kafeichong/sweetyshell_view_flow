@@ -161,6 +161,17 @@ model Asset {
   mediaMetadata   Json?             @map("media_metadata")
   // 这份 media_metadata 是哪一版检查器算的；复用旧资产时用它判断要不要重检。
   inspectorVersion String?          @map("inspector_version")
+  // 私域素材库：这一行同时是"我们 OSS 上的字节"和"方舟素材库里的一份素材"。
+  // 生成时送 asset://<arkAssetId> 而不是我方签名 URL——含真人人脸的参考素材直传会被拦，
+  // 所以这不是优化项。arkAssetId 全局唯一：一份方舟素材只该对应一行，重复登记会往
+  // 素材组里灌重复素材、白占权益包容量（第一道防线是登记时的 advisory lock）。
+  arkAssetId            String?   @unique @map("ark_asset_id")
+  arkGroupId            String?   @map("ark_group_id")
+  arkAssetStatus        String?   @map("ark_asset_status")
+  // 上面那个状态是什么时候查的。提交时不能为它去发 HTTP（那一遍在事务里），
+  // 只能读这个缓存值，所以必须带新鲜度上限。
+  arkAssetStatusCheckedAt DateTime? @map("ark_asset_status_checked_at")
+  arkLastInferenceTime  DateTime? @map("ark_last_inference_time")
   createdAt        DateTime          @default(now()) @map("created_at")
 
   @@unique([ownerId, role, fileHash])

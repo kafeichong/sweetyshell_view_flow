@@ -63,6 +63,22 @@ export class MediaInspectorService {
   constructor(@Inject(MEDIA_PROBE_RUNNER) private readonly runProbe: ProbeRunner) {}
 
   async inspect(url: string, expectedMime?: string): Promise<MediaMetadata> {
+    return (await this.inspectWithMime(url, expectedMime)).metadata;
+  }
+
+  /**
+   * 同 `inspect`，但把**探测出来的 MIME** 一并交出来。
+   *
+   * 常规上传路径用不上它：MIME 由客户端声明、服务端只做一致性约束。但私域素材库的
+   * 素材是我们自己去取的，没有谁声明过 MIME，而 Asset 行需要它——所以那条路需要这个。
+   *
+   * 注意它不能并进 `MediaMetadata` 里：那个对象会原样存进 `assets.media_metadata`，
+   * 再与客户端按字段摘要比对；多一个字段就会让所有既有上传件的比对失败。
+   */
+  async inspectWithMime(
+    url: string,
+    expectedMime?: string,
+  ): Promise<{ metadata: MediaMetadata; mimeType: string }> {
     let data: ProbeResponse;
     try { data = JSON.parse(await this.runProbe(url)) as ProbeResponse; } catch { throw new Error('MEDIA_INSPECTION_FAILED'); }
     const streams = data.streams ?? [];
@@ -85,32 +101,43 @@ export class MediaInspectorService {
         : ['mif1', 'msf1'].includes(brand) ? 'image/heif' : null;
       if (heifMime && durationSeconds === undefined) {
         assertExpectedMime(heifMime, expectedMime);
-        return { kind: 'image', width: video.width, height: video.height };
+        return { metadata: { kind: 'image', width: video.width, height: video.height }, mimeType: heifMime };
       }
       const imageMime: Record<string, string> = { png: 'image/png', mjpeg: 'image/jpeg', webp: 'image/webp', bmp: 'image/bmp', tiff: 'image/tiff', gif: 'image/gif' };
       const detectedImageMime = imageMime[(video.codec_name ?? '').toLowerCase()];
       if (detectedImageMime && (formatName.includes('image2') || formatName.includes('gif') || durationSeconds === undefined)) {
         assertExpectedMime(detectedImageMime, expectedMime);
-        return { kind: 'image', width: video.width, height: video.height };
+        return { metadata: { kind: 'image', width: video.width, height: video.height }, mimeType: detectedImageMime };
       }
       if (!formatName.includes('mov') && !formatName.includes('mp4')) {
         throw new Error('MEDIA_FORMAT_UNSUPPORTED');
       }
-      const detectedVideoMime = brand.startsWith('qt') ? 'video/quicktime' : 'video/mp4';
+      // 按 `;` 拆成品牌列表逐个比，**不能写 `brand.startsWith('qt')`**：ffprobe 9.0 起
+      // `major_brand` 会给分号拼起来的列表（同一个文件 8.x 是 `qt`、9.x 是 `isom;qt`），只看开头
+      // 会把后者判成 mp4，与客户端对不上（2026-09-16 真实踩到）。客户端同名处理见
+      // media_inspection.py 的 `_is_quicktime_brand`。
+      const brands = brand.split(';').map((part) => part.trim());
+      const detectedVideoMime = brands.includes('qt') ? 'video/quicktime' : 'video/mp4';
       assertExpectedMime(detectedVideoMime, expectedMime);
       const codec = video.codec_name?.toLowerCase();
       return {
-        kind: 'video', width: video.width, height: video.height, durationSeconds,
-        frameRate: frameRate(video.avg_frame_rate ?? video.r_frame_rate),
-        videoCodec: codec === 'hevc' ? 'h265' : codec,
-        ...(audio?.codec_name ? { audioCodec: audio.codec_name.toLowerCase() } : {}),
+        metadata: {
+          kind: 'video', width: video.width, height: video.height, durationSeconds,
+          frameRate: frameRate(video.avg_frame_rate ?? video.r_frame_rate),
+          videoCodec: codec === 'hevc' ? 'h265' : codec,
+          ...(audio?.codec_name ? { audioCodec: audio.codec_name.toLowerCase() } : {}),
+        },
+        mimeType: detectedVideoMime,
       };
     }
     if (audio && durationSeconds) {
       const detectedAudioMime = formatName.includes('wav') ? 'audio/wav' : formatName.includes('mp3') ? 'audio/mpeg' : null;
       if (!detectedAudioMime) throw new Error('MEDIA_FORMAT_UNSUPPORTED');
       assertExpectedMime(detectedAudioMime, expectedMime);
-      return { kind: 'audio', durationSeconds: stableAudioDuration(durationSeconds), ...(audio.codec_name ? { audioCodec: audio.codec_name.toLowerCase() } : {}) };
+      return {
+        metadata: { kind: 'audio', durationSeconds: stableAudioDuration(durationSeconds), ...(audio.codec_name ? { audioCodec: audio.codec_name.toLowerCase() } : {}) },
+        mimeType: detectedAudioMime,
+      };
     }
     throw new Error('MEDIA_INSPECTION_FAILED');
   }

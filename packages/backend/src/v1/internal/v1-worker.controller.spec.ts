@@ -17,14 +17,41 @@ import { V1WorkerController } from './v1-worker.controller';
 
 describe('V1WorkerController output ownership', () => {
   const buildController = (
-    overrides: { executions?: unknown; tasks?: unknown; assets?: unknown } = {},
+    overrides: { executions?: unknown; tasks?: unknown; assets?: unknown; presign?: unknown } = {},
   ) =>
     new V1WorkerController(
       (overrides.executions ?? {}) as never,
       (overrides.tasks ?? {}) as never,
       (overrides.assets ?? {}) as never,
-      {} as never,
+      (overrides.presign ?? {}) as never,
     );
+
+  // 素材库素材必须拿到 asset://<asset ID>：方舟按这个协议去自己的库里取，只有这样送
+  // 才不会被输入审核拦下。Worker 因此不需要知道"素材库"这个概念，拿到的仍是字符串地址。
+  it('hands over an asset protocol address for a library asset instead of a signed url', async () => {
+    const presign = { createDownloadUrl: jest.fn().mockReturnValue({ downloadUrl: 'https://oss/signed' }) };
+    const controller = buildController({
+      assets: { findUploadedById: jest.fn().mockResolvedValue({ objectKey: 'inputs/x.png', arkAssetId: 'asset-20260917115246-cgmtw' }) },
+      presign,
+    });
+
+    await expect(controller.resolveAsset('asset-1')).resolves.toEqual({
+      downloadUrl: 'asset://asset-20260917115246-cgmtw',
+      expiresIn: null,
+    });
+    expect(presign.createDownloadUrl).not.toHaveBeenCalled();
+  });
+
+  it('keeps signing a normal upload as before', async () => {
+    const presign = { createDownloadUrl: jest.fn().mockReturnValue({ downloadUrl: 'https://oss/signed', expiresIn: 300 }) };
+    const controller = buildController({
+      assets: { findUploadedById: jest.fn().mockResolvedValue({ objectKey: 'inputs/x.png', arkAssetId: null }) },
+      presign,
+    });
+
+    await expect(controller.resolveAsset('asset-1')).resolves.toEqual({ downloadUrl: 'https://oss/signed', expiresIn: 300 });
+    expect(presign.createDownloadUrl).toHaveBeenCalledWith('inputs/x.png');
+  });
 
   it('lets the task decide ownership and reports idempotent registration', async () => {
     const assets = {

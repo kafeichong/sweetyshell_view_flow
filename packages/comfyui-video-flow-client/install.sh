@@ -38,7 +38,7 @@ trap cleanup EXIT
 mkdir "$TEMP_DIR"
 # 逐个文件列出而不是目录整体拷贝：多带一个本地调试文件进同事环境，
 # 比漏更新一个模块更难排查。新增模块时必须同步这份清单。
-for file in __init__.py client.py config.py execution_slot.py media_inspection.py nodes.py preflight_nodes.py receipts.py requirements.txt submission_state.py README.md; do
+for file in __init__.py api_proxy.py client.py config.py execution_slot.py media_inspection.py nodes.py preflight_nodes.py receipts.py requirements.txt submission_state.py README.md; do
   cp "$SOURCE_DIR/$file" "$TEMP_DIR/$file"
 done
 # 资源目录：工作流模板、可直接导入的示例、前端展示脚本。
@@ -75,4 +75,31 @@ fi
 CLIENT_VERSION="$(sed -n 's/^CLIENT_VERSION = "\(.*\)"/\1/p' "$SOURCE_DIR/__init__.py" | head -1)"
 echo "Video Flow 客户端已安装到: $TARGET_DIR"
 echo "版本: ${CLIENT_VERSION:-未知}（排查问题时请提供这一版号）"
+
+# ffprobe 是本地素材检查的硬依赖（要读视频/音频的时长、帧率、编码）。缺了不会在安装时报错，
+# 而是**跑到一半**才报 FFPROBE_NOT_AVAILABLE——那时候参数都填完了，白折腾（同事机上真实踩到）。
+# 包里带了各架构的 ffprobe（`ffprobe/`），这里直接装上：**不让同事去下载，也不用敲命令**。
+# 搜索顺序与 media_inspection.py 的 FFPROBE_CANDIDATES 保持一致——不能只看 `command -v`：
+# Comfy Desktop 从 GUI 启动，进程 PATH 不含 /opt/homebrew/bin，那样会在"明明装了"的机器上误报。
+FFPROBE_FOUND=""
+command -v ffprobe >/dev/null 2>&1 && FFPROBE_FOUND="$(command -v ffprobe)"
+for candidate in /opt/homebrew/bin/ffprobe /usr/local/bin/ffprobe /opt/local/bin/ffprobe /usr/bin/ffprobe "$HOME/.video-flow/ffprobe"; do
+  if test -z "$FFPROBE_FOUND" && test -x "$candidate"; then FFPROBE_FOUND="$candidate"; fi
+done
+
+if test -n "$FFPROBE_FOUND"; then
+  echo "ffprobe: $FFPROBE_FOUND"
+elif test -x "$SOURCE_DIR/install_ffprobe.sh" && "$SOURCE_DIR/install_ffprobe.sh"; then
+  :  # 随包那份装好了，install_ffprobe.sh 自己打印了结果
+else
+  echo
+  echo "⚠️  没找到 ffprobe，随包那份也没装上。视频/音频素材检查要用它，跑工作流时会报"
+  echo "    FFPROBE_NOT_AVAILABLE（预检之前就停住，不会产生费用）。补上它，任选一种："
+  echo
+  echo "    ① 装了 Homebrew（终端里跑）：      brew install ffmpeg"
+  echo "    ② 没装 Homebrew：**双击同目录的「装ffprobe.command」**，它会按芯片架构自动装好。"
+  echo
+  echo "    装完**重启 ComfyUI**。拿不准就双击同目录的「诊断.command」，把输出发给管理员。"
+fi
+
 echo "请重启 ComfyUI，并在节点库中搜索 Video Flow。"

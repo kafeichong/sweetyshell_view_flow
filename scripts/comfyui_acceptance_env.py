@@ -117,8 +117,11 @@ def prepare_runtime(
         directory.mkdir(parents=True, exist_ok=True)
 
     templates = sorted(source_workflows.glob("*-preflight-v1.comfy.json"))
-    if len(templates) != 8:
-        raise RuntimeError(f"EXPECTED_8_WORKFLOW_TEMPLATES_FOUND_{len(templates)}")
+    # **不写死份数**。交付的模板会随工作流开合增减（单参考图那条退休时就是这个数漏改，
+    # 让整套跨包合同红了一整天；2026-09-17 加人像模板时又差点再来一次）。真正要防的是
+    # "一个模板都没拷到"，而每个模板自身的结构在下面逐个校验——那才是有效的把关。
+    if not templates:
+        raise RuntimeError("NO_WORKFLOW_TEMPLATES_FOUND")
     for source in templates:
         workflow = json.loads(source.read_text(encoding="utf-8"))
         config_nodes = [node for node in workflow.get("nodes", []) if node.get("type") == "VideoFlowConfig"]

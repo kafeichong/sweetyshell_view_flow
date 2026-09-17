@@ -75,7 +75,7 @@ describe('official completion token settlement', () => {
     )).toEqual({
       status: 'usage_calculated',
       amountCny: '5.544000',
-      pricingVersion: 'seedance-2.5-public-catalog-2026-09-15',
+      pricingVersion: 'seedance-2.5-public-catalog-2026-09-17',
       usage: { completion_tokens: 100000 },
     });
   });

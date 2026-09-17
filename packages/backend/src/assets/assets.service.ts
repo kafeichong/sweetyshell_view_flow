@@ -22,6 +22,13 @@ export interface RegisterAssetInput {
   sizeBytes?: number;
   fileHash?: string;
   inspectionStatus?: string;
+  /** 私域素材库素材：见 schema.prisma 里 Asset 的 ark* 列。普通上传件不带这些字段。 */
+  arkAssetId?: string;
+  arkGroupId?: string;
+  arkAssetStatus?: string;
+  arkAssetStatusCheckedAt?: Date;
+  mediaMetadata?: MediaMetadata;
+  inspectorVersion?: string;
 }
 
 export interface RegisterAssetOutput extends RegisterAssetInput {}
@@ -322,6 +329,24 @@ export class AssetsService {
    * 这是幂等的前提。客户端用 prompt+图片内容算幂等键，如果每次上传都生成新的
    * asset_id，同一工作流第二次排队就会变成"同 key 不同请求体"并被判 409。
    */
+  /**
+   * 复用旧资产重签票据时，把行上的 mimeType / sizeBytes 对齐到**新票据**声明的值。
+   *
+   * 为什么需要：内容寻址会按 sha256 复用同一行资产，但票据是每次新签的。如果客户端这次声明的
+   * mime 与行里存的不一样（踩过：我们把 ffprobe 升到 9.0 后，同一个 mov 的判定从 mp4 变成
+   * quicktime），OSS 对象会按新票据打上新的 Content-Type，而 `complete` 是拿它与**行里的旧值**
+   * 比 → 恒定报"与票据不符"，用户重试多少次都没用。
+   *
+   * 只动 `pending_upload` 的行：已经验收过的资产不能被这条路径改（它的 mime 已经按内容复核过），
+   * 更新范围交给 updateMany 的 where 收窄。
+   */
+  async alignPendingUpload(id: string, mimeType: string, sizeBytes: number) {
+    await this.prisma.asset.updateMany({
+      where: { id, inspectionStatus: 'pending_upload' },
+      data: { mimeType, sizeBytes },
+    });
+  }
+
   findByOwnerHash(ownerId: string, fileHash: string) {
     const prismaAsset = this.prisma as unknown as { asset: { findFirst: any } };
     return prismaAsset.asset.findFirst({

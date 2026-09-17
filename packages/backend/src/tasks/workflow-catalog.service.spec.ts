@@ -76,7 +76,7 @@ describe('WorkflowCatalogService', () => {
   it('publishes the exact contract revision, digest and server-selected model with the directory', () => {
     expect(catalog.directory()).toMatchObject({
       contractVersion: 2,
-      contractRevision: '2026-09-15.4',
+      contractRevision: '2026-09-17.1',
       model: 'doubao-seedance-2-5-260628',
       workflows: expect.any(Array),
     });
@@ -292,5 +292,93 @@ describe('WorkflowCatalogService', () => {
       expect.objectContaining({ code: 'VIDEO_TOTAL_DURATION_INVALID', path: 'media' }),
       expect.objectContaining({ code: 'AUDIO_TOTAL_DURATION_INVALID', path: 'media' }),
     ]));
+  });
+
+  // ---- 私域素材库（asset://）----
+  // 含真人人脸的参考素材**只能**走这条路：直传 URL 会被方舟输入审核拦下。所以这里的
+  // 每条断言都对应一种会花钱才发现的失败，要拦在预检阶段。
+
+  const arkImage = (overrides: Record<string, unknown> = {}) => ({
+    slotId: 'reference-1',
+    role: 'reference_image',
+    sha256: 'a'.repeat(64),
+    mimeType: 'image/png',
+    sizeBytes: 1024,
+    metadata: { kind: 'image', width: 1024, height: 1024 },
+    arkAssetId: 'asset-20260917115246-cgmtw',
+    ...overrides,
+  });
+
+  const evaluateOrThrow = (intent: unknown) => {
+    try {
+      catalog.evaluate(intent);
+    } catch (error) {
+      return error as WorkflowContractError;
+    }
+    throw new Error('expected the catalog to refuse this intent');
+  };
+
+  it('accepts an asset-library asset alongside the ordinary OSS-shaped fields', () => {
+    const result = catalog.evaluate({
+      ...textIntent('seedance.omni-reference.v1'),
+      media: [arkImage()],
+    });
+
+    expect(result.requestCheck.status).toBe('passed');
+    // arkAssetId 是**加法**：其余六个键照旧是真值（那份文件入库时我方检查器看过），
+    // 所以 production-submission 的逐字段比对不用为素材库开特例。
+    expect(result.effectiveRequest.media[0]).toMatchObject({
+      arkAssetId: 'asset-20260917115246-cgmtw',
+      sha256: 'a'.repeat(64),
+      sizeBytes: 1024,
+      mimeType: 'image/png',
+    });
+  });
+
+  it('keeps an intent without an asset id byte-identical, so frozen digests stay valid', () => {
+    // 这条是给"加法设计"上的锁：不带 arkAssetId 的历史 intent 必须算出一模一样的对象，
+    // 否则已冻结的 task.execution_plan 会在 Worker 侧报 contract digest 失配、进人工核查。
+    // 用 toStrictEqual 而不是 toEqual——后者会放过"键存在但值是 undefined"。
+    const descriptor = arkImage();
+    delete (descriptor as Record<string, unknown>).arkAssetId;
+
+    const result = catalog.evaluate({
+      ...textIntent('seedance.omni-reference.v1'),
+      media: [descriptor],
+    });
+
+    expect(result.effectiveRequest.media[0]).toStrictEqual({
+      slotId: 'reference-1',
+      role: 'reference_image',
+      sha256: 'a'.repeat(64),
+      mimeType: 'image/png',
+      sizeBytes: 1024,
+      metadata: { kind: 'image', width: 1024, height: 1024 },
+    });
+  });
+
+  it('refuses the asset library on roles the contract has no official example for', () => {
+    // 官方只对 reference_* 给了 asset:// 示例，首帧/尾帧没有依据，所以合同把它们放在
+    // assetLibrary.unverifiedRoles 而不是 roles 里。白名单在这里生效——用户在建槽位时
+    // 就被告知，而不是提交后花了钱才被方舟打回。
+    const error = evaluateOrThrow({
+      ...textIntent('seedance.first-frame-to-video.v1'),
+      media: [arkImage({ role: 'first_frame' })],
+    });
+
+    expect(error).toBeInstanceOf(WorkflowContractError);
+    expect(error.code).toBe('MEDIA_ARK_ROLE_UNSUPPORTED');
+    expect(error.path).toBe('media[0].role');
+  });
+
+  it('rejects a malformed asset id instead of forwarding it to the provider', () => {
+    const error = evaluateOrThrow({
+      ...textIntent('seedance.omni-reference.v1'),
+      media: [arkImage({ arkAssetId: 'https://example.invalid/not-an-asset.png' })],
+    });
+
+    expect(error).toBeInstanceOf(WorkflowContractError);
+    expect(error.code).toBe('MEDIA_ARK_ASSET_ID_INVALID');
+    expect(error.path).toBe('media[0].arkAssetId');
   });
 });

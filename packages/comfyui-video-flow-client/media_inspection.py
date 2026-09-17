@@ -145,6 +145,10 @@ FFPROBE_CANDIDATES = (
     "/usr/local/bin/ffprobe",      # macOS / Intel 的 Homebrew
     "/opt/local/bin/ffprobe",      # MacPorts
     "/usr/bin/ffprobe",            # 常见发行版自带
+    # 没装包管理器时的"手动落点"：把 ffprobe 二进制丢进 ~/.video-flow/ 即可，不用碰环境变量
+    # （Comfy Desktop 从 GUI 启动，改了 .zshrc 里的 PATH 也传不进来）。同事机器上缺 ffprobe
+    # 报 FFPROBE_NOT_AVAILABLE 时，安装器就是引导到这里。
+    str(Path.home() / ".video-flow" / "ffprobe"),
 )
 
 
@@ -184,6 +188,19 @@ def _probe(path: Path) -> dict[str, Any]:
         raise MediaInspectionError("MEDIA_INSPECTION_FAILED") from error
 
 
+def _is_quicktime_brand(format_data: dict[str, Any]) -> bool:
+    """容器是不是 QuickTime 品牌。
+
+    **不能写 `brand.startswith("qt")`**：ffprobe 9.0 起 `major_brand` 会给出**分号拼起来的品牌
+    列表**，同一个文件在 8.x 是 `qt`、在 9.x 是 `isom;qt`。只看开头就会把后者判成 mp4，与服务端
+    （8.x，判成 quicktime）对不上——正式提交时被服务端按 mime 不符拒掉，而且错误被吞成一句
+    "Uploaded media could not be inspected"（2026-09-16 同事机上真实踩到，就是因为随包的
+    ffprobe 是 9.0.1）。所以按 `;` 拆开，逐个比。
+    """
+    brand = str((format_data.get("tags") or {}).get("major_brand", "")).lower()
+    return any(part.strip() == "qt" for part in brand.split(";"))
+
+
 def _inspect_av(path: Path) -> tuple[str, str, dict[str, Any]]:
     probe = _probe(path)
     streams = probe.get("streams") if isinstance(probe.get("streams"), list) else []
@@ -199,8 +216,7 @@ def _inspect_av(path: Path) -> tuple[str, str, dict[str, Any]]:
     if video:
         if "mov" not in format_name and "mp4" not in format_name:
             raise _invalid("VIDEO_CONTAINER_INVALID", f"容器是 {format_name or '未知'}，只接受 mp4 / mov")
-        brand = str((format_data.get("tags") or {}).get("major_brand", "")).strip().lower()
-        mime_type = "video/quicktime" if brand.startswith("qt") else "video/mp4"
+        mime_type = "video/quicktime" if _is_quicktime_brand(format_data) else "video/mp4"
         codec = str(video.get("codec_name", "")).lower()
         metadata = {
             "kind": "video",

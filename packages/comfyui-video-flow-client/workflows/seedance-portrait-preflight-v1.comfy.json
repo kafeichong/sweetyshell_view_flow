@@ -1,0 +1,481 @@
+{
+  "id": "4a1f7e05-8dab-4473-aa80-8278e9c9a2fc",
+  "revision": 0,
+  "last_node_id": 15,
+  "last_link_id": 19,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "VideoFlowConfig",
+      "pos": [
+        30,
+        30
+      ],
+      "size": [
+        320,
+        200
+      ],
+      "order": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "config",
+          "type": "VIDEO_FLOW_CONFIG",
+          "links": [
+            1,
+            2,
+            3,
+            4
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VideoFlowConfig"
+      },
+      "widgets_values": [
+        "https://ai.sweetyshell.com",
+        "1"
+      ]
+    },
+    {
+      "id": 2,
+      "type": "VideoFlowExecutionPolicy",
+      "pos": [
+        30,
+        270
+      ],
+      "size": [
+        320,
+        200
+      ],
+      "order": 1,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "execution_policy",
+          "type": "VIDEO_FLOW_EXECUTION_POLICY",
+          "links": [
+            5,
+            6
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VideoFlowExecutionPolicy"
+      },
+      "widgets_values": [
+        "preview"
+      ]
+    },
+    {
+      "id": 3,
+      "type": "VideoFlowArkAssetInput",
+      "pos": [
+        400,
+        30
+      ],
+      "size": [
+        360,
+        180
+      ],
+      "order": 2,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "reference_media",
+          "type": "VIDEO_FLOW_LOCAL_MEDIA_LIST",
+          "links": [
+            7
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VideoFlowArkAssetInput"
+      },
+      "widgets_values": [
+        "（不用素材库素材）"
+      ]
+    },
+    {
+      "id": 4,
+      "type": "VideoFlowReferenceImageInput",
+      "pos": [
+        400,
+        230
+      ],
+      "size": [
+        360,
+        180
+      ],
+      "order": 3,
+      "inputs": [
+        {
+          "name": "reference_media",
+          "type": "VIDEO_FLOW_LOCAL_MEDIA_LIST",
+          "link": 7
+        }
+      ],
+      "outputs": [
+        {
+          "name": "reference_media",
+          "type": "VIDEO_FLOW_LOCAL_MEDIA_LIST",
+          "links": [
+            19
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VideoFlowReferenceImageInput"
+      },
+      "widgets_values": [
+        "（不给素材）"
+      ]
+    },
+    {
+      "id": 10,
+      "type": "VideoFlowMultiReferenceRequest",
+      "pos": [
+        1200,
+        30
+      ],
+      "size": [
+        360,
+        320
+      ],
+      "order": 9,
+      "inputs": [
+        {
+          "name": "reference_media",
+          "type": "VIDEO_FLOW_LOCAL_MEDIA_LIST",
+          "link": 19
+        }
+      ],
+      "outputs": [
+        {
+          "name": "request",
+          "type": "VIDEO_FLOW_PREFLIGHT_REQUEST",
+          "links": [
+            14
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VideoFlowMultiReferenceRequest"
+      },
+      "widgets_values": [
+        "写实口播广告风格，室内柔和自然光。参考@图像1 中人物的形象与外观，参考@图像2 中产品的配色与材质；人物正面朝向镜头，手持产品自然介绍。0s-3s：中景，人物微笑开口，镜头缓慢推近，产品在画面中部清晰可见。3s-5s：近景特写产品细节，人物手部动作自然，浅景深，背景干净虚化。低角度拍摄，画面干净、高级、有质感。",
+        5,
+        "16:9",
+        "720p"
+      ]
+    },
+    {
+      "id": 11,
+      "type": "VideoFlowRequestPreflight",
+      "pos": [
+        1590,
+        30
+      ],
+      "size": [
+        340,
+        220
+      ],
+      "order": 10,
+      "inputs": [
+        {
+          "name": "config",
+          "type": "VIDEO_FLOW_CONFIG",
+          "link": 1
+        },
+        {
+          "name": "execution_policy",
+          "type": "VIDEO_FLOW_EXECUTION_POLICY",
+          "link": 5
+        },
+        {
+          "name": "request",
+          "type": "VIDEO_FLOW_PREFLIGHT_REQUEST",
+          "link": 14
+        }
+      ],
+      "outputs": [
+        {
+          "name": "checked_request",
+          "type": "VIDEO_FLOW_CHECKED_REQUEST",
+          "links": [
+            15
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VideoFlowRequestPreflight"
+      }
+    },
+    {
+      "id": 12,
+      "type": "VideoFlowConfirmedCreate",
+      "pos": [
+        1970,
+        30
+      ],
+      "size": [
+        340,
+        220
+      ],
+      "order": 11,
+      "inputs": [
+        {
+          "name": "config",
+          "type": "VIDEO_FLOW_CONFIG",
+          "link": 2
+        },
+        {
+          "name": "execution_policy",
+          "type": "VIDEO_FLOW_EXECUTION_POLICY",
+          "link": 6
+        },
+        {
+          "name": "checked_request",
+          "type": "VIDEO_FLOW_CHECKED_REQUEST",
+          "link": 15
+        }
+      ],
+      "outputs": [
+        {
+          "name": "task",
+          "type": "VIDEO_FLOW_EXECUTION_RESULT",
+          "links": [
+            16
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VideoFlowConfirmedCreate"
+      },
+      "widgets_values": [
+        "slot-template-portrait-v1",
+        1
+      ]
+    },
+    {
+      "id": 13,
+      "type": "VideoFlowPolicyWait",
+      "pos": [
+        2350,
+        30
+      ],
+      "size": [
+        340,
+        220
+      ],
+      "order": 12,
+      "inputs": [
+        {
+          "name": "config",
+          "type": "VIDEO_FLOW_CONFIG",
+          "link": 3
+        },
+        {
+          "name": "task",
+          "type": "VIDEO_FLOW_EXECUTION_RESULT",
+          "link": 16
+        }
+      ],
+      "outputs": [
+        {
+          "name": "task",
+          "type": "VIDEO_FLOW_EXECUTION_RESULT",
+          "links": [
+            17
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VideoFlowPolicyWait"
+      },
+      "widgets_values": [
+        1200
+      ]
+    },
+    {
+      "id": 14,
+      "type": "VideoFlowPolicyDownload",
+      "pos": [
+        2730,
+        30
+      ],
+      "size": [
+        340,
+        220
+      ],
+      "order": 13,
+      "inputs": [
+        {
+          "name": "config",
+          "type": "VIDEO_FLOW_CONFIG",
+          "link": 4
+        },
+        {
+          "name": "task",
+          "type": "VIDEO_FLOW_EXECUTION_RESULT",
+          "link": 17
+        }
+      ],
+      "outputs": [
+        {
+          "name": "local_video_path",
+          "type": "STRING",
+          "links": [
+            18
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VideoFlowPolicyDownload"
+      }
+    },
+    {
+      "id": 15,
+      "type": "VideoFlowPolicyPreview",
+      "pos": [
+        3110,
+        30
+      ],
+      "size": [
+        340,
+        200
+      ],
+      "order": 14,
+      "inputs": [
+        {
+          "name": "local_video_path",
+          "type": "STRING",
+          "link": 18
+        }
+      ],
+      "outputs": [
+        {
+          "name": "local_video_path",
+          "type": "STRING",
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VideoFlowPolicyPreview"
+      },
+      "widgets_values": [
+        ""
+      ]
+    }
+  ],
+  "links": [
+    [
+      1,
+      1,
+      0,
+      11,
+      0,
+      "VIDEO_FLOW_CONFIG"
+    ],
+    [
+      2,
+      1,
+      0,
+      12,
+      0,
+      "VIDEO_FLOW_CONFIG"
+    ],
+    [
+      3,
+      1,
+      0,
+      13,
+      0,
+      "VIDEO_FLOW_CONFIG"
+    ],
+    [
+      4,
+      1,
+      0,
+      14,
+      0,
+      "VIDEO_FLOW_CONFIG"
+    ],
+    [
+      5,
+      2,
+      0,
+      11,
+      1,
+      "VIDEO_FLOW_EXECUTION_POLICY"
+    ],
+    [
+      6,
+      2,
+      0,
+      12,
+      1,
+      "VIDEO_FLOW_EXECUTION_POLICY"
+    ],
+    [
+      7,
+      3,
+      0,
+      4,
+      0,
+      "VIDEO_FLOW_LOCAL_MEDIA_LIST"
+    ],
+    [
+      14,
+      10,
+      0,
+      11,
+      2,
+      "VIDEO_FLOW_PREFLIGHT_REQUEST"
+    ],
+    [
+      15,
+      11,
+      0,
+      12,
+      2,
+      "VIDEO_FLOW_CHECKED_REQUEST"
+    ],
+    [
+      16,
+      12,
+      0,
+      13,
+      1,
+      "VIDEO_FLOW_EXECUTION_RESULT"
+    ],
+    [
+      17,
+      13,
+      0,
+      14,
+      1,
+      "VIDEO_FLOW_EXECUTION_RESULT"
+    ],
+    [
+      18,
+      14,
+      0,
+      15,
+      0,
+      "STRING"
+    ],
+    [
+      19,
+      4,
+      0,
+      10,
+      0,
+      "VIDEO_FLOW_LOCAL_MEDIA_LIST"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {},
+  "version": 0.4
+}

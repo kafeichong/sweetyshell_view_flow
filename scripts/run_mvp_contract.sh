@@ -162,6 +162,17 @@ else
   LIVE_LOG="$(mktemp -t video-flow-live-backend.XXXXXX)"
 
   actor_hash="$(printf '%s' "$LIVE_ACTOR_TOKEN" | shasum -a 256 | cut -d' ' -f1)"
+
+  # 种子的输入素材必须盖上**当前**检查器版本：正式提交有一道 ASSET_INSPECTION_STALE 闸门，
+  # 版本对不上就直接拒（它拦的是"按旧口径算出来的"资产）。版本号从源头读，别在这里写死——
+  # 检查器一升级，写死的值会让这套合同以一句看不懂的报错挂掉（2026-09-16 真实发生过：
+  # 闸门落地时没人回来改这个脚本，跨包合同因此红了一整天）。
+  INSPECTOR_VERSION="$(sed -n "s/^export const MEDIA_INSPECTOR_VERSION = '\(.*\)';$/\1/p" \
+    "$REPO_ROOT/packages/backend/src/assets/media-inspector-version.ts" | head -1)"
+  if test -z "$INSPECTOR_VERSION"; then
+    echo '未能从 media-inspector-version.ts 读到 MEDIA_INSPECTOR_VERSION' >&2
+    exit 1
+  fi
   docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" exec -T postgres \
     psql -v ON_ERROR_STOP=1 -U video_contract -d video_flow_contract -c "
       INSERT INTO actor_credentials (id, actor_id, name, token_hash, status, daily_limit_cny, monthly_limit_cny)
@@ -169,18 +180,18 @@ else
       ON CONFLICT (actor_id) DO UPDATE SET token_hash = EXCLUDED.token_hash, status = 'active';
       INSERT INTO production_gates (id, paused, reason) VALUES ('production', false, 'live contract')
       ON CONFLICT (id) DO UPDATE SET paused = false, reason = 'live contract';
-      INSERT INTO assets (id, owner_id, role, object_key, file_hash, inspection_status, media_type, mime_type, media_metadata, size_bytes)
-      VALUES (gen_random_uuid(), 'live-contract-actor', 'input', 'live-contract/reference.png', '2bec78f9edca83498eba36c257e0d0a95a0ff0a21c6ff985739c51a5e0c81ec5', 'verified', 'image', 'image/png', json_build_object('kind', 'image', 'width', 1280, 'height', 720), 43)
-      ON CONFLICT (owner_id, role, file_hash) DO NOTHING;
-      INSERT INTO assets (id, owner_id, role, object_key, file_hash, inspection_status, media_type, mime_type, media_metadata, size_bytes)
-      VALUES (gen_random_uuid(), 'live-contract-actor', 'input', 'live-contract/last.png', 'bbe001f704b684e176736ece7542c7e3edb76b3c3e5b0ed4c14f9f89c2365587', 'verified', 'image', 'image/png', json_build_object('kind', 'image', 'width', 1280, 'height', 720), 38)
-      ON CONFLICT (owner_id, role, file_hash) DO NOTHING;
-      INSERT INTO assets (id, owner_id, role, object_key, file_hash, inspection_status, media_type, mime_type, media_metadata, size_bytes)
-      VALUES (gen_random_uuid(), 'live-contract-actor', 'input', 'live-contract/audio.wav', '80e4320275831d70a161ed0c0b35a1d92d61ed537a29c772e06d9129c3509883', 'verified', 'audio', 'audio/wav', json_build_object('kind', 'audio', 'durationSeconds', 10, 'audioCodec', 'pcm_s16le'), 39)
-      ON CONFLICT (owner_id, role, file_hash) DO NOTHING;
-      INSERT INTO assets (id, owner_id, role, object_key, file_hash, inspection_status, media_type, mime_type, media_metadata, size_bytes)
-      VALUES (gen_random_uuid(), 'live-contract-actor', 'input', 'live-contract/video.mp4', '5df585981ac0b823eedcf3580e24ad2db223b7829bbaa593e2d3c2d835557f85', 'verified', 'video', 'video/mp4', json_build_object('kind', 'video', 'width', 1280, 'height', 720, 'durationSeconds', 6, 'frameRate', 24, 'videoCodec', 'h264', 'audioCodec', 'aac'), 39)
-      ON CONFLICT (owner_id, role, file_hash) DO NOTHING;
+      INSERT INTO assets (id, owner_id, role, object_key, file_hash, inspection_status, media_type, mime_type, media_metadata, size_bytes, inspector_version)
+      VALUES (gen_random_uuid(), 'live-contract-actor', 'input', 'live-contract/reference.png', '2bec78f9edca83498eba36c257e0d0a95a0ff0a21c6ff985739c51a5e0c81ec5', 'verified', 'image', 'image/png', json_build_object('kind', 'image', 'width', 1280, 'height', 720), 43, '$INSPECTOR_VERSION')
+      ON CONFLICT (owner_id, role, file_hash) DO UPDATE SET inspector_version = EXCLUDED.inspector_version;
+      INSERT INTO assets (id, owner_id, role, object_key, file_hash, inspection_status, media_type, mime_type, media_metadata, size_bytes, inspector_version)
+      VALUES (gen_random_uuid(), 'live-contract-actor', 'input', 'live-contract/last.png', 'bbe001f704b684e176736ece7542c7e3edb76b3c3e5b0ed4c14f9f89c2365587', 'verified', 'image', 'image/png', json_build_object('kind', 'image', 'width', 1280, 'height', 720), 38, '$INSPECTOR_VERSION')
+      ON CONFLICT (owner_id, role, file_hash) DO UPDATE SET inspector_version = EXCLUDED.inspector_version;
+      INSERT INTO assets (id, owner_id, role, object_key, file_hash, inspection_status, media_type, mime_type, media_metadata, size_bytes, inspector_version)
+      VALUES (gen_random_uuid(), 'live-contract-actor', 'input', 'live-contract/audio.wav', '80e4320275831d70a161ed0c0b35a1d92d61ed537a29c772e06d9129c3509883', 'verified', 'audio', 'audio/wav', json_build_object('kind', 'audio', 'durationSeconds', 10, 'audioCodec', 'pcm_s16le'), 39, '$INSPECTOR_VERSION')
+      ON CONFLICT (owner_id, role, file_hash) DO UPDATE SET inspector_version = EXCLUDED.inspector_version;
+      INSERT INTO assets (id, owner_id, role, object_key, file_hash, inspection_status, media_type, mime_type, media_metadata, size_bytes, inspector_version)
+      VALUES (gen_random_uuid(), 'live-contract-actor', 'input', 'live-contract/video.mp4', '5df585981ac0b823eedcf3580e24ad2db223b7829bbaa593e2d3c2d835557f85', 'verified', 'video', 'video/mp4', json_build_object('kind', 'video', 'width', 1280, 'height', 720, 'durationSeconds', 6, 'frameRate', 24, 'videoCodec', 'h264', 'audioCodec', 'aac'), 39, '$INSPECTOR_VERSION')
+      ON CONFLICT (owner_id, role, file_hash) DO UPDATE SET inspector_version = EXCLUDED.inspector_version;
     " >/dev/null
 
   LIVE_ASSET_ID="$(docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" exec -T postgres \

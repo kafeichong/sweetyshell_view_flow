@@ -76,22 +76,68 @@ function snapshot() {
   };
 }
 
-function dependencies() {
+// ---- 私域素材库（asset://）----
+// 这些断言各自对应一种"不拦就会白花钱"的失败：方舟会拒掉状态不对、或与生成 Key
+// 不同项目的素材，而那时任务已经建好了。
+
+const ARK_ASSET_ID = 'asset-20260917115246-cgmtw';
+
+function arkSnapshot() {
   const value = snapshot();
+  // descriptor 带上 arkAssetId，并且双方（descriptor 与 Asset 行）必须一致
+  (value.effectiveRequest.media[0] as Record<string, unknown>).arkAssetId = ARK_ASSET_ID;
+  return value;
+}
+
+function arkAssetRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'asset-1', ownerId: 'actor-1', role: 'input', objectKey: 'inputs/ark-copy.png',
+    inspectionStatus: 'verified', fileHash: sha256, sizeBytes: BigInt(12),
+    mimeType: 'image/png', mediaMetadata: { kind: 'image', width: 1280, height: 720 },
+    inspectorVersion: MEDIA_INSPECTOR_VERSION,
+    arkAssetId: ARK_ASSET_ID, arkAssetStatus: null, arkAssetStatusCheckedAt: null,
+    ...overrides,
+  };
+}
+
+/** 让整条链变成"素材库素材"：descriptor 与 Asset 行都带上同一个 arkAssetId。 */
+function arkDependencies({ asset = {}, remote = {} } = {}) {
+  const deps = dependencies({ asset: { ...arkAssetRow(asset) }, value: arkSnapshot() });
+  deps.arkLibrary.getAsset.mockResolvedValue(arkRemote(remote));
+  return deps;
+}
+
+function arkRemote(overrides: Record<string, unknown> = {}) {
+  return {
+    id: ARK_ASSET_ID, name: '005', assetType: 'Image', status: 'Active',
+    groupId: 'group-20260917115246-vr2hh', projectName: 'default', url: 'https://ark.example.invalid/x.jpg',
+    ...overrides,
+  };
+}
+
+function dependencies({
+  asset: assetOverrides = {},
+  value: valueOverride,
+}: { asset?: Record<string, unknown>; value?: unknown } = {}) {
+  const value = (valueOverride ?? snapshot()) as ReturnType<typeof snapshot>;
   const asset = {
     id: 'asset-1', ownerId: 'actor-1', role: 'input', objectKey: 'inputs/asset.png',
     inspectionStatus: 'verified', fileHash: sha256, sizeBytes: BigInt(12),
     mimeType: 'image/png', mediaMetadata: { kind: 'image', width: 1280, height: 720 },
     inspectorVersion: MEDIA_INSPECTOR_VERSION,
+    // 默认是普通上传件：不在素材库里，走 OSS 字节复验那条路。
+    arkAssetId: null, arkAssetStatus: null, arkAssetStatusCheckedAt: null,
+    ...assetOverrides,
   };
   const prisma = {
     task: { findFirst: jest.fn().mockResolvedValue(null) },
-    asset: { findFirst: jest.fn().mockResolvedValue(asset) },
+    asset: { findFirst: jest.fn().mockResolvedValue(asset), updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
   };
   const preflight = {
     prepareSubmission: jest.fn().mockResolvedValue(value),
   };
   const presign = { verifyObjectContent: jest.fn().mockResolvedValue(undefined) };
+  const arkLibrary = { getAsset: jest.fn() };
   const tx = { marker: 'transaction', asset: { findFirst: jest.fn().mockResolvedValue(asset) } };
   const budget = {
     createTaskWithReservation: jest.fn(async (data, validate) => {
@@ -99,7 +145,7 @@ function dependencies() {
       return { task: { id: 'task-1', ...data.task, executionPlan: data.executionPlan }, created: true };
     }),
   };
-  return { value, asset, prisma, preflight, presign, budget, tx };
+  return { value, asset, prisma, preflight, presign, budget, tx, arkLibrary };
 }
 
 describe('ProductionSubmissionService', () => {
@@ -107,6 +153,7 @@ describe('ProductionSubmissionService', () => {
     const deps = dependencies();
     const service = new ProductionSubmissionService(
       deps.prisma as never, deps.preflight as never, deps.presign as never, deps.budget as never,
+      deps.arkLibrary as never,
     );
 
     const result = await service.submit('actor-1', 'request-1', confirmed());
@@ -143,6 +190,7 @@ describe('ProductionSubmissionService', () => {
     const deps = dependencies();
     const service = new ProductionSubmissionService(
       deps.prisma as never, deps.preflight as never, deps.presign as never, deps.budget as never,
+      deps.arkLibrary as never,
     );
 
     await expect(service.submit('actor-1', 'request-1', confirmed(override))).rejects.toMatchObject({ code });
@@ -154,6 +202,7 @@ describe('ProductionSubmissionService', () => {
     const deps = dependencies();
     const service = new ProductionSubmissionService(
       deps.prisma as never, deps.preflight as never, deps.presign as never, deps.budget as never,
+      deps.arkLibrary as never,
     );
     await expect(service.submit('actor-1', 'request-1', confirmed({ media: [] })))
       .rejects.toMatchObject({ code: 'SUBMISSION_MEDIA_BINDINGS_MISMATCH' });
@@ -169,6 +218,7 @@ describe('ProductionSubmissionService', () => {
     deps.asset.mediaMetadata = { kind: 'image', width: 720, height: 1280 };
     const service = new ProductionSubmissionService(
       deps.prisma as never, deps.preflight as never, deps.presign as never, deps.budget as never,
+      deps.arkLibrary as never,
     );
     await expect(service.submit('actor-1', 'request-1', confirmed()))
       .rejects.toMatchObject({ code: 'PREFLIGHT_ACTUAL_CONTENT_MISMATCH' });
@@ -182,6 +232,7 @@ describe('ProductionSubmissionService', () => {
     deps.asset.inspectorVersion = '2026-09-15.1';
     const service = new ProductionSubmissionService(
       deps.prisma as never, deps.preflight as never, deps.presign as never, deps.budget as never,
+      deps.arkLibrary as never,
     );
 
     await expect(service.submit('actor-1', 'request-1', confirmed())).rejects.toMatchObject({
@@ -203,6 +254,7 @@ describe('ProductionSubmissionService', () => {
     });
     const service = new ProductionSubmissionService(
       deps.prisma as never, deps.preflight as never, deps.presign as never, deps.budget as never,
+      deps.arkLibrary as never,
     );
 
     await expect(service.submit('actor-1', 'request-1', request)).resolves.toMatchObject({
@@ -219,6 +271,7 @@ describe('ProductionSubmissionService', () => {
       .mockResolvedValueOnce({ id: 'task-current', status: 'running', clientDeliveryStatus: 'pending', executionAttempts: [] });
     const service = new ProductionSubmissionService(
       deps.prisma as never, deps.preflight as never, deps.presign as never, deps.budget as never,
+      deps.arkLibrary as never,
     );
 
     await expect(service.submit('actor-1', 'request-new', confirmed({ preflightId: 'expired-preflight' })))
@@ -234,6 +287,7 @@ describe('ProductionSubmissionService', () => {
     });
     const service = new ProductionSubmissionService(
       deps.prisma as never, deps.preflight as never, deps.presign as never, deps.budget as never,
+      deps.arkLibrary as never,
     );
 
     await expect(service.submit('actor-1', 'request-1', confirmed()))
@@ -245,6 +299,7 @@ describe('ProductionSubmissionService', () => {
     deps.budget.createTaskWithReservation.mockRejectedValueOnce(new Error('IDEMPOTENCY_KEY_REUSED'));
     const service = new ProductionSubmissionService(
       deps.prisma as never, deps.preflight as never, deps.presign as never, deps.budget as never,
+      deps.arkLibrary as never,
     );
 
     await expect(service.submit('actor-1', 'request-1', confirmed()))
@@ -258,10 +313,101 @@ describe('ProductionSubmissionService', () => {
       .mockRejectedValueOnce(new PreflightRecordError('PREFLIGHT_EXPIRED'));
     const service = new ProductionSubmissionService(
       deps.prisma as never, deps.preflight as never, deps.presign as never, deps.budget as never,
+      deps.arkLibrary as never,
     );
 
     await expect(service.submit('actor-1', 'request-1', confirmed()))
       .rejects.toMatchObject({ code: 'PREFLIGHT_EXPIRED', path: 'preflightId' });
     expect(deps.presign.verifyObjectContent).toHaveBeenCalledTimes(1);
+  });
+
+  // 素材库素材的字节在方舟手里，复验我方 OSS 那份副本证明不了方舟还认它。
+  it('confirms a library asset with Ark instead of re-hashing our own copy', async () => {
+    const deps = arkDependencies();
+    const service = new ProductionSubmissionService(
+      deps.prisma as never, deps.preflight as never, deps.presign as never, deps.budget as never,
+      deps.arkLibrary as never,
+    );
+
+    await service.submit('actor-1', 'request-1', confirmed());
+
+    expect(deps.arkLibrary.getAsset).toHaveBeenCalledWith(ARK_ASSET_ID, 'default');
+    expect(deps.presign.verifyObjectContent).not.toHaveBeenCalled();
+    // 事务外查到的状态要写回缓存，事务内那一遍只读它——在事务里发 HTTP 会把行锁
+    // 持有一个网络往返，方舟抖动就变成数据库事务失败。
+    expect(deps.prisma.asset.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'asset-1' },
+      data: expect.objectContaining({ arkAssetStatus: 'Active' }),
+    }));
+  });
+
+  it.each([
+    ['ARK_ASSET_PROJECT_MISMATCH', { projectName: 'other-project' }],
+    ['ARK_ASSET_NOT_ACTIVE', { status: 'Failed' }],
+  ])('refuses a library asset that Ark would not accept: %s', async (code, remote) => {
+    const deps = arkDependencies({ remote });
+    const service = new ProductionSubmissionService(
+      deps.prisma as never, deps.preflight as never, deps.presign as never, deps.budget as never,
+      deps.arkLibrary as never,
+    );
+
+    await expect(service.submit('actor-1', 'request-1', confirmed()))
+      .rejects.toMatchObject({ code });
+    // 拦在预占之前：这类素材送上去必被方舟拒，不该先建任务再白花一次钱。
+    expect(deps.budget.createTaskWithReservation).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when Ark cannot be reached at all', async () => {
+    const deps = arkDependencies();
+    deps.arkLibrary.getAsset.mockRejectedValue(new Error('network down'));
+    const service = new ProductionSubmissionService(
+      deps.prisma as never, deps.preflight as never, deps.presign as never, deps.budget as never,
+      deps.arkLibrary as never,
+    );
+
+    await expect(service.submit('actor-1', 'request-1', confirmed()))
+      .rejects.toMatchObject({ code: 'ARK_ASSET_UNREACHABLE' });
+  });
+
+  it('refuses a library asset whose inspection was never confirmed before submitting', async () => {
+    // 第二遍（事务内）只能读缓存。缓存从不新鲜时**不能**当作还活着放行——
+    // 素材可能在预检之后被人从素材库里删掉。
+    const deps = arkDependencies({ asset: { arkAssetStatus: 'Active', arkAssetStatusCheckedAt: null } });
+    const service = new ProductionSubmissionService(
+      deps.prisma as never, deps.preflight as never, deps.presign as never, deps.budget as never,
+      deps.arkLibrary as never,
+    );
+    // 让事务外那一遍查不到（模拟两遍之间缓存被清掉）——直接把 tx 的 asset 换成陈旧副本
+    deps.tx.asset.findFirst.mockResolvedValue({ ...deps.asset, arkAssetStatusCheckedAt: null });
+    deps.arkLibrary.getAsset.mockResolvedValue(arkRemote());
+
+    await expect(service.submit('actor-1', 'request-1', confirmed()))
+      .rejects.toMatchObject({ code: 'ARK_ASSET_STATUS_NOT_FRESH' });
+  });
+
+  it('rejects a descriptor whose asset id disagrees with the bound Asset', async () => {
+    // 换绑：descriptor 说是 A，绑的却是 B。逐字段比对必须抓住它。
+    const deps = arkDependencies({ asset: { arkAssetId: 'asset-20260917115246-other' } });
+    const service = new ProductionSubmissionService(
+      deps.prisma as never, deps.preflight as never, deps.presign as never, deps.budget as never,
+      deps.arkLibrary as never,
+    );
+
+    await expect(service.submit('actor-1', 'request-1', confirmed()))
+      .rejects.toMatchObject({ code: 'PREFLIGHT_ACTUAL_CONTENT_MISMATCH' });
+  });
+
+  it('keeps ordinary uploads on the OSS byte check', async () => {
+    // 加法设计不能把普通素材也带进 ark 分支：它们没有 arkAssetId，仍必须走字节复验。
+    const deps = dependencies();
+    const service = new ProductionSubmissionService(
+      deps.prisma as never, deps.preflight as never, deps.presign as never, deps.budget as never,
+      deps.arkLibrary as never,
+    );
+
+    await service.submit('actor-1', 'request-1', confirmed());
+
+    expect(deps.presign.verifyObjectContent).toHaveBeenCalledWith('inputs/asset.png', sha256, 12);
+    expect(deps.arkLibrary.getAsset).not.toHaveBeenCalled();
   });
 });
