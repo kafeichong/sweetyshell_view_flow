@@ -1,10 +1,12 @@
-import { BadRequestException, Body, ConflictException, Controller, Get, NotFoundException, Param, Post, ServiceUnavailableException, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, Get, NotFoundException, Param, Post, Query, ServiceUnavailableException, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { randomUUID } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { ApiCredentialGuard } from '../../auth/api-credential.guard';
 import { CurrentActor } from '../../auth/current-actor.decorator';
 import { AssetsService } from '../../assets/assets.service';
+import { ArkAssetIngestService, ArkIngestError } from '../../assets/ark-asset-ingest.service';
+import { ArkAssetLibraryService } from '../../assets/ark-asset-library.service';
 import { AssetPresignService } from '../../assets/asset-presign.service';
 import { MEDIA_INSPECTOR_VERSION, MediaInspectorService } from '../../assets/media-inspector.service';
 import {
@@ -24,6 +26,8 @@ export class V1AssetsController {
   constructor(
     private readonly assets: AssetsService,
     private readonly presign: AssetPresignService,
+    private readonly arkLibrary: ArkAssetLibraryService,
+    private readonly arkIngest: ArkAssetIngestService,
     private readonly tasks?: TasksService,
     private readonly inspector?: MediaInspectorService,
   ) {}
@@ -87,6 +91,71 @@ export class V1AssetsController {
       sizeBytes: asset.sizeBytes === null ? null : Number(asset.sizeBytes),
       ...this.presign.createDownloadUrl(asset.objectKey),
     };
+  }
+
+  /**
+   * 私域素材库里、当前账号可用的素材。
+   *
+   * 客户端据此让用户挑素材；挑中的那一份再走 `POST /v1/assets/ark` 登记。
+   * 返回的是方舟侧的元信息（asset ID、类型、状态），不是我方 Asset——登记之前
+   * 我方还没有对应的行，这正是"选"和"绑定"分开的原因。
+   */
+  @Get('ark')
+  async listArkAssets(@Query('groupId') groupId?: string) {
+    try {
+      const assets = await this.arkLibrary.listAssets({
+        groupType: 'AIGC',
+        groupId: groupId?.trim() || undefined,
+      });
+      // url 不外发：那是方舟签的地址，客户端不需要它，拿到了反而多一处泄露面。
+      return {
+        assets: assets.map(({ url, ...rest }) => rest),
+      };
+    } catch (error) {
+      throw this.arkError(error);
+    }
+  }
+
+  /**
+   * 把素材库里的一份素材登记成我方 Asset，返回 assetId 供正式提交绑定。
+   *
+   * 登记会把它取回来检查（尺寸、时长、编码）并在我方存储留一份副本——GetAsset 不返回这些，
+   * 而视频时长直接进计费公式，拿不到就是预占低估。生成时送的仍是 `asset://<asset ID>`。
+   */
+  @Post('ark')
+  async registerArkAsset(
+    @CurrentActor() actor: { actorId: string },
+    @Body() body: { arkAssetId?: string },
+  ) {
+    const arkAssetId = typeof body?.arkAssetId === 'string' ? body.arkAssetId.trim() : '';
+    if (!arkAssetId) throw new BadRequestException('arkAssetId is required');
+    try {
+      const asset = await this.arkIngest.materialize(actor.actorId, arkAssetId);
+      return {
+        assetId: asset.id,
+        arkAssetId: asset.arkAssetId,
+        mimeType: asset.mimeType,
+        sizeBytes: Number(asset.sizeBytes),
+        metadata: asset.mediaMetadata,
+      };
+    } catch (error) {
+      throw this.arkError(error);
+    }
+  }
+
+  /**
+   * 素材库的错误码要原样带给用户：`ARK_ASSET_NOT_ACTIVE`（还没处理完）与
+   * `ARK_ASSET_PROJECT_MISMATCH`（项目不对）让用户做的事完全不同。
+   * 但**不要把方舟的原始报文透出去**——里面可能有带签名的地址。
+   */
+  private arkError(error: unknown) {
+    if (error instanceof ArkIngestError) {
+      return new BadRequestException({ code: error.code, message: error.message });
+    }
+    if (error instanceof ServiceUnavailableException) {
+      return error;
+    }
+    return new ServiceUnavailableException('ARK_ASSET_LIBRARY_UNAVAILABLE');
   }
 
   @Post('upload-ticket')

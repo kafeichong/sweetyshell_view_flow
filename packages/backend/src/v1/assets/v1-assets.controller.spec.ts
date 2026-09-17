@@ -8,6 +8,7 @@ jest.mock('@nestjs/common', () => ({
   Get: () => () => {},
   Body: () => () => {},
   Param: () => () => {},
+  Query: () => () => {},
   BadRequestException: class BadRequestException extends Error { status = 400; },
   NotFoundException: class NotFoundException extends Error { status = 404; },
   ServiceUnavailableException: class ServiceUnavailableException extends Error { status = 503; },
@@ -48,6 +49,8 @@ describe('V1AssetsController ownership', () => {
     const controller = new V1AssetsController(
       assets as never,
       presign as never,
+      {} as never,
+      {} as never,
       tasks as never,
     );
 
@@ -80,6 +83,8 @@ describe('V1AssetsController ownership', () => {
     const controller = new V1AssetsController(
       assets as never,
       presign as never,
+      {} as never,
+      {} as never,
       tasks as never,
     );
 
@@ -95,6 +100,8 @@ describe('V1AssetsController ownership', () => {
       new V1AssetsController(
         { findLatestOwnedOutputForTask: jest.fn() } as never,
         { createDownloadUrl: jest.fn() } as never,
+        {} as never,
+        {} as never,
         { findOneForActor: jest.fn().mockResolvedValue(task) } as never,
       );
 
@@ -118,7 +125,7 @@ describe('V1AssetsController ownership', () => {
   it('does not create a download URL for an asset owned by another actor', async () => {
     const assets = { findOwnedUploaded: jest.fn().mockResolvedValue(null), registerInput: jest.fn() };
     const presign = { isConfigured: jest.fn().mockReturnValue(true), createDownloadUrl: jest.fn() };
-    const controller = new V1AssetsController(assets as never, presign as never);
+    const controller = new V1AssetsController(assets as never, presign as never, {} as never, {} as never);
 
     await expect(controller.download({ actorId: 'actor-a' }, 'asset-1')).rejects.toMatchObject({ status: 404 });
     expect(presign.createDownloadUrl).not.toHaveBeenCalled();
@@ -134,7 +141,7 @@ describe('V1AssetsController ownership', () => {
       getBucketName: jest.fn().mockReturnValue('sweetyshell-ai-assets'),
       createUploadTicket: jest.fn().mockReturnValue({ assetId: 'asset-1' }),
     };
-    const controller = new V1AssetsController(assets as never, presign as never);
+    const controller = new V1AssetsController(assets as never, presign as never, {} as never, {} as never);
 
     await controller.createUploadTicket(
       { actorId: 'actor-a' },
@@ -172,7 +179,7 @@ describe('V1AssetsController ownership', () => {
       isConfigured: jest.fn().mockReturnValue(true),
       createUploadTicket: jest.fn().mockReturnValue({ assetId: 'asset-existing' }),
     };
-    const controller = new V1AssetsController(assets as never, presign as never);
+    const controller = new V1AssetsController(assets as never, presign as never, {} as never, {} as never);
 
     const ticket = await controller.createUploadTicket(
       { actorId: 'actor-a' },
@@ -208,7 +215,7 @@ describe('V1AssetsController ownership', () => {
       isConfigured: jest.fn().mockReturnValue(true),
       createUploadTicket: jest.fn(),
     };
-    const controller = new V1AssetsController(assets as never, presign as never);
+    const controller = new V1AssetsController(assets as never, presign as never, {} as never, {} as never);
 
     const result = await controller.createUploadTicket(
       { actorId: 'actor-a' },
@@ -233,7 +240,7 @@ describe('V1AssetsController ownership', () => {
       registerInput: jest.fn(),
     };
     const presign = { isConfigured: jest.fn().mockReturnValue(true), createUploadTicket: jest.fn() };
-    const controller = new V1AssetsController(assets as never, presign as never);
+    const controller = new V1AssetsController(assets as never, presign as never, {} as never, {} as never);
 
     await expect(controller.createUploadTicket(
       { actorId: 'actor-a' },
@@ -257,7 +264,7 @@ describe('V1AssetsController ownership', () => {
       getBucketName: jest.fn().mockReturnValue('sweetyshell-ai-assets'),
       createUploadTicket: jest.fn().mockReturnValue({}),
     };
-    const controller = new V1AssetsController(assets as never, presign as never);
+    const controller = new V1AssetsController(assets as never, presign as never, {} as never, {} as never);
 
     await controller.createUploadTicket(
       { actorId: 'actor-a' },
@@ -303,7 +310,7 @@ describe('V1AssetsController ownership', () => {
       createDownloadUrl: jest.fn().mockReturnValue({ downloadUrl: 'https://oss/signed-image' }),
     };
     const inspector = { inspect: jest.fn().mockResolvedValue({ kind: 'image', width: 500, height: 500 }) };
-    const controller = new V1AssetsController(assets as never, presign as never, undefined, inspector as never);
+    const controller = new V1AssetsController(assets as never, presign as never, {} as never, {} as never, undefined, inspector as never);
 
     const result = await controller.completeUpload({ actorId: 'actor-a' }, 'asset-1');
 
@@ -339,7 +346,7 @@ describe('V1AssetsController ownership', () => {
       inspectObject: jest.fn().mockResolvedValue({ sizeBytes: 9, mimeType: 'image/png' }),
       getBucketName: jest.fn().mockReturnValue('sweetyshell-ai-assets'),
     };
-    const controller = new V1AssetsController(assets as never, presign as never);
+    const controller = new V1AssetsController(assets as never, presign as never, {} as never, {} as never);
 
     await expect(controller.completeUpload({ actorId: 'actor-a' }, 'asset-1')).rejects.toMatchObject({ status: 400 });
     expect(assets.markUploaded).not.toHaveBeenCalled();
@@ -364,7 +371,7 @@ describe('V1AssetsController ownership', () => {
       inspectObject: jest.fn().mockResolvedValue(actual),
       getBucketName: jest.fn().mockReturnValue('sweetyshell-ai-assets'),
     };
-    const controller = new V1AssetsController(assets as never, presign as never);
+    const controller = new V1AssetsController(assets as never, presign as never, {} as never, {} as never);
 
     await expect(controller.completeUpload({ actorId: 'actor-a' }, 'asset-1')).rejects.toMatchObject({ status: 400 });
     expect(assets.markUploaded).not.toHaveBeenCalled();
@@ -385,7 +392,7 @@ describe('V1AssetsController ownership', () => {
       inspectObject: jest.fn().mockRejectedValue(new Error('NoSuchKey')),
       getBucketName: jest.fn().mockReturnValue('sweetyshell-ai-assets'),
     };
-    const controller = new V1AssetsController(assets as never, presign as never);
+    const controller = new V1AssetsController(assets as never, presign as never, {} as never, {} as never);
 
     await expect(controller.completeUpload({ actorId: 'actor-a' }, 'asset-1')).rejects.toMatchObject({ status: 400 });
     expect(assets.markUploaded).not.toHaveBeenCalled();
@@ -394,7 +401,7 @@ describe('V1AssetsController ownership', () => {
   it('does not issue a download URL for an unconfirmed upload', async () => {
     const assets = { findOwnedUploaded: jest.fn().mockResolvedValue(null) };
     const presign = { createDownloadUrl: jest.fn() };
-    const controller = new V1AssetsController(assets as never, presign as never);
+    const controller = new V1AssetsController(assets as never, presign as never, {} as never, {} as never);
 
     await expect(controller.download({ actorId: 'actor-a' }, 'asset-pending')).rejects.toMatchObject({ status: 404 });
     expect(presign.createDownloadUrl).not.toHaveBeenCalled();
@@ -423,7 +430,7 @@ describe('V1AssetsController ownership', () => {
       getBucketName: jest.fn().mockReturnValue('sweetyshell-ai-assets'),
       createUploadTicket: jest.fn().mockReturnValue({ assetId: 'asset-winner' }),
     };
-    const controller = new V1AssetsController(assets as never, presign as never);
+    const controller = new V1AssetsController(assets as never, presign as never, {} as never, {} as never);
 
     const result = await controller.createUploadTicket(
       { actorId: 'actor-a' },
@@ -453,7 +460,7 @@ describe('V1AssetsController official Seedance media ticket policy', () => {
       getBucketName: jest.fn().mockReturnValue('sweetyshell-ai-assets'),
       createUploadTicket: jest.fn().mockReturnValue({ assetId: 'asset-media' }),
     };
-    return { assets, presign, controller: new V1AssetsController(assets as never, presign as never) };
+    return { assets, presign, controller: new V1AssetsController(assets as never, presign as never, {} as never, {} as never) };
   }
 
   it.each([
@@ -497,7 +504,7 @@ describe('V1AssetsController media inspection', () => {
     const assets = { findOwned: jest.fn().mockResolvedValue(asset), markUploaded: jest.fn().mockResolvedValue({ ...asset, bucket: 'bucket', inspectionStatus: 'verified' }) };
     const presign = { inspectObject: jest.fn().mockResolvedValue(actual), getBucketName: jest.fn().mockReturnValue('bucket'), createDownloadUrl: jest.fn().mockReturnValue({ downloadUrl: 'https://oss/signed' }) };
     const inspector = { inspect: jest.fn().mockResolvedValue({ kind: 'video', width: 1280, height: 720, durationSeconds: 5, frameRate: 24, videoCodec: 'h264' }) };
-    const controller = new V1AssetsController(assets as never, presign as never, undefined, inspector as never);
+    const controller = new V1AssetsController(assets as never, presign as never, {} as never, {} as never, undefined, inspector as never);
     await controller.completeUpload({ actorId: 'actor-a' }, 'asset-1');
     expect(inspector.inspect).toHaveBeenCalledWith('https://oss/signed', 'video/mp4');
     expect(assets.markUploaded).toHaveBeenCalledWith('asset-1', 'actor-a', expect.objectContaining({
@@ -509,7 +516,7 @@ describe('V1AssetsController media inspection', () => {
     const assets = { findOwned: jest.fn().mockResolvedValue(asset), markUploaded: jest.fn() };
     const presign = { inspectObject: jest.fn().mockResolvedValue(actual), getBucketName: jest.fn().mockReturnValue('bucket'), createDownloadUrl: jest.fn().mockReturnValue({ downloadUrl: 'https://oss/signed' }) };
     const inspector = { inspect: jest.fn().mockRejectedValue(new Error('MEDIA_INSPECTION_FAILED')) };
-    const controller = new V1AssetsController(assets as never, presign as never, undefined, inspector as never);
+    const controller = new V1AssetsController(assets as never, presign as never, {} as never, {} as never, undefined, inspector as never);
     await expect(controller.completeUpload({ actorId: 'actor-a' }, 'asset-1')).rejects.toMatchObject({ status: 400 });
     expect(assets.markUploaded).not.toHaveBeenCalled();
   });
@@ -523,7 +530,7 @@ describe('V1AssetsController media inspection', () => {
       createDownloadUrl: jest.fn().mockReturnValue({ downloadUrl: 'https://oss/signed' }),
     };
     const inspector = { inspect: jest.fn().mockResolvedValue({ kind: 'image', width: 640, height: 480 }) };
-    const controller = new V1AssetsController(assets as never, presign as never, undefined, inspector as never);
+    const controller = new V1AssetsController(assets as never, presign as never, {} as never, {} as never, undefined, inspector as never);
 
     await expect(controller.completeUpload({ actorId: 'actor-a' }, 'asset-1')).rejects.toMatchObject({ status: 400 });
     expect(assets.markUploaded).not.toHaveBeenCalled();
@@ -536,7 +543,7 @@ describe('V1AssetsController media inspection', () => {
       getBucketName: jest.fn().mockReturnValue('bucket'),
       createDownloadUrl: jest.fn(),
     };
-    const controller = new V1AssetsController(assets as never, presign as never);
+    const controller = new V1AssetsController(assets as never, presign as never, {} as never, {} as never);
 
     await expect(controller.completeUpload({ actorId: 'actor-a' }, 'asset-1')).rejects.toMatchObject({ status: 503 });
     expect(assets.markUploaded).not.toHaveBeenCalled();

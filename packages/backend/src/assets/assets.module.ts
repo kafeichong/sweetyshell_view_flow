@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { AssetsService } from './assets.service';
 import { AssetPresignService } from './asset-presign.service';
+import { ArkAssetIngestService } from './ark-asset-ingest.service';
 import { ArkAssetLibraryService } from './ark-asset-library.service';
 import { defaultMediaProbeRunner, MediaInspectorService, MEDIA_PROBE_RUNNER } from './media-inspector.service';
 
@@ -11,9 +12,10 @@ import { defaultMediaProbeRunner, MediaInspectorService, MEDIA_PROBE_RUNNER } fr
     AssetsService,
     AssetPresignService,
     ArkAssetLibraryService,
+    ArkAssetIngestService,
     { provide: MEDIA_PROBE_RUNNER, useValue: defaultMediaProbeRunner },
     MediaInspectorService,
   ],
-  exports: [AssetsService, AssetPresignService, ArkAssetLibraryService, MediaInspectorService],
+  exports: [AssetsService, AssetPresignService, ArkAssetLibraryService, ArkAssetIngestService, MediaInspectorService],
 })
 export class AssetsModule {}
