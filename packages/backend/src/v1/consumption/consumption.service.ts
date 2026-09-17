@@ -1,21 +1,26 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
+import { CostAlertService, TriggeredAlert } from './cost-alert.service';
 
 export interface ConsumptionOverview {
   daily: {
     settled: string;
     reserved: string;
+    total: string;
     taskCount: number;
     limit: string | null;
     remaining: string | null;
+    alerts: TriggeredAlert[];
   };
   monthly: {
     settled: string;
     reserved: string;
+    total: string;
     taskCount: number;
     limit: string | null;
     remaining: string | null;
+    alerts: TriggeredAlert[];
   };
 }
 
@@ -27,7 +32,10 @@ export interface ConsumptionTrend {
 
 @Injectable()
 export class ConsumptionService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly costAlert: CostAlertService,
+  ) {}
 
   async getOverview(actorId: string): Promise<ConsumptionOverview> {
     const now = new Date();
@@ -84,20 +92,29 @@ export class ConsumptionService {
       ? credential.monthlyLimitCny.sub(monthlyTotal).toFixed(6)
       : null;
 
+    // 检查预警
+    const alerts = await this.costAlert.checkAlerts(actorId, dailyTotal, monthlyTotal);
+    const dailyAlerts = alerts.filter((a) => a.type === 'daily_threshold');
+    const monthlyAlerts = alerts.filter((a) => a.type === 'monthly_threshold');
+
     return {
       daily: {
         settled: dailySettledAmount.toFixed(6),
         reserved: dailyReservedAmount.toFixed(6),
+        total: dailyTotal.toFixed(6),
         taskCount: dailySettled._count,
         limit: credential?.dailyLimitCny?.toFixed(6) || null,
         remaining: dailyRemaining,
+        alerts: dailyAlerts,
       },
       monthly: {
         settled: monthlySettledAmount.toFixed(6),
         reserved: monthlyReservedAmount.toFixed(6),
+        total: monthlyTotal.toFixed(6),
         taskCount: monthlySettled._count,
         limit: credential?.monthlyLimitCny?.toFixed(6) || null,
         remaining: monthlyRemaining,
+        alerts: monthlyAlerts,
       },
     };
   }

@@ -177,6 +177,8 @@ model ActorCredential {
   dailyLimitCny   Decimal?  @map("daily_limit_cny") @db.Decimal(18, 6)
   monthlyLimitCny Decimal?  @map("monthly_limit_cny") @db.Decimal(18, 6)
   lastUsedAt      DateTime? @map("last_used_at")
+  lastIpAddress   String?   @map("last_ip_address")
+  usageCount      Int       @default(0) @map("usage_count")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
@@ -238,6 +240,58 @@ model PreflightRecord {
   @@index([actorId, createdAt])
   @@index([expiresAt])
   @@map("preflight_records")
+}
+
+// 费用预警配置表
+model CostAlert {
+  id              String    @id @default(uuid()) @db.Uuid
+  actorId         String    @map("actor_id")
+  alertType       String    @map("alert_type")
+  thresholdCny    Decimal   @map("threshold_cny") @db.Decimal(18, 6)
+  enabled         Boolean   @default(true)
+  lastTriggeredAt DateTime? @map("last_triggered_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@unique([actorId, alertType])
+  @@index([actorId, enabled])
+  @@map("cost_alerts")
+}
+
+// 费用对账记录表
+model CostReconciliation {
+  id              String   @id @default(uuid()) @db.Uuid
+  monthKey        String   @map("month_key")
+  actorId         String?  @map("actor_id")
+  systemTotalCny  Decimal  @map("system_total_cny") @db.Decimal(18, 6)
+  providerBillCny Decimal  @map("provider_bill_cny") @db.Decimal(18, 6)
+  varianceCny     Decimal  @map("variance_cny") @db.Decimal(18, 6)
+  variancePercent Decimal  @map("variance_percent") @db.Decimal(5, 2)
+  evidenceUrl     String?  @map("evidence_url")
+  notes           String?
+  reconciledBy    String   @map("reconciled_by")
+  reconciledAt    DateTime @map("reconciled_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@unique([monthKey, actorId])
+  @@index([monthKey])
+  @@map("cost_reconciliations")
+}
+
+// Token使用日志表
+model TokenUsageLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  actorId    String   @map("actor_id")
+  endpoint   String
+  method     String
+  statusCode Int      @map("status_code")
+  ipAddress  String?  @map("ip_address")
+  userAgent  String?  @map("user_agent")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([actorId, createdAt])
+  @@index([createdAt])
+  @@map("token_usage_logs")
 }
 
 // 配置表（单条记录）

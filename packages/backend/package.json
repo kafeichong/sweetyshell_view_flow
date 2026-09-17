@@ -14,7 +14,8 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
     "assets:backfill": "node dist/src/tools/asset-hash-backfill.js",
-    "assets:reinspect": "node dist/src/tools/asset-reinspection.js"
+    "assets:reinspect": "node dist/src/tools/asset-reinspection.js",
+    "consumption:analyze": "node dist/src/tools/consumption-data-analysis.js"
   },
   "dependencies": {
     "@nestjs/common": "^12.0.1",
@@ -28,6 +29,7 @@
   "devDependencies": {
     "@nestjs/cli": "12.0.0",
     "@nestjs/testing": "^12.0.1",
+    "@types/express": "^5.0.6",
     "@types/jest": "^29.5.12",
     "@types/node": "^26.4.0",
     "@types/supertest": "^6.0.2",

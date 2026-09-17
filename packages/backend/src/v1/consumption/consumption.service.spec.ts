@@ -8,10 +8,12 @@ jest.mock('@nestjs/common', () => ({
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
 import { ConsumptionService } from './consumption.service';
+import { CostAlertService } from './cost-alert.service';
 
 describe('ConsumptionService', () => {
   let service: ConsumptionService;
   let prisma: any;
+  let costAlert: any;
 
   beforeEach(() => {
     prisma = {
@@ -22,7 +24,14 @@ describe('ConsumptionService', () => {
       },
     };
 
-    service = new ConsumptionService(prisma as unknown as PrismaService);
+    costAlert = {
+      checkAlerts: jest.fn().mockResolvedValue([]),
+    };
+
+    service = new ConsumptionService(
+      prisma as unknown as PrismaService,
+      costAlert as unknown as CostAlertService,
+    );
   });
 
   afterEach(() => {
@@ -62,15 +71,19 @@ describe('ConsumptionService', () => {
 
       expect(result.daily.settled).toBe('10.500000');
       expect(result.daily.reserved).toBe('5.250000');
+      expect(result.daily.total).toBe('15.750000'); // settled + reserved
       expect(result.daily.taskCount).toBe(5);
       expect(result.daily.limit).toBe('100.000000');
       expect(result.daily.remaining).toBe('84.250000'); // 100 - 10.5 - 5.25
+      expect(result.daily.alerts).toEqual([]); // no alerts triggered
 
       expect(result.monthly.settled).toBe('50.000000');
       expect(result.monthly.reserved).toBe('15.000000');
+      expect(result.monthly.total).toBe('65.000000'); // settled + reserved
       expect(result.monthly.taskCount).toBe(20);
       expect(result.monthly.limit).toBe('1000.000000');
       expect(result.monthly.remaining).toBe('935.000000'); // 1000 - 50 - 15
+      expect(result.monthly.alerts).toEqual([]); // no alerts triggered
     });
 
     it('should return zero values when no consumption exists', async () => {
