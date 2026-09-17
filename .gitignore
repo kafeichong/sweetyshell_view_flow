@@ -32,3 +32,13 @@ docker-compose.override.yaml
 # 临时文件
 *.tmp
 *.swp
+
+# 测试和开发临时文件
+.playwright-mcp/
+.test-token
+scripts/test_*.sh
+scripts/create_test_*.ts
+
+# 交付包里随带的 ffprobe 二进制（各架构约 25–35MB）。**不进仓库**——太大，而且它只是
+# 交付物的一部分；打包时由 scripts 之外的手工步骤放进 `packages/comfyui-video-flow-client/ffprobe/`。
+packages/comfyui-video-flow-client/ffprobe/

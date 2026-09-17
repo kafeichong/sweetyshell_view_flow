@@ -59,7 +59,7 @@ if command -v ffprobe >/dev/null 2>&1; then
 else
   printf 'PATH 里没有（客户端会去 /opt/homebrew/bin、/usr/local/bin、/opt/local/bin、/usr/bin 再找一遍）\n'
 fi
-for candidate in /opt/homebrew/bin/ffprobe /usr/local/bin/ffprobe /opt/local/bin/ffprobe /usr/bin/ffprobe; do
+for candidate in /opt/homebrew/bin/ffprobe /usr/local/bin/ffprobe /opt/local/bin/ffprobe /usr/bin/ffprobe "$HOME/.video-flow/ffprobe"; do
   test -x "$candidate" && printf '  存在: %s\n' "$candidate"
 done
 

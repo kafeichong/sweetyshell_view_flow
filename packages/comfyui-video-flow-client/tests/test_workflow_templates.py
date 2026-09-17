@@ -13,7 +13,10 @@ def load_template(path):
 
 
 def test_all_preflight_templates_have_bidirectional_type_safe_links():
-    assert len(PREFLIGHT_TEMPLATES) == 8
+    # **不写死份数**：这个数字已经错两次了——参考图那条退休时 8 没改成 7，改完之后
+    # 人像模板一加又变成 8。它拦不住任何真问题（下面逐个模板校验连线才是有效的把关），
+    # 却每次增删模板都要跟着改三处。真正要防的是"一个模板都没了"。
+    assert PREFLIGHT_TEMPLATES, "交付包里一个模板都没有"
 
     for path in PREFLIGHT_TEMPLATES:
         workflow = load_template(path)
@@ -72,17 +75,16 @@ def test_all_preflight_templates_default_to_preview_and_reach_an_output_node():
         assert any(nodes[node_id]["type"] in output_classes for node_id in reachable), path.name
 
 
-def test_retired_single_reference_image_entry_ships_no_template():
-    """单参考图入口已退休（它是全模态参考的子集），模板不该再出现在交付包里。
+def test_retired_reference_image_entry_keeps_its_nodes_but_ships_no_template():
+    """参考图那条工作流退休了：节点还在（删节点会牵动注册与老画布），但模板不再交付。
 
-    真事：产品图模板曾在包里，用户导入后一提交就被 `WORKFLOW_NOT_ENABLED` 拒——模板在手上
-    却用不了，比没有这个模板更糟。入口退休就得连模板一起撤，这条盯着别又漂回来。
+    产品图/参考图的正确入口是全模态模板——单图就是放第一张参考图；要"图严格当首帧"
+    用首帧模板。这条断言盯住"别再有人把模板加回来"。
     """
-    assert not (WORKFLOW_ROOT / "seedance-product-preflight-v1.comfy.json").exists(), (
-        "单参考图模板已退休，不该再随客户端出货；产品图/参考图走全模态参考模板"
-    )
-    # 节点本身**保留注册**（别人画布里存了这两个节点，撤掉会变成"节点丢失"），
-    # 时长选项仍必须是合同允许的 4–30 秒。
+    assert not (WORKFLOW_ROOT / "seedance-product-preflight-v1.comfy.json").exists()
+    # 节点仍在注册表里，且说明里要写清退化到哪个入口，否则用户会照旧搭一条走不通的画布。
+    assert preflight_nodes.CLASSES["VideoFlowProductInput"] is preflight_nodes.ProductInput
+    assert "全模态" in preflight_nodes.ProductRequest.DESCRIPTION
     duration = preflight_nodes.ProductRequest.INPUT_TYPES()["required"]["duration"][0]
     assert duration == list(range(4, 31))
 

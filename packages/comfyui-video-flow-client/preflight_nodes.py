@@ -119,6 +119,26 @@ def preflight_report(record, message):
     }
 
 
+def admission_blockers(record):
+    """把服务端的 `productionAdmission.blockers` 写成一行可读的原因。
+
+    服务端会把每条 blocker 的码与原因都给出来（如 `WORKFLOW_NOT_ENABLED` +
+    `V2_FULL_CHAIN_NOT_COMPLETE`），只丢一句"不满足条件"的话，用户既不知道被哪道闸门挡下，
+    也不知道该找谁开——踩过：纯音频那条还没开放时，只能自己去翻检查报告里的 JSON。
+    原因与码相同时只留码，避免出现 `WORKFLOW_NOT_READY(WORKFLOW_NOT_READY)`。
+    """
+    items = record.get('productionAdmission', {}).get('blockers')
+    if not isinstance(items, list):
+        return []
+    rendered = []
+    for item in items:
+        if not isinstance(item, dict) or not item.get('code'):
+            continue
+        code, message = str(item['code']), item.get('message')
+        rendered.append(f"{code}({message})" if message and message != code else code)
+    return rendered
+
+
 def task_notice(task, result):
     """一行给用户看的提交摘要。
 
@@ -156,6 +176,8 @@ class ExecutionPolicy:
 
 
 class ProductInput:
+    DESCRIPTION = ("选择一张产品图 / 参考图。"
+                   "**单图入口已退休**：请改用全模态参考模板，把图放进第一张参考图槽位。")
     @classmethod
     def INPUT_TYPES(cls):
         import folder_paths
@@ -175,6 +197,10 @@ class ProductInput:
 
 
 class ProductRequest:
+    DESCRIPTION = ("单参考图生视频：用一张产品图 / 参考图生成视频。"
+                   "**该入口已退休**——它在 provider 侧就是全模态参考的 reference 子集，"
+                   "不重复开第二条入口：产品图请改用全模态参考模板（单图就放第一张参考图）；"
+                   "要「图严格当第一帧」请用首帧模板。")
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {"media": ("VIDEO_FLOW_LOCAL_MEDIA",), "prompt": ("STRING", {"multiline": True, "tooltip": PROMPT_WRITING_TOOLTIP}),
@@ -277,28 +303,36 @@ def _reference_choices(suffixes):
 def _reference_spec(suffixes, **extra):
     """图片参考的下拉规格：老式「选项列表 + 附加键」写法。
 
-    与 ComfyUI 自带的 `LoadImage.image` 一致（它用 `{"image_upload": true}`）。**别改成
-    V3 的 ("COMBO", {...}) 写法**——图片上传按钮是老式写法下验证可用的，没必要动。
+    与 ComfyUI 自带的 `LoadImage.image` 一致（它用 `{"image_upload": true}`）。**不必**改成
+    V3 的 ("COMBO", {...}) 写法：前端两种写法都认（列表认 `isComboInputSpecV1`、COMBO 认
+    `inputName === 'COMBO'`）。这里不动，是因为图片槽的上传按钮已经验证可用。
     """
     return (_reference_choices(suffixes), {"tooltip": REFERENCE_SLOT_TOOLTIP, **extra})
 
 
-def _reference_combo_spec(suffixes, upload_key=None):
-    """视频/音频参考的下拉规格：V3 的 ("COMBO", {...}) 写法，`upload_key` 给上传按钮。
+def _reference_combo_spec(suffixes):
+    """参考槽的下拉规格：V3 的 ("COMBO", {...}) 写法，与 ComfyUI 自带的 LoadVideo/LoadAudio 同款。
+
+    前端不会因此丢掉选项列表（`getComboSpecComboOptions` 会从第二个元素里取 `options`）。
+    """
+    return (
+        "COMBO",
+        {"options": _reference_choices(suffixes), "multiselect": False,
+         "tooltip": REFERENCE_SLOT_TOOLTIP},
+    )
+
+
+def _reference_upload_spec(suffixes, upload_key):
+    """在参考槽下拉之上加一个上传标志，前端据此在槽位上加"选择要上传的文件"。
 
     `upload_key` 取 ComfyUI 自带加载节点的同款标志（`LoadVideo.file` 用 `video_upload`）。
-    没有它，用户**只能从 ComfyUI/input 目录里挑**，没法把别处的文件传进来——这正是
-    "视频不能上传只能选择"的原因。
-
-    **音频不要传 `audio_upload`**：前端那条注入路是写给 LoadAudio 那一族的（它要一个只有
-    那一族才有的 `audioUI` widget，我们没有），标志带不来按钮。音频的上传按钮由
-    `web/audio_upload.js` 自绘——那里的注释记了完整原因。
+    **音频不能走这条路**：前端 `useImageUploadWidget` 只认 image_upload / video_upload /
+    animated_image_upload，而 `Comfy.UploadAudio` 注入的 AUDIOUPLOAD widget 会去找一个
+    只有 LoadAudio 那一族才有的 `audioUI`，我们的节点上找不到就直接抛错——标志加了也没用。
+    音频槽的上传按钮由 `web/audio_upload.js` 自己加，见 ReferenceAudioInput。
     """
-    extra = {"options": _reference_choices(suffixes), "multiselect": False,
-             "tooltip": REFERENCE_SLOT_TOOLTIP}
-    if upload_key:
-        extra[upload_key] = True
-    return ("COMBO", extra)
+    _, options = _reference_combo_spec(suffixes)
+    return ("COMBO", {**options, upload_key: True})
 
 
 # 这几个数字与合同 `media` 一节同源：合同是服务端复验用的真值，客户端这一份只为
@@ -556,7 +590,7 @@ class ReferenceVideoInput:
     @classmethod
     def INPUT_TYPES(cls):
         return {
-            "required": {"video": _reference_combo_spec(('.mp4', '.mov'), "video_upload")},
+            "required": {"video": _reference_upload_spec(('.mp4', '.mov'), "video_upload")},
             "optional": {"reference_media": ("VIDEO_FLOW_LOCAL_MEDIA_LIST",)},
         }
     DESCRIPTION = ("把上游节点的 reference_media 接进来，再追加这段参考视频。"
@@ -576,14 +610,16 @@ class ReferenceVideoInput:
 class ReferenceAudioInput:
     @classmethod
     def INPUT_TYPES(cls):
+        # 刻意不带 audio_upload：见 _reference_upload_spec 的说明——前端那条路在我们的
+        # 自定义节点上是坏的（注入的 widget 找不到 audioUI 就抛错）。上传按钮由
+        # web/audio_upload.js 加在同一个槽位上，两种渲染下都出现。
         return {
-            # 音频刻意不带 audio_upload：前端那条注入路会取我们节点上没有的 audioUI 后抛错，
-            # 按钮由 web/audio_upload.js 自绘（见那里的注释）。
             "required": {"audio": _reference_combo_spec(('.wav', '.mp3'))},
             "optional": {"reference_media": ("VIDEO_FLOW_LOCAL_MEDIA_LIST",)},
         }
     DESCRIPTION = ("把上游节点的 reference_media 接进来，再追加这段参考音频。"
-                   "槽位可以留在「不给素材」；单个音频 2–30 秒，所有参考音频总时长不超过 30 秒。")
+                   "槽位可以留在「不给素材」；单个音频 2–30 秒，所有参考音频总时长不超过 30 秒。"
+                   "本机文件请在节点上用「选择音频文件上传」按钮传进来。")
     RETURN_TYPES = ("VIDEO_FLOW_LOCAL_MEDIA_LIST",)
     RETURN_NAMES = ("reference_media",)
     FUNCTION = "inspect"
@@ -729,7 +765,9 @@ class VideoExtendRequest:
 
 class AudioReferenceRequest:
     DESCRIPTION = ("音频参考成片：接 1–2 段参考音频，让画面跟随音频的节奏与情绪。"
-                   "默认值是一段照官方公式写好的完整示例。")
+                   "默认值是一段照官方公式写好的完整示例。"
+                   "注意成片是视频，且音轨由模型按提示词与画面生成——不是你传进来的这几段音频"
+                   "（官方口径为单声道），要保留原音得自己后期替换。")
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {
@@ -927,11 +965,8 @@ class CreateTask:
         if record.get('requestCheck', {}).get('status') != 'passed':
             raise ValueError("服务器预检记录已失效")
         if record.get('productionAdmission', {}).get('canSubmit') is not True:
-            reasons = admission_blockers(record)
-            raise ValueError(
-                "当前不满足正式提交条件"
-                + (f"：{'、'.join(reasons)}" if reasons else "")
-            )
+            blockers = admission_blockers(record)
+            raise ValueError("当前不满足正式提交条件" + (f"：{'、'.join(blockers)}" if blockers else ""))
         request = {**request, 'record': record}
         local_media = request.get('media', [])
         if isinstance(local_media, dict):
@@ -1049,10 +1084,11 @@ class PolicyPreview:
             raise ValueError("视频必须存在于 ComfyUI output 目录")
         relative = path.relative_to(output_root)
         subfolder = '' if str(relative.parent) == '.' else str(relative.parent)
-        # ComfyUI 0.35.x 的前端沿用旧 Seedance 节点的兼容格式：MP4
-        # 作为 animated image 结果返回。单独返回 ui.videos 在该前端不会显示。
-        return {'ui': {'images': [{'filename': relative.name, 'subfolder': subfolder, 'type': 'output'}],
-                       'animated': (True,)},
+        # **不走 ui.images**。前端收到它之后是按 node id 在**当前活动工作流**里找节点再挂预览的
+        # （`getNodeByExecutionId(this.rootGraph, …)`），而 id 在不同工作流之间会重号；云端出片
+        # 要几分钟，这期间用户很容易切走，视频回来时就挂到另一个工作流里恰好同号的那个节点上
+        # （用户报过）。改成交给我们自己的前端，按**发起运行的那个图**来挂：见 web/result_preview.js。
+        return {'ui': {'video_flow_video': [{'filename': relative.name, 'subfolder': subfolder, 'type': 'output'}]},
                 'result': (str(path),)}
 
 

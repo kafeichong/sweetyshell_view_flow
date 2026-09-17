@@ -112,7 +112,12 @@ export class MediaInspectorService {
       if (!formatName.includes('mov') && !formatName.includes('mp4')) {
         throw new Error('MEDIA_FORMAT_UNSUPPORTED');
       }
-      const detectedVideoMime = brand.startsWith('qt') ? 'video/quicktime' : 'video/mp4';
+      // 按 `;` 拆成品牌列表逐个比，**不能写 `brand.startsWith('qt')`**：ffprobe 9.0 起
+      // `major_brand` 会给分号拼起来的列表（同一个文件 8.x 是 `qt`、9.x 是 `isom;qt`），只看开头
+      // 会把后者判成 mp4，与客户端对不上（2026-09-16 真实踩到）。客户端同名处理见
+      // media_inspection.py 的 `_is_quicktime_brand`。
+      const brands = brand.split(';').map((part) => part.trim());
+      const detectedVideoMime = brands.includes('qt') ? 'video/quicktime' : 'video/mp4';
       assertExpectedMime(detectedVideoMime, expectedMime);
       const codec = video.codec_name?.toLowerCase();
       return {

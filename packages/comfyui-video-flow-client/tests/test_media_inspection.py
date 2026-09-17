@@ -143,6 +143,18 @@ def test_ffprobe_lookup_falls_back_to_known_install_locations(tmp_path, monkeypa
     assert media.ffprobe_executable() == str(fake)
 
 
+def test_ffprobe_lookup_includes_the_manual_drop_in_location():
+    """没装包管理器的机器，可以把 ffprobe 直接丢进 `~/.video-flow/`。
+
+    同事机器上真实踩到过 FFPROBE_NOT_AVAILABLE。**让他"设个环境变量"是不现实的**——Comfy
+    Desktop 从 GUI 启动，改 .zshrc 里的 PATH 传不进来。所以安装器引导的是一个"丢文件"的落点，
+    客户端就必须真的去那儿找；这条断言盯住它别在重构里被删掉。
+    """
+    from pathlib import Path
+
+    assert str(Path.home() / ".video-flow" / "ffprobe") in media.FFPROBE_CANDIDATES
+
+
 def test_ffprobe_lookup_prefers_an_explicit_override(tmp_path, monkeypatch):
     chosen = tmp_path / "custom-ffprobe"
     chosen.write_text("#!/bin/sh\n")
@@ -208,3 +220,20 @@ def test_video_duration_comes_from_the_stream_not_the_container(tmp_path, monkey
 
     item = media.inspect_media(path, "reference_video", "reference-video-1")
     assert item["descriptor"]["metadata"]["durationSeconds"] == 5.041667
+
+@pytest.mark.parametrize("brand,expected", [
+    ("qt  ", True),           # ffprobe 8.x：只给主品牌
+    ("isom;qt  ", True),      # ffprobe 9.x：把品牌拼成 `;` 列表——同一个文件
+    ("isom", False),
+    ("mp42", False),
+    ("", False),
+])
+def test_quicktime_brand_survives_ffprobe_brand_lists(brand, expected):
+    """判 QuickTime 要按 `;` 拆开比，不能只看开头。
+
+    踩过（同事机真实发生）：随包的 ffprobe 是 9.0.1，同一个 mov 文件它给
+    `major_brand = "isom;qt  "`，而服务端 8.x 给 `"qt  "`。客户端用 `startswith("qt")`
+    就把前者判成 mp4，与服务端的 quicktime 对不上，正式提交被按 mime 不符拒掉。
+    """
+    assert media._is_quicktime_brand({"tags": {"major_brand": brand}}) is expected
+    assert media._is_quicktime_brand({}) is False

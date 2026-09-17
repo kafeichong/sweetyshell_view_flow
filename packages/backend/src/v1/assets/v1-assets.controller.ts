@@ -225,6 +225,8 @@ export class V1AssetsController {
             inspectionStatus: existing.inspectionStatus,
           };
         }
+        // 先对齐，再签票据：票据里写的 mime 必须与资产行一致，否则 complete 必然报"与票据不符"。
+        await this.assets.alignPendingUpload(existing.id, mimeType, body.sizeBytes);
         return this.presign.createUploadTicket(
           existing.id,
           existing.objectKey,
@@ -316,8 +318,13 @@ export class V1AssetsController {
       const signed = this.presign.createDownloadUrl(asset.objectKey);
       mediaMetadata = await this.inspector.inspect(signed.downloadUrl, expectedMime);
       validateSeedanceMediaMetadata(expectedMime, mediaMetadata, actual.sizeBytes);
-    } catch {
-      throw new BadRequestException('Uploaded media could not be inspected');
+    } catch (error) {
+      // **别把原因吞掉**。这里原本只回一句 "could not be inspected"，让一次"客户端与服务端对
+      // 同一份素材判出不同 mime"的问题查了很久（2026-09-16 真实踩到：两边的 ffprobe 大版本不同，
+      // 对 mov 品牌给出不同结果）。带上原因，下一次一眼就能看出来。
+      throw new BadRequestException(
+        `Uploaded media could not be inspected: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
     const uploaded = await this.assets.markUploaded(id, actor.actorId, {
       bucket: this.presign.getBucketName(),

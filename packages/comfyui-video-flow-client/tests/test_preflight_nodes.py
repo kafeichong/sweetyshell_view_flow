@@ -654,7 +654,7 @@ def test_each_current_template_has_its_own_persistent_execution_slot():
     workflow_root = Path(__file__).parents[1] / 'workflows'
     # 按目录取而不是写死清单：新增模板时这条自动覆盖，退休的模板（参考图那条）不会漏在名单里。
     names = sorted(path.name for path in workflow_root.glob('*-preflight-v1.comfy.json'))
-    assert len(names) == 8, names
+    assert names, "交付包里一个模板都没有"
     slots = []
 
     for name in names:
@@ -668,7 +668,13 @@ def test_each_current_template_has_its_own_persistent_execution_slot():
     assert len(slots) == len(set(slots))
 
 
-def test_policy_preview_returns_comfyui_video_player_payload(tmp_path, monkeypatch):
+def test_policy_preview_hands_the_video_to_our_own_frontend(tmp_path, monkeypatch):
+    """位置交给 web/result_preview.js，**不走 `ui.images`**。
+
+    走了的话，前端会按 node id 在「当前活动工作流」里找节点再挂预览；而 id 在不同工作流之间
+    会重号，云端出片那几分钟里用户切走了，预览就落到别的工作流上（用户报过：用音频跑，结果
+    挂在另一个打开的工作流里）。
+    """
     output = tmp_path / 'output'
     video = output / 'video-flow' / 'task.mp4'
     video.parent.mkdir(parents=True)
@@ -678,8 +684,11 @@ def test_policy_preview_returns_comfyui_video_player_payload(tmp_path, monkeypat
     result = n.PolicyPreview().preview(str(video))
 
     assert result['result'] == (str(video),)
-    assert result['ui']['images'] == [{'filename': 'task.mp4', 'subfolder': 'video-flow', 'type': 'output'}]
-    assert result['ui']['animated'] == (True,)
+    assert result['ui']['video_flow_video'] == [
+        {'filename': 'task.mp4', 'subfolder': 'video-flow', 'type': 'output'}
+    ]
+    # 一旦这里回了 ui.images，ComfyUI 就会自己去挂一遍，多标签下又会挂错。
+    assert 'images' not in result['ui']
 
 
 def test_policy_preview_rejects_video_outside_comfyui_output(tmp_path, monkeypatch):
@@ -910,15 +919,14 @@ def test_every_file_picking_widget_offers_an_upload(tmp_path, monkeypatch):
     assert '/upload/image' in source, '扩展没有走 ComfyUI 的通用上传入口'
     # 只查代码，注释里可以随便解释这条规矩（这一行下面的断言就是例子）。
     code = "\n".join(line.split("//")[0] for line in source.splitlines())
-    # 盯的是**语义**不是那个单词在不在：显式写 `= false` 与完全不写等价（都是 falsy，
-    # 都渲染），真要命的是写成真值。原先按子串判，被一句 `options.canvasOnly = false`
-    # 误伤过一次——那句是修按钮可见性时加的，注释里同时写着"不能带 canvasOnly"。
-    for line in code.splitlines():
-        if 'canvasOnly' in line:
-            assert 'true' not in line.lower(), (
-                '按钮的 canvasOnly 被设成真值就只会在经典画布里显示：Nodes 2.0 的 '
-                'widgetRegistry 用 `!options.canvasOnly && !!widget.type` 决定渲不渲染'
-            )
+    # 查的是"别把它设成**真值**"，不是"别出现这个字符串"：addDOMWidget 的默认值就是 true，
+    # 显式写 `= false` 恰恰是让它两种渲染下都出现的做法（ComfyUI 自己的 AUDIO_UI 也这么写）。
+    squashed = code.replace(' ', '')
+    for truthy in ('canvasOnly:true', 'canvasOnly=true', 'canvasOnly:!0', 'canvasOnly=!0'):
+        assert truthy not in squashed, (
+            '按钮把 canvasOnly 设成了真值，就只会在经典画布里显示：Nodes 2.0 的 widgetRegistry 用 '
+            '`!options.canvasOnly && !!widget.type` 决定渲不渲染'
+        )
 
 
 def test_admission_failure_names_the_blockers_instead_of_a_bare_message():
