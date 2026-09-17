@@ -13,7 +13,7 @@ def load_template(path):
 
 
 def test_all_preflight_templates_have_bidirectional_type_safe_links():
-    assert len(PREFLIGHT_TEMPLATES) == 7
+    assert len(PREFLIGHT_TEMPLATES) == 8
 
     for path in PREFLIGHT_TEMPLATES:
         workflow = load_template(path)
@@ -98,6 +98,7 @@ OPEN_TEMPLATE_REQUEST_NODES = {
     "seedance-first-frame-to-video-preflight-v1.comfy.json": "VideoFlowFirstFrameRequest",
     "seedance-first-last-frame-to-video-preflight-v1.comfy.json": "VideoFlowFirstLastFrameRequest",
     "seedance-multi-reference-preflight-v1.comfy.json": "VideoFlowMultiReferenceRequest",
+    "seedance-portrait-preflight-v1.comfy.json": "VideoFlowMultiReferenceRequest",
     "seedance-video-edit-preflight-v1.comfy.json": "VideoFlowVideoEditRequest",
     "seedance-audio-reference-preflight-v1.comfy.json": "VideoFlowAudioReferenceRequest",
 }
@@ -279,3 +280,32 @@ def test_audio_reference_template_chains_multiple_audio_inputs():
     assert (
         audio_nodes[1]["id"], nodes["VideoFlowAudioReferenceRequest"]["id"], "VIDEO_FLOW_LOCAL_MEDIA_LIST",
     ) in links
+
+
+def test_portrait_template_takes_the_head_slot_from_the_asset_library():
+    """人像模板的第一个槽位来自**素材库**，不是本机文件。
+
+    含真人人脸的参考素材只能走 asset://：直传 URL 会被方舟输入审核拦下。
+    这条盯着"别为了统一又把头槽改回本机图"。
+    """
+    workflow = load_template(WORKFLOW_ROOT / "seedance-portrait-preflight-v1.comfy.json")
+    nodes = {node["id"]: node for node in workflow["nodes"]}
+    types = [node["type"] for node in workflow["nodes"]]
+
+    assert types.count("VideoFlowArkAssetInput") == 1
+    assert types.count("VideoFlowReferenceImageInput") == 1
+
+    ark = next(node for node in workflow["nodes"] if node["type"] == "VideoFlowArkAssetInput")
+    # 默认留空；哨兵文案**不能**撞上文件选择器的识别标记，否则会被要求带上传标志。
+    assert ark["widgets_values"] == [preflight_nodes.ARK_UNUSED_CHOICE]
+    assert "（不给素材）" not in preflight_nodes.ARK_UNUSED_CHOICE
+    assert "请选择" not in preflight_nodes.ARK_UNUSED_CHOICE
+
+    # 素材库槽位在链头：它的 reference_media 输入没有上游连线。
+    incoming = {(link[3], link[4]) for link in workflow["links"]}
+    assert (ark["id"], 0) not in incoming
+
+    # 请求节点仍是全模态参考——**没有新增工作流 key**。新增 key 会改变执行摘要，
+    # 让所有在途任务的冻结快照失配，这条是最容易被"顺手加一个"破坏的地方。
+    request = next(node for node in workflow["nodes"] if node["type"].endswith("Request"))
+    assert request["type"] == "VideoFlowMultiReferenceRequest"
