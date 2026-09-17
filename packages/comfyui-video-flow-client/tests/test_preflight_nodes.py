@@ -908,10 +908,15 @@ def test_every_file_picking_widget_offers_an_upload(tmp_path, monkeypatch):
     assert '/upload/image' in source, '扩展没有走 ComfyUI 的通用上传入口'
     # 只查代码，注释里可以随便解释这条规矩（这一行下面的断言就是例子）。
     code = "\n".join(line.split("//")[0] for line in source.splitlines())
-    assert 'canvasOnly' not in code, (
-        '按钮带上 canvasOnly 就只会在经典画布里显示：Nodes 2.0 的 widgetRegistry 用 '
-        '`!options.canvasOnly && !!widget.type` 决定渲不渲染'
-    )
+    # 盯的是**语义**不是那个单词在不在：显式写 `= false` 与完全不写等价（都是 falsy，
+    # 都渲染），真要命的是写成真值。原先按子串判，被一句 `options.canvasOnly = false`
+    # 误伤过一次——那句是修按钮可见性时加的，注释里同时写着"不能带 canvasOnly"。
+    for line in code.splitlines():
+        if 'canvasOnly' in line:
+            assert 'true' not in line.lower(), (
+                '按钮的 canvasOnly 被设成真值就只会在经典画布里显示：Nodes 2.0 的 '
+                'widgetRegistry 用 `!options.canvasOnly && !!widget.type` 决定渲不渲染'
+            )
 
 
 def test_admission_failure_names_the_blockers_instead_of_a_bare_message():

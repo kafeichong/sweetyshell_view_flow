@@ -45,6 +45,24 @@ def require_server_success(response):
         raise ValueError(f"服务器预检未通过（HTTP {response.status_code}）：{detail}")
 
 
+def admission_blockers(record):
+    """把服务端给的准入 blockers 写成一行行原因码，供报错指名道姓。
+
+    只说"当前不满足正式提交条件"等于没说：真正有用的是 `WORKFLOW_NOT_ENABLED`
+    （这条工作流根本没开放，找管理员）还是 `QUOTE_UNAVAILABLE`（报价算不出来，改参数）。
+    服务端在 blocker 的 `message` 里放的是平台原因码，与 `code` 相同时不重复写。
+    """
+    blockers = (record.get('productionAdmission') or {}).get('blockers')
+    if not blockers:
+        return []
+    lines = []
+    for blocker in blockers:
+        code = blocker.get('code') or blocker.get('message') or ''
+        message = blocker.get('message') or ''
+        lines.append(f"{code}({message})" if message and message != code else str(code))
+    return lines
+
+
 def fingerprint(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
 
@@ -263,18 +281,22 @@ def _reference_spec(suffixes, **extra):
     return (_reference_choices(suffixes), {"tooltip": REFERENCE_SLOT_TOOLTIP, **extra})
 
 
-def _reference_upload_spec(suffixes, upload_key):
-    """视频/音频参考的下拉规格：V3 的 ("COMBO", {...}) 写法 + 上传按钮。
+def _reference_combo_spec(suffixes, upload_key=None):
+    """视频/音频参考的下拉规格：V3 的 ("COMBO", {...}) 写法，`upload_key` 给上传按钮。
 
-    `upload_key` 取 ComfyUI 自带加载节点的同款标志（`LoadVideo.file` 用 `video_upload`、
-    `LoadAudio.audio` 用 `audio_upload`）。没有它，用户**只能从 ComfyUI/input 目录里挑**，
-    没法把别处的文件传进来——这正是"视频不能上传只能选择"的原因。
+    `upload_key` 取 ComfyUI 自带加载节点的同款标志（`LoadVideo.file` 用 `video_upload`）。
+    没有它，用户**只能从 ComfyUI/input 目录里挑**，没法把别处的文件传进来——这正是
+    "视频不能上传只能选择"的原因。
+
+    **音频不要传 `audio_upload`**：前端那条注入路是写给 LoadAudio 那一族的（它要一个只有
+    那一族才有的 `audioUI` widget，我们没有），标志带不来按钮。音频的上传按钮由
+    `web/audio_upload.js` 自绘——那里的注释记了完整原因。
     """
-    return (
-        "COMBO",
-        {"options": _reference_choices(suffixes), "multiselect": False,
-         upload_key: True, "tooltip": REFERENCE_SLOT_TOOLTIP},
-    )
+    extra = {"options": _reference_choices(suffixes), "multiselect": False,
+             "tooltip": REFERENCE_SLOT_TOOLTIP}
+    if upload_key:
+        extra[upload_key] = True
+    return ("COMBO", extra)
 
 
 # 这几个数字与合同 `media` 一节同源：合同是服务端复验用的真值，客户端这一份只为
@@ -338,7 +360,7 @@ class ReferenceVideoInput:
     @classmethod
     def INPUT_TYPES(cls):
         return {
-            "required": {"video": _reference_upload_spec(('.mp4', '.mov'), "video_upload")},
+            "required": {"video": _reference_combo_spec(('.mp4', '.mov'), "video_upload")},
             "optional": {"reference_media": ("VIDEO_FLOW_LOCAL_MEDIA_LIST",)},
         }
     DESCRIPTION = ("把上游节点的 reference_media 接进来，再追加这段参考视频。"
@@ -359,7 +381,9 @@ class ReferenceAudioInput:
     @classmethod
     def INPUT_TYPES(cls):
         return {
-            "required": {"audio": _reference_upload_spec(('.wav', '.mp3'), "audio_upload")},
+            # 音频刻意不带 audio_upload：前端那条注入路会取我们节点上没有的 audioUI 后抛错，
+            # 按钮由 web/audio_upload.js 自绘（见那里的注释）。
+            "required": {"audio": _reference_combo_spec(('.wav', '.mp3'))},
             "optional": {"reference_media": ("VIDEO_FLOW_LOCAL_MEDIA_LIST",)},
         }
     DESCRIPTION = ("把上游节点的 reference_media 接进来，再追加这段参考音频。"
@@ -707,7 +731,11 @@ class CreateTask:
         if record.get('requestCheck', {}).get('status') != 'passed':
             raise ValueError("服务器预检记录已失效")
         if record.get('productionAdmission', {}).get('canSubmit') is not True:
-            raise ValueError("当前不满足正式提交条件")
+            reasons = admission_blockers(record)
+            raise ValueError(
+                "当前不满足正式提交条件"
+                + (f"：{'、'.join(reasons)}" if reasons else "")
+            )
         request = {**request, 'record': record}
         local_media = request.get('media', [])
         if isinstance(local_media, dict):
