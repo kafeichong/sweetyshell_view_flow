@@ -211,6 +211,7 @@
         "referenceVideoAndAudioPaths": "**尚未验证**：官方把 asset:// 同时写在 content.<模态>_url.url 的三种模态上，但真实账号只测过图像这一条。要用视频/音频参考前应先补一次验证。",
         "firstFrameAndLastFramePaths": "**尚未验证**：官方没有给任何示例（见 unverifiedRoles），服务端目前一律拒绝。要放开必须先有一份真实证据，不要凭推测改。",
         "registrationPath": "登记链路（GetAsset → 取回字节 → 检查 → 写我方对象存储 → 回读 sha256 一致）已在真实账号上跑通，用 800×1600 的图验证；该步不落库、不产生生成费用。",
+        "createAssetFromOurStoragePath": "**已由真实账号验证**：把我方对象存储的签名地址交给 CreateAsset，方舟**在创建那一刻就拉取**对象——Processing → Active 用了 6.1 秒，回传地址落在方舟自己的桶上。这条正是「以后从客户端上传素材入库」要走的路。**推论（重要）**：签名用默认的短有效期即可，**不要**因为\"CreateAsset 是异步的\"就去签一个小时的地址——那是给一张人脸图开长期可读的口子，而实测根本没有这个必要。",
         "scopeNote": "以上验证是**直接调方舟接口**做的，绕过了本系统的预检/提交/Worker 链路——那三段各有单测覆盖但尚未串起来真跑过。"
       },
       "evidence": [
