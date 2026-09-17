@@ -59,7 +59,11 @@ def test_prepare_creates_isolated_token_and_local_workflow_copies(tmp_path):
     assert source_hashes == {
         path.name: sha256(path) for path in source_root.glob("*.comfy.json")
     }
-    assert not (Path.home() / ".video-flow" / "token").samefile(result.token_file)
+    # 别让验收环境用上操作者本人的 token（那是真实凭证，该环境必须用自己的）。
+    # **先判存在**：samefile 在文件不存在时会抛 FileNotFoundError，而这个文件只在
+    # 操作者机器上有——CI 上没有，于是这条断言在 CI 里恒挂，看起来像逻辑错。
+    home_token = Path.home() / ".video-flow" / "token"
+    assert not (home_token.exists() and home_token.samefile(result.token_file))
 
 
 def test_runtime_state_never_serializes_actor_token(tmp_path):

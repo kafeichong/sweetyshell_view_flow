@@ -111,4 +111,9 @@ jobs:
           cache: pip
           cache-dependency-path: packages/comfyui-video-flow-client/requirements.txt
       - run: pip install -r requirements.txt pytest
+      - name: Install ffmpeg
+        # 素材检查真的调 ffprobe。runner 默认没有它，缺失时那条"损坏文件应报
+        # MEDIA_INSPECTION_FAILED"的用例会先撞上 FFPROBE_NOT_AVAILABLE——
+        # 看起来像断言写错了，其实是环境缺工具。
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: python -m pytest -q -rs
