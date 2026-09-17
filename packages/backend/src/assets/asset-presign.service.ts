@@ -13,6 +13,11 @@ const OssConstructor = ((require('ali-oss') as { default?: unknown }).default ??
 }) => {
   getStream: (objectKey: string) => Promise<{ stream: Readable }>;
   signatureUrl: (objectKey: string, options: Record<string, unknown>) => string;
+  put: (
+    objectKey: string,
+    data: Buffer,
+    options?: Record<string, unknown>,
+  ) => Promise<{ name?: string }>;
   head: (objectKey: string) => Promise<{
     res?: { headers?: Record<string, string | number | undefined> };
   }>;
@@ -123,5 +128,22 @@ export class AssetPresignService {
   createDownloadUrl(objectKey: string) {
     if (!this.client) throw new ServiceUnavailableException('OSS presign service is not configured');
     return { downloadUrl: this.client.signatureUrl(objectKey, { method: 'GET', expires: 300 }), expiresIn: 300 };
+  }
+
+  /**
+   * 服务端自己把字节写进存储桶，并算出 sha256。**只给服务端用**。
+   *
+   * 常规上传是客户端拿 `createUploadTicket` 签好的地址直传的，服务端不碰素材本体。
+   * 唯一的例外是私域素材库素材的登记：那份字节在方舟手里，只能由服务端取回来。
+   * `x-oss-meta-sha256` 与客户端上传路径保持一致，`inspectObject` 才读得到同一个摘要。
+   */
+  async putObject(objectKey: string, bytes: Buffer, mimeType: string) {
+    if (!this.client) throw new ServiceUnavailableException('OSS presign service is not configured');
+    const fileHash = createHash('sha256').update(bytes).digest('hex');
+    await this.client.put(objectKey, bytes, {
+      mime: mimeType,
+      headers: { 'x-oss-meta-sha256': fileHash },
+    });
+    return { sizeBytes: bytes.length, fileHash };
   }
 }
