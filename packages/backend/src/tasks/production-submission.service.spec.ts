@@ -397,6 +397,38 @@ describe('ProductionSubmissionService', () => {
       .rejects.toMatchObject({ code: 'PREFLIGHT_ACTUAL_CONTENT_MISMATCH' });
   });
 
+  it('still accepts a local file whose bytes were also published to the library', async () => {
+    // 同一个文件既被本机文件槽位用、又已经入库时，两者共用同一行（内容寻址）。
+    // 客户端的 descriptor 里**没有** arkAssetId——它预检时还没上传、无从知道。
+    // 曾经要求"两边都为 null"，于是任何入库过的文件都不能再从文件槽位用（踩过）。
+    const deps = dependencies({ asset: arkAssetRow({ arkAssetId: ARK_ASSET_ID }) });
+    deps.arkLibrary.getAsset.mockResolvedValue(arkRemote());
+    const service = new ProductionSubmissionService(
+      deps.prisma as never, deps.preflight as never, deps.presign as never, deps.budget as never,
+      deps.arkLibrary as never,
+    );
+
+    await expect(service.submit('actor-1', 'request-1', confirmed())).resolves.toBeDefined();
+    // 这一行有 arkAssetId，所以 URL 形态是 asset://——复验要走方舟那条路，不是 OSS 字节。
+    expect(deps.arkLibrary.getAsset).toHaveBeenCalled();
+    expect(deps.presign.verifyObjectContent).not.toHaveBeenCalled();
+  });
+
+  it('refuses a published asset in a role the library has no official example for', async () => {
+    // descriptor 没声明 arkAssetId 时预检那道的角色白名单不会跑；而 URL 形态由**行**决定，
+    // 所以这里必须再拦一道，否则会拿一个未验证的角色去花一次钱。
+    const deps = arkDependencies();
+    (deps.value.effectiveRequest.media[0] as { role: string }).role = 'first_frame';
+    const service = new ProductionSubmissionService(
+      deps.prisma as never, deps.preflight as never, deps.presign as never, deps.budget as never,
+      deps.arkLibrary as never,
+    );
+
+    await expect(service.submit('actor-1', 'request-1', confirmed()))
+      .rejects.toMatchObject({ code: 'MEDIA_ARK_ROLE_UNSUPPORTED' });
+    expect(deps.budget.createTaskWithReservation).not.toHaveBeenCalled();
+  });
+
   it('keeps ordinary uploads on the OSS byte check', async () => {
     // 加法设计不能把普通素材也带进 ark 分支：它们没有 arkAssetId，仍必须走字节复验。
     const deps = dependencies();
