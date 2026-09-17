@@ -80,7 +80,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - run: pip install -r packages/worker/requirements.txt pytest
+      # pytest 不收集 .mjs：下面这两条合同不变量测试（付费放行闸门、三份合同字节一致）
+      # 靠这一行才进 CI，此前只在交付记录里以手工命令存在——改合同的人漏跑就没有任何拦阻。
+      - run: node --test scripts/tests/*.test.mjs
       - run: python -m pytest scripts/tests -q
 
   comfyui-client:
