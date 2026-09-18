@@ -1,8 +1,8 @@
 {
   "id": "seedance-multi-reference-preflight-v1",
   "revision": 0,
-  "last_node_id": 15,
-  "last_link_id": 18,
+  "last_node_id": 17,
+  "last_link_id": 20,
   "nodes": [
     {
       "id": 1,
@@ -317,12 +317,12 @@
         360,
         320
       ],
-      "order": 9,
+      "order": 11,
       "inputs": [
         {
           "name": "reference_media",
           "type": "VIDEO_FLOW_LOCAL_MEDIA_LIST",
-          "link": 13
+          "link": 20
         }
       ],
       "outputs": [
@@ -355,7 +355,7 @@
         340,
         220
       ],
-      "order": 10,
+      "order": 12,
       "inputs": [
         {
           "name": "config",
@@ -397,7 +397,7 @@
         340,
         220
       ],
-      "order": 11,
+      "order": 13,
       "inputs": [
         {
           "name": "config",
@@ -443,7 +443,7 @@
         340,
         220
       ],
-      "order": 12,
+      "order": 14,
       "inputs": [
         {
           "name": "config",
@@ -483,7 +483,7 @@
         340,
         220
       ],
-      "order": 13,
+      "order": 15,
       "inputs": [
         {
           "name": "config",
@@ -520,7 +520,7 @@
         340,
         200
       ],
-      "order": 14,
+      "order": 16,
       "inputs": [
         {
           "name": "local_video_path",
@@ -540,6 +540,76 @@
       },
       "widgets_values": [
         ""
+      ]
+    },
+    {
+      "id": 16,
+      "type": "VideoFlowArkAssetInput",
+      "pos": [
+        830,
+        700
+      ],
+      "size": [
+        360,
+        180
+      ],
+      "order": 9,
+      "inputs": [
+        {
+          "name": "reference_media",
+          "type": "VIDEO_FLOW_LOCAL_MEDIA_LIST",
+          "link": 13
+        }
+      ],
+      "outputs": [
+        {
+          "name": "reference_media",
+          "type": "VIDEO_FLOW_LOCAL_MEDIA_LIST",
+          "links": [
+            19
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VideoFlowArkAssetInput"
+      },
+      "widgets_values": [
+        "（不用素材库素材）"
+      ]
+    },
+    {
+      "id": 17,
+      "type": "VideoFlowArkUploadInput",
+      "pos": [
+        1230,
+        700
+      ],
+      "size": [
+        360,
+        180
+      ],
+      "order": 10,
+      "inputs": [
+        {
+          "name": "reference_media",
+          "type": "VIDEO_FLOW_LOCAL_MEDIA_LIST",
+          "link": 19
+        }
+      ],
+      "outputs": [
+        {
+          "name": "reference_media",
+          "type": "VIDEO_FLOW_LOCAL_MEDIA_LIST",
+          "links": [
+            20
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VideoFlowArkUploadInput"
+      },
+      "widgets_values": [
+        "（不给素材）"
       ]
     }
   ],
@@ -644,7 +714,7 @@
       13,
       9,
       0,
-      10,
+      16,
       0,
       "VIDEO_FLOW_LOCAL_MEDIA_LIST"
     ],
@@ -687,6 +757,22 @@
       15,
       0,
       "STRING"
+    ],
+    [
+      19,
+      16,
+      0,
+      17,
+      0,
+      "VIDEO_FLOW_LOCAL_MEDIA_LIST"
+    ],
+    [
+      20,
+      17,
+      0,
+      10,
+      0,
+      "VIDEO_FLOW_LOCAL_MEDIA_LIST"
     ]
   ],
   "groups": [],

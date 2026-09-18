@@ -1134,10 +1134,48 @@ def test_confirmed_submission_binds_a_library_asset_without_uploading_anything(t
     assert payload['media'] == [{'slotId': 'reference-image-1', 'assetId': 'ours-1'}]
 
 
-def test_ark_upload_publishes_the_local_file_and_returns_a_usable_asset(tmp_path, monkeypatch):
-    """本机文件 → 我方存储 → 推给方舟入库，产出的槽位直接能接请求节点。
+def test_ark_upload_slot_reads_locally_and_never_reaches_the_network(tmp_path, monkeypatch):
+    """上传槽位的节点执行**不发任何网络请求**——素材一个字节都不该在这里出去。
 
-    含真人人脸的参考素材只能走素材库，没有这个入口创意就得先去控制台传一次。
+    节点的执行早于模式判定：素材节点都在请求节点上游，Preview 与 Production 的 Queue
+    都会跑它，而模式要到请求/提交节点才读得出来。曾经它在这里就 upload + publish，
+    结果「Preview 不上传素材」（PRODUCT.md、README 验收第 2 条）当场失守：用户选了文件、
+    点 Preview，字节已经出了本机，而界面同一时刻报的是「未上传素材」。
+
+    所以这条用例把客户端整个换成"一构造就炸"的替身：只要有网络调用就必然失败。
+    """
+    import sys
+
+    path = tmp_path / 'look.png'
+    Image.new('RGB', (500, 500)).save(path)
+    monkeypatch.setitem(sys.modules, 'folder_paths', SimpleNamespace(
+        get_input_directory=lambda: str(tmp_path),
+        get_annotated_filepath=lambda _: str(path),
+    ))
+
+    def explode(*_args, **_kwargs):
+        raise AssertionError('节点执行不该碰网络：入库发生在正式提交那一步')
+
+    monkeypatch.setattr(n, 'VideoFlowClient', explode)
+    monkeypatch.setattr(n, '_ark_client', explode)
+
+    media = n.ArkUploadInput().inspect('look.png', None)[0]
+
+    # 条目上只留一个"待入库"的标记，没有 asset id：此刻还没有任何素材进过库。
+    assert media[0][n.LIBRARY_PUBLISH_PENDING] is True
+    assert 'ark_asset_id' not in media[0] and 'asset_id' not in media[0]
+    # descriptor 与普通本机槽位同形（**不带** arkAssetId）。服务端逐字段比对时，
+    # `arkAssetId` 只有在 descriptor 声明了它的时候才参与——两边都对得上。
+    assert 'arkAssetId' not in media[0]['descriptor']
+    # 字段仍来自**本机检查**，与提交时那次复检同源才算得对。
+    assert media[0]['descriptor']['sha256'] == n.inspect_product('look.png')['descriptor']['sha256']
+
+
+def test_confirmed_submission_publishes_the_upload_slot_and_binds_the_published_asset(tmp_path, monkeypatch):
+    """本机文件 → 我方存储 → 推给方舟入库，发生在**正式提交**那一刻，产出的槽位直接能接请求节点。
+
+    两端一起钉：提交前没有任何上传，提交时上传 + 入库，并把入库后的那条 Asset 绑上去
+    （服务端见到 arkAssetId 就回 asset://，含真人人脸的素材只有这样送才不会被拦）。
     """
     import sys
     import httpx
@@ -1151,26 +1189,64 @@ def test_ark_upload_publishes_the_local_file_and_returns_a_usable_asset(tmp_path
     ))
 
     seen = []
+    record_holder = {}
 
     def handle(req):
         seen.append((req.method, req.url.path))
         if req.url.path.endswith('/upload-ticket'):
-            # 内容寻址：同一个文件第二次 Queue 会命中这里，不会再传一次。
+            # 内容寻址：同一个文件第二次提交会命中这里，不会再传一次。
             return httpx.Response(201, json={'assetId': 'a1', 'alreadyUploaded': True, 'inspectionStatus': 'verified'})
         if req.url.path.endswith('/assets/ark/publish'):
             return httpx.Response(201, json={'assetId': 'a1', 'arkAssetId': ARK_ASSET_ID, 'arkGroupId': 'g1'})
-        raise AssertionError(f'不该打到 {req.url.path}')
+        if req.url.path.endswith('/preflight'):
+            return httpx.Response(201, json=record_holder['record'])
+        if '/slots/' in req.url.path:
+            return httpx.Response(200, json={'executionSlotId': 'slot-up', 'currentTask': None})
+        if req.url.path.endswith('/check'):
+            return httpx.Response(200, json=record_holder['record'])
+        if req.method == 'POST' and req.url.path.endswith('/tasks'):
+            record_holder['submitted'] = req.content.decode('utf-8')
+            return httpx.Response(201, json={'id': 'task-up-1', 'executionPlan': {'reserveCny': '6.111000'}})
+        raise AssertionError(f'这条用例不该打到 {req.url.path}')
 
     monkeypatch.setattr(n, 'VideoFlowClient', lambda cfg: VideoFlowClient(cfg, httpx.Client(transport=httpx.MockTransport(handle))))
 
+    config = VideoFlowConfig('https://test', 'token', receipt_dir=str(tmp_path / 'receipts'))
     media = n.ArkUploadInput().inspect('look.png', None)[0]
+    assert seen == [], f'节点执行阶段就已经联网了：{seen}'
 
-    assert media[0]['ark_asset_id'] == ARK_ASSET_ID
-    assert media[0]['asset_id'] == 'a1'
-    assert media[0]['descriptor']['arkAssetId'] == ARK_ASSET_ID
-    # descriptor 的字段来自**本机检查**，服务端会用自己的检查逐字段比对——两边同源才对得上。
-    assert media[0]['descriptor']['sha256'] == n.inspect_product('look.png')['descriptor']['sha256']
+    intent = {
+        'contractVersion': 2,
+        'workflowKey': 'seedance.omni-reference.v1',
+        'prompt': {'positive': '本机新形象口播'},
+        'generation': n.generation_request(4, '9:16', '720p'),
+        'media': [item['descriptor'] for item in media],
+    }
+    request = {'intent': intent, 'media': media}
+    record_holder['record'] = {
+        'preflightId': 'p-up', 'expiresAt': (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat(),
+        'willCallProvider': False, 'willUploadMedia': False, 'effectiveRequest': intent,
+        'requestCheck': {'status': 'passed', 'items': []},
+        'productionAdmission': {'canSubmit': True, 'blockers': []},
+        'intentDigest': 'd', 'quote': {'quoteDigest': 'q', 'status': 'estimated'},
+    }
+
+    # 先 Preview 一次：正式提交是从回执里读那条预检记录的（既有链路就是这么走的）。
+    n.RequestPreview().check(config, n.ExecutionPolicy().execute()[0], request)
+    # Preview 走完了：预检只发 descriptor，素材仍然一个字节都没出去。
+    assert not any(p.endswith('/upload-ticket') for _, p in seen), seen
+    assert not any(p.endswith('/assets/ark/publish') for _, p in seen), seen
+
+    policy = n.ExecutionPolicy().execute('production')[0]
+    checked = n.RequestPreview().check(config, policy, request)['result'][0]
+
+    submitted = n.CreateTask().submit(config, policy, checked, execution_slot_id='slot-up')
+
+    assert submitted['result'][0]['task_id'] == 'task-up-1'
+    assert any(p.endswith('/upload-ticket') for _, p in seen), seen
     assert any(p.endswith('/assets/ark/publish') for _, p in seen), seen
+    payload = json.loads(record_holder['submitted'])
+    assert payload['media'] == [{'slotId': 'reference-image-1', 'assetId': 'a1'}]
 
 
 def test_ark_upload_passes_through_when_unused():
