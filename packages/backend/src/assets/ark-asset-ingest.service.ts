@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
@@ -18,6 +19,11 @@ const ARK_ASSET_TYPE_BY_MEDIA_TYPE: Record<string, string> = {
   video: 'Video',
   audio: 'Audio',
 };
+
+/** 取回来的那份字节的 sha256。与 `Asset.fileHash` 同一口径（内容寻址全靠它）。 */
+function sha256Of(bytes: Buffer): string {
+  return createHash('sha256').update(bytes).digest('hex');
+}
 
 /** 对象键 `inputs/<actor>/<uuid>-名字.png` → 给人看的「名字」。 */
 function displayName(objectKey: string): string {
@@ -85,6 +91,21 @@ export class ArkAssetIngestService {
     }
     this.assertWithinPolicy(mimeType, metadata, bytes.length);
 
+    // 对象的 sha256 已经算出来了，先看**同一份内容是不是已经有一行**。
+    //
+    // 内容寻址让「先当本机文件传上来、之后又入库」的两条路径落在同一行上
+    // （`@@unique([ownerId, role, fileHash])`）。这种情况下不能再建一行（会撞唯一约束），
+    // 而要**把方舟那份的关联认领到这行上**。2026-09-17 真实踩到：用户先前把图作为本机文件
+    // 传过、又入库了，但那次入库没写回关联，于是登记时既找不到关联、又撞约束，彻底卡死。
+    const sameContent = await this.prisma.asset.findFirst({
+      where: { ownerId, role: 'input', fileHash: sha256Of(bytes) },
+    });
+    if (sameContent) {
+      const link = { arkAssetId, arkGroupId: remote.groupId || null, arkAssetStatus: remote.status };
+      await this.recordArkLink(sameContent.id, link);
+      return { ...sameContent, ...link };
+    }
+
     // 对象键由 arkAssetId 决定，不用随机值：两个并发的重复登记会写同一个键（内容相同，
     // 后写覆盖先写，结果一致），失败方不会在桶里留下垃圾对象。
     const objectKey = `inputs/${ownerId}/ark-${arkAssetId}`;
@@ -114,9 +135,17 @@ export class ArkAssetIngestService {
       // 并发竞争由数据库的唯一约束裁决，失败方回读胜者——这是既有上传路径的同一条规矩：
       // 正常的幂等竞争不该暴露成 500。用唯一约束而不是事务级 advisory lock，是因为登记
       // 全程有网络调用，把锁跨网络持有等于让数据库事务陪着等几个网络往返。
+      //
+      // **两个唯一约束都要认**：arkAssetId（并发的重复登记）与本行的
+      // (ownerId, role, fileHash)（同一份内容的行刚好在上面的检查之后被建出来）。
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        const winner = await this.findExisting(ownerId, arkAssetId);
-        if (winner) return winner;
+        const winner = await this.findExisting(ownerId, arkAssetId)
+          ?? await this.prisma.asset.findFirst({ where: { ownerId, role: 'input', fileHash: sha256Of(bytes) } });
+        if (winner) {
+          const link = { arkAssetId, arkGroupId: remote.groupId || null, arkAssetStatus: remote.status };
+          await this.recordArkLink(winner.id, link);
+          return { ...winner, ...link };
+        }
       }
       throw error;
     }
@@ -158,18 +187,28 @@ export class ArkAssetIngestService {
       assetType,
       name: displayName(asset.objectKey),
     });
-    const active = await this.ark.waitForAssetActive(arkAssetId);
 
-    await this.prisma.asset.updateMany({
-      where: { id: asset.id },
-      data: {
-        arkAssetId,
-        arkGroupId: active.groupId || groupId,
-        arkAssetStatus: active.status,
-        arkAssetStatusCheckedAt: new Date(),
-      },
+    // **CreateAsset 一返回就落库，不要等轮询结束。** 那一刻方舟那边已经有这份素材了，
+    // 而轮询是网络操作、随时可能抖。等到最后才写的话，中间任何一次失败都会留下
+    // 「方舟有、我方没有」的孤儿：用户再选它去登记时找不到这条关联，又因为内容寻址
+    // 撞上唯一约束，彻底卡死（2026-09-17 真实踩到）。
+    await this.recordArkLink(asset.id, { arkAssetId, arkGroupId: groupId, arkAssetStatus: 'Processing' });
+
+    const active = await this.ark.waitForAssetActive(arkAssetId);
+    const linked = { arkAssetId, arkGroupId: active.groupId || groupId, arkAssetStatus: active.status };
+    await this.recordArkLink(asset.id, linked);
+    return { ...asset, ...linked };
+  }
+
+  /** 记下「我方这一行 ↔ 方舟那一份」的关联。方舟侧一有 ID 就该写，不等后续步骤。 */
+  private recordArkLink(
+    assetId: string,
+    link: { arkAssetId: string; arkGroupId: string; arkAssetStatus: string },
+  ) {
+    return this.prisma.asset.updateMany({
+      where: { id: assetId },
+      data: { ...link, arkAssetStatusCheckedAt: new Date() },
     });
-    return { ...asset, arkAssetId, arkGroupId: active.groupId || groupId, arkAssetStatus: active.status };
   }
 
   private async findExisting(ownerId: string, arkAssetId: string) {

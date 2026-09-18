@@ -28,9 +28,11 @@ function build(overrides: {
       create: overrides.createError
         ? jest.fn().mockRejectedValue(overrides.createError)
         : jest.fn().mockResolvedValue(created),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
   };
   const ark = {
+    waitForAssetActive: jest.fn().mockResolvedValue({ groupId: 'group-1', status: 'Active' }),
     getAsset: jest.fn().mockResolvedValue({
       id: ARK_ASSET_ID, name: '005', assetType: 'Image', status: 'Active',
       groupId: 'group-1', projectName: 'default', url: 'https://ark.example.invalid/x.jpg',
@@ -145,6 +147,53 @@ describe('ArkAssetIngestService', () => {
     });
   });
 
+  it('adopts an existing row when the same bytes were already uploaded as a file', async () => {
+    // 内容寻址：先当本机文件传上来、之后又入库的两条路落在同一行上。这时不能再建一行
+    // （会撞 @@unique([ownerId, role, fileHash])），而要把方舟那份的关联**认领**到那行上。
+    // 踩过：用户的图先作为本机文件传过，登记时既找不到关联、又撞约束，彻底卡死。
+    mockFetchBytes();
+    const existingRow = { id: 'row-from-upload', arkAssetId: null, objectKey: 'inputs/actor-1/uuid-x.jpg' };
+    const { service, prisma, presign } = build();
+    prisma.asset.findFirst
+      .mockResolvedValueOnce(null)            // 按 arkAssetId 找：没有
+      .mockResolvedValueOnce(existingRow);    // 按内容找：找到了
+
+    const asset = await service.materialize('actor-1', ARK_ASSET_ID);
+
+    expect(asset.id).toBe('row-from-upload');
+    expect(prisma.asset.create).not.toHaveBeenCalled();
+    // 认领时不该再往桶里写一份副本——那一行本来就有字节。
+    expect(presign.putObject).not.toHaveBeenCalled();
+    expect(prisma.asset.updateMany).toHaveBeenCalledWith({
+      where: { id: 'row-from-upload' },
+      data: expect.objectContaining({ arkAssetId: ARK_ASSET_ID }),
+    });
+  });
+
+  it('records the ark link before waiting for the asset to become active', async () => {
+    // CreateAsset 一返回，方舟那边就已经有这份素材了。轮询是网络操作、随时可能抖；
+    // 等到最后才写就会留下"方舟有、我方没有"的孤儿，重试时又撞唯一约束，彻底卡死。
+    const { service, prisma, ark, presign } = build();
+    prisma.asset.findFirst.mockResolvedValue({
+      id: 'asset-row-1', ownerId: 'actor-1', role: 'input', mediaType: 'image',
+      objectKey: 'inputs/actor-1/uuid-x.jpg', arkAssetId: null,
+    });
+    Object.assign(ark, {
+      createAssetGroup: jest.fn().mockResolvedValue('group-1'),
+      createAsset: jest.fn().mockResolvedValue('asset-new'),
+    });
+    Object.assign(presign, { createDownloadUrl: jest.fn().mockReturnValue({ downloadUrl: 'https://oss/signed' }) });
+    (ark.waitForAssetActive as jest.Mock).mockRejectedValue(new Error('轮询时网络断了'));
+
+    await expect(service.publish('actor-1', 'ours-1')).rejects.toThrow('轮询时网络断了');
+
+    // 关键：即便轮询失败，关联也已经写下去了。
+    expect(prisma.asset.updateMany).toHaveBeenCalledWith({
+      where: { id: 'asset-row-1' },
+      data: expect.objectContaining({ arkAssetId: expect.any(String) }),
+    });
+  });
+
   it('returns the winner when two registrations race', async () => {
     mockFetchBytes();
     // 并发竞争由唯一约束裁决，失败方回读胜者——正常的幂等竞争不该暴露成 500。
@@ -153,7 +202,8 @@ describe('ArkAssetIngestService', () => {
     const { service, prisma } = build({ createError: conflict });
     prisma.asset.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce(winner);
 
-    await expect(service.materialize('actor-1', ARK_ASSET_ID)).resolves.toBe(winner);
+    await expect(service.materialize('actor-1', ARK_ASSET_ID))
+      .resolves.toMatchObject({ id: 'asset-row-winner', arkAssetId: ARK_ASSET_ID });
   });
 
   it('fails closed when the library cannot be reached', async () => {
@@ -236,6 +286,11 @@ describe('ArkAssetIngestService publish', () => {
     );
 
     await expect(service.publish('actor-1', 'ours-1')).rejects.toMatchObject({ code: 'ARK_ASSET_LIBRARY_ERROR:AssetStillProcessing:Processing' });
-    expect(prisma.asset.updateMany).not.toHaveBeenCalled();
+    // **关联已经写下了**（状态是 Processing）：方舟那边确实有这份素材，不能因为我们
+    // 没等到 Active 就当作没发生过——那会留下"方舟有、我方没有"的孤儿，重试时撞唯一约束。
+    expect(prisma.asset.updateMany).toHaveBeenCalledWith({
+      where: { id: 'ours-1' },
+      data: expect.objectContaining({ arkAssetId: 'asset-new', arkAssetStatus: 'Processing' }),
+    });
   });
 });

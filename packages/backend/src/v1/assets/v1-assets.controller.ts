@@ -1,5 +1,6 @@
 import { BadRequestException, Body, ConflictException, Controller, Get, NotFoundException, Param, Post, Query, ServiceUnavailableException, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { Logger } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { ApiCredentialGuard } from '../../auth/api-credential.guard';
@@ -178,6 +179,8 @@ export class V1AssetsController {
    * `ARK_ASSET_PROJECT_MISMATCH`（项目不对）让用户做的事完全不同。
    * 但**不要把方舟的原始报文透出去**——里面可能有带签名的地址。
    */
+  private arkErrorLogger = new Logger(V1AssetsController.name);
+
   private arkError(error: unknown) {
     if (error instanceof ArkIngestError) {
       return new BadRequestException({ code: error.code, message: error.message });
@@ -185,6 +188,14 @@ export class V1AssetsController {
     if (error instanceof ServiceUnavailableException) {
       return error;
     }
+    // **兜底一定要留下原始错误**。这条分支以前直接返回一个笼统的
+    // ARK_ASSET_LIBRARY_UNAVAILABLE 就完事，于是 2026-09-17 那次真实的失败
+    // 在日志里、在客户端上都看不出任何原因，只能靠推理去猜。
+    // 客户端的 message 仍然只给笼统码（不泄露内部实现），但日志里必须有原文。
+    this.arkErrorLogger.error(
+      `Ark asset library failed: ${error instanceof Error ? `${error.name}: ${error.message}` : String(error)}`,
+      error instanceof Error ? error.stack : undefined,
+    );
     return new ServiceUnavailableException('ARK_ASSET_LIBRARY_UNAVAILABLE');
   }
 

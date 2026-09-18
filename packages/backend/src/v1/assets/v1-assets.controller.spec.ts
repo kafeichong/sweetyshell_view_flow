@@ -9,6 +9,7 @@ jest.mock('@nestjs/common', () => ({
   Body: () => () => {},
   Param: () => () => {},
   Query: () => () => {},
+  Logger: class Logger { error() {} warn() {} log() {} },
   BadRequestException: class BadRequestException extends Error { status = 400; },
   NotFoundException: class NotFoundException extends Error { status = 404; },
   ServiceUnavailableException: class ServiceUnavailableException extends Error { status = 503; },
