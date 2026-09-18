@@ -209,8 +209,18 @@ def test_omni_reference_template_ships_ready_made_slots_for_extra_media():
     assert len(slots) == 7
     assert all(node["widgets_values"] == [preflight_nodes.UNUSED_MEDIA_CHOICE] for node in slots)
 
-    # 七个槽位串成一条链，顺序是 4 图 → 2 视频 → 1 音频，末尾接请求节点。
+    # **两条路都要有**：素材库里有就选库（走 asset://，含真人人脸的素材只有这样送才不会被
+    # 方舟输入审核拦下），库里没有就本机传一张、传完自动入库。少了上传槽位，创意新做的形象
+    # 在这张画布上就没有入库入口；少了素材库槽位，就得先去控制台传一次才能用。
+    ark_asset = next(node for node in nodes if node["type"] == "VideoFlowArkAssetInput")
+    ark_upload = next(node for node in nodes if node["type"] == "VideoFlowArkUploadInput")
+    assert ark_asset["widgets_values"] == [preflight_nodes.ARK_UNUSED_CHOICE]
+    assert ark_upload["widgets_values"] == [preflight_nodes.UNUSED_MEDIA_CHOICE]
+
+    # 槽位串成一条链，顺序是 4 图 → 2 视频 → 1 音频 → 素材库 → 上传 → 请求节点。
     # 从请求节点反向走链，避免把节点 id 写死在测试里。
+    # **链序就是 @图像N / @视频N 的编号顺序**，所以那两个素材库槽位必须钉在链尾：挪到链头
+    # 会让默认提示词里的 @图像1 / @视频1 指到别的素材上。
     incoming = {(link[3], link[4]): link for link in workflow["links"]}
     request = next(node for node in nodes if node["type"] == "VideoFlowMultiReferenceRequest")
     chain, current, slot = [], request["id"], 0
@@ -219,6 +229,8 @@ def test_omni_reference_template_ships_ready_made_slots_for_extra_media():
         current, slot = link[1], 0
 
     assert chain == [
+        "VideoFlowArkUploadInput",
+        "VideoFlowArkAssetInput",
         "VideoFlowReferenceAudioInput",
         "VideoFlowReferenceVideoInput",
         "VideoFlowReferenceVideoInput",
