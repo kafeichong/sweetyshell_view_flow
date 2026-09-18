@@ -47,13 +47,17 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const navItems = [
     { href: '/dashboard', label: '消费看板', icon: '📊' },
     { href: '/tokens', label: 'Token管理', icon: '🔑' },
+    ...(authMode === 'user'
+      ? [
+          { href: '/history', label: '任务历史', icon: '📜' },
+          { href: '/alerts', label: '预警管理', icon: '⚠️' },
+        ]
+      : []),
     ...(authMode === 'admin'
       ? [
           { href: '/reconciliation', label: '对账管理', icon: '💰' },
         ]
-      : [
-          { href: '/alerts', label: '预警管理', icon: '⚠️' },
-        ]),
+      : []),
   ];
 
   return (

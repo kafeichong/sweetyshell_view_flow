@@ -34,9 +34,12 @@ export default function DashboardPage() {
         setOverview({
           todayCny: '0.00',
           monthCny: '0.00',
-          dailyLimit: null,
-          monthlyLimit: null,
-          alerts: { daily: { triggered: false }, monthly: { triggered: false } }
+          dailyLimit: undefined,
+          monthlyLimit: undefined,
+          alerts: {
+            daily: { enabled: false, thresholdCny: '0', triggered: false },
+            monthly: { enabled: false, thresholdCny: '0', triggered: false }
+          }
         });
         setTrends({
           trends: [],
