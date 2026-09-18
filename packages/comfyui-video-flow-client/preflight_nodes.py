@@ -466,11 +466,22 @@ def _append_ark_reference_media(reference_media, ark_asset_id):
     return _validated_reference_media(media)
 
 
-def _append_published_media(reference_media, filename):
-    """把本机的一份文件上传到方舟私域素材库，产出可以直接用的素材库素材。
+# 上传槽位在参考集合条目上留的标记：**正式提交时**才把这份本机文件推去入库。
+#
+# 为什么不在节点里传：节点的执行早于模式判定。素材节点都在请求节点上游，Queue 时必跑，
+# 而模式要到请求/提交节点才被读出来——在这里上传就等于 Preview 也会把素材传出去，
+# 与 PRODUCT.md「Preview 不自动上传素材」和 README 的验收清单第 2 条直接冲突。
+# 真正的上传 + 入库放进 CreateTask.submit：那里本来就按模式分流，本机素材的上传
+# （upload_media）也全都发生在那一处。
+LIBRARY_PUBLISH_PENDING = "publish_to_library"
 
-    复用既有的上传链路：本机文件 → 我方对象存储（上传票据）→ 推给方舟入库。
-    之后生成时用的是 `asset://`，含真人人脸的素材**只有**这条路能走。
+
+def _append_library_pending_media(reference_media, filename):
+    """把本机这张图挂进参考集合，并标记为「正式提交时入库」。
+
+    含真人人脸的素材**只能**走素材库（直传 URL 会被方舟输入审核拦下），但入库这个动作
+    必须等到正式提交，理由见 LIBRARY_PUBLISH_PENDING。这里只做本机检查、不发网络请求，
+    所以 descriptor 与普通本机槽位同形——**不带** arkAssetId。
     """
     media = _validated_reference_media(reference_media)
     role = "reference_image"
@@ -482,29 +493,31 @@ def _append_published_media(reference_media, filename):
         raise ValueError(f"参考素材总数最多 {REFERENCE_MEDIA_TOTAL_LIMIT} 个")
 
     inspected = inspect_product(filename, role, f"{role.replace('_', '-')}-{role_count + 1}")
-    client = _ark_client()
-    # 已有内容寻址：同一个文件重复 Queue 会复用同一条 Asset；publish 也是幂等的，
-    # 所以再次 Queue 不会在素材库里灌出重复素材。
+    media.append({**inspected, LIBRARY_PUBLISH_PENDING: True})
+    return _validated_reference_media(media)
+
+
+def publish_pending_library_media(client, media):
+    """正式提交时把上传槽位那份本机文件推去入库，返回可以绑定的 Asset id。
+
+    内容寻址让上传与 publish 都是幂等的：同一个文件重复 Queue 只会复用同一条 Asset，
+    不会在素材库里灌出重复素材。
+    """
+    # 提交前再读一次并逐字段比对：Queue 与提交之间文件被换掉的话，在这里拦下，
+    # 而不是拿一份没复核过的字节去入库。
     uploaded = client.upload_media(
-        read_verified_media(inspected),
-        filename=inspected["filename"],
-        mime_type=inspected["descriptor"]["mimeType"],
+        read_verified_media(media),
+        filename=media["filename"],
+        mime_type=media["descriptor"]["mimeType"],
     )
     published = client.publish_ark_asset(uploaded["assetId"])
     if not published.get("arkAssetId"):
         raise ValueError("服务器没有返回入库后的素材 ID，这个槽位没法用")
-
-    media.append({
-        "ark_asset_id": published["arkAssetId"],
-        "asset_id": uploaded["assetId"],
-        "filename": inspected["filename"],
-        "descriptor": {**inspected["descriptor"], "arkAssetId": published["arkAssetId"]},
-    })
-    return _validated_reference_media(media)
+    return uploaded["assetId"]
 
 
 class ArkUploadInput:
-    """把本机文件上传到方舟私域素材库，产出一份可以直接用的素材库素材。
+    """把本机文件在**正式提交时**上传到方舟私域素材库，产出一份能直接用的素材库素材。
 
     为什么入库这一步在客户端也要有入口：含真人人脸的参考素材**只能**走素材库
     （直传 URL 会被方舟输入审核拦下），没有这个入口，创意就只能先去控制台传一次。
@@ -516,9 +529,10 @@ class ArkUploadInput:
             "required": {"image": _reference_spec(('.png', '.jpg', '.jpeg', '.webp'), image_upload=True)},
             "optional": {"reference_media": ("VIDEO_FLOW_LOCAL_MEDIA_LIST",)},
         }
-    DESCRIPTION = ("把本机这张图**上传到方舟私域素材库**，再追加进参考集合。"
-                   "上传后它会出现在「素材库素材」的下拉里，之后可以直接复用；"
+    DESCRIPTION = ("把本机这张图**在正式提交时上传到方舟私域素材库**，再追加进参考集合。"
                    "生成时走 asset://——含真人人脸的素材只有这样送才不会被拦。"
+                   "Preview 只读本机、不传素材；入库发生在正式提交那一刻，"
+                   "入库后它会出现在「素材库素材」的下拉里，可以直接复用。"
                    "留在「不给素材」表示这个槽位不用。")
     RETURN_TYPES = ("VIDEO_FLOW_LOCAL_MEDIA_LIST",)
     RETURN_NAMES = ("reference_media",)
@@ -529,7 +543,7 @@ class ArkUploadInput:
     def inspect(self, image, reference_media=None):
         if image == UNUSED_MEDIA_CHOICE:
             return (_validated_reference_media(reference_media),)
-        return (_append_published_media(reference_media, image),)
+        return (_append_library_pending_media(reference_media, image),)
 
 
 class ArkAssetInput:
@@ -979,6 +993,15 @@ class CreateTask:
                 # 也不该再传一次。直接绑定登记时给的那条 Asset；服务端会向方舟复验它还活着、
                 # 并且在同一个项目里。
                 uploaded_media.append({'slotId': expected['slotId'], 'assetId': media['asset_id']})
+                continue
+            if media.get(LIBRARY_PUBLISH_PENDING):
+                # 上传槽位：到这里才真上传 + 入库，绑定的仍是入库后那条 Asset（服务端见到
+                # arkAssetId 就回 asset://）。放在这一步而不是节点里，是为了让 Preview
+                # 一个字节都不出本机——见 LIBRARY_PUBLISH_PENDING 的说明。
+                uploaded_media.append({
+                    'slotId': expected['slotId'],
+                    'assetId': publish_pending_library_media(client, media),
+                })
                 continue
             data = read_verified_media(media)
             uploaded = client.upload_media(data, filename=media['filename'], mime_type=media['descriptor']['mimeType'])

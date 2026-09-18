@@ -8,6 +8,20 @@
 
 ## 0. 本轮交付判断
 
+### 2026-09-18：客户端素材库两条路补齐；入库时机改到正式提交（分支 `feat/ark-nodes-in-multi-reference`，**未部署**）
+
+**先纠正上一节的状态**：2026-09-17 那条写的是「后端完整，**客户端未做**」——客户端那半已经做了（素材库选择节点、本机文件的上传入库槽位、人像模板）。
+
+**补齐**：全模态参考模板（`seedance-multi-reference-preflight-v1`）此前只有本机文件槽位，素材库那条路只在人像模板上有。现在两张画布都接了「从库里选」（`VideoFlowArkAssetInput`）与「本机传一张、提交时入库」（`VideoFlowArkUploadInput`），两个槽位都接在**链尾**——链序决定 `@图像N` / `@视频N` 的编号，接链尾才不动默认提示词。补充一条产品事实：编号只算**实际放进去的素材**（空槽原样透传、不占号），所以库选素材单独用时它就是 `@图像1`。
+
+**修掉一个边界缺陷（人像模板先犯的，这次一并修）**：上传槽位原先在**节点执行时**就 `upload_media` + `publish_ark_asset`。素材节点都在请求节点上游，Preview 与 Production 的 Queue 都会跑到它，而模式要到请求/提交节点才读得出来——于是用户选好文件点 Preview，字节已经出了本机（我方对象存储 + 方舟私域库），而界面同一时刻报的是「Preview 已完成，未上传素材、未生成视频」。这与 `docs/PRODUCT.md`「Preview 不自动上传素材」、README 验收清单第 2 条冲突，也正是不变量 **C01**（「用户选择 Preview 仍可能产生素材出站，违反无上传边界」）描述的那一类。
+
+**改法**：节点的 `inspect` 只读本机、**不发任何网络请求**，在集合条目上留一个 `publish_to_library` 标记；上传 + 入库移到 `CreateTask.submit`——那里本来就按模式分流，本机素材的上传（`upload_media`）也全都发生在那一处。descriptor 因此与普通本机槽位同形（**不带** `arkAssetId`）。后端逐字段比对本就支持这条路径（`still accepts a local file whose bytes were also published to the library`）：`arkAssetId` 只在 descriptor 声明了它时才参与比对，而 URL 形态由 **Asset 行**决定，所以仍然走 `asset://`。副作用是入库要等一次正式提交之后才会出现在素材库下拉里（节点说明已同步改写）。
+
+**证据**：客户端 162 passed（新增两条——节点执行阶段用「一构造就炸」的客户端替身证明不碰网络；提交时才上传 + 绑定入库后的那条 Asset）；后端 `production-submission.service.spec.ts` 20 passed。
+
+**未验证**：**没有在真实 ComfyUI 里 Queue 过**。这条改动只在单测层面成立，真跑需要用户手动 Queue（会真的上传入库）。
+
 ### 2026-09-17：私域素材库通路已接通，`asset://` 在真实账号上验证通过（分支 `feat/ark-asset-library`，**未部署**）
 
 **要解决的问题**：方舟 Seedance 2.5/2.0 **不接受含真人人脸的参考素材直传**（输入审核会拦），官方唯一合规通路是素材先入方舟私域素材库、生成时用 `asset://<asset ID>` 指代。此前本系统**没有任何一处能产生 `asset://`**，合同里的 `media.humanFacePolicy` 只记录了这条边界、零代码读取。
