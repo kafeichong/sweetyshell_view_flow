@@ -1,8 +1,8 @@
 {
   "id": "4a1f7e05-8dab-4473-aa80-8278e9c9a2fc",
   "revision": 0,
-  "last_node_id": 15,
-  "last_link_id": 19,
+  "last_node_id": 16,
+  "last_link_id": 21,
   "nodes": [
     {
       "id": 1,
@@ -120,7 +120,7 @@
           "name": "reference_media",
           "type": "VIDEO_FLOW_LOCAL_MEDIA_LIST",
           "links": [
-            19
+            20
           ]
         }
       ],
@@ -147,7 +147,7 @@
         {
           "name": "reference_media",
           "type": "VIDEO_FLOW_LOCAL_MEDIA_LIST",
-          "link": 19
+          "link": 21
         }
       ],
       "outputs": [
@@ -366,6 +366,41 @@
       "widgets_values": [
         ""
       ]
+    },
+    {
+      "id": 16,
+      "type": "VideoFlowArkUploadInput",
+      "pos": [
+        800,
+        230
+      ],
+      "size": [
+        360,
+        180
+      ],
+      "order": 4,
+      "inputs": [
+        {
+          "name": "reference_media",
+          "type": "VIDEO_FLOW_LOCAL_MEDIA_LIST",
+          "link": 20
+        }
+      ],
+      "outputs": [
+        {
+          "name": "reference_media",
+          "type": "VIDEO_FLOW_LOCAL_MEDIA_LIST",
+          "links": [
+            21
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VideoFlowArkUploadInput"
+      },
+      "widgets_values": [
+        "（不给素材）"
+      ]
     }
   ],
   "links": [
@@ -466,8 +501,16 @@
       "STRING"
     ],
     [
-      19,
+      20,
       4,
+      0,
+      16,
+      0,
+      "VIDEO_FLOW_LOCAL_MEDIA_LIST"
+    ],
+    [
+      21,
+      16,
       0,
       10,
       0,

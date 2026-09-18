@@ -256,11 +256,29 @@ export class ProductionSubmissionService {
         && asset.sizeBytes !== null && Number(asset.sizeBytes) === descriptor.sizeBytes
         && asset.mimeType?.toLowerCase() === descriptor.mimeType
         && workflowDigest(asset.mediaMetadata) === workflowDigest(descriptor.metadata)
-        // 两边都归一成 null 再比：缺键与 null 指的是同一件事（"这份素材不在素材库里"），
-        // 直接用 undefined === null 会把普通素材全判成不一致。
-        && (asset.arkAssetId ?? null) === (descriptor.arkAssetId ?? null);
+        // 只在 descriptor **声明**了自己用素材库素材时才要求两边一致。
+        //
+        // 反过来要求"行上没有 arkAssetId"是错的：**同一个文件**可能既被本机文件槽位用、
+        // 又已经被发布进素材库（内容寻址让它们共用同一行）。而客户端在预检那一刻**无从知道**
+        // 这件事——本地上传还没发生。曾经这么比过，结果是一条单向陷阱：任何文件只要入过库，
+        // 就再也不能从文件槽位用了，报的还是看不出所以然的 PREFLIGHT_ACTUAL_CONTENT_MISMATCH
+        // （2026-09-17 真实踩到）。内容由上面的 hash/size/mime/metadata 钉死，这一项管不了防伪。
+        && (descriptor.arkAssetId === undefined || asset.arkAssetId === descriptor.arkAssetId);
       if (!matches) throw new ProductionSubmissionError('PREFLIGHT_ACTUAL_CONTENT_MISMATCH', `media.${descriptor.slotId}`);
       if (asset.arkAssetId) {
+        // **URL 形态由这一行决定**（内部接口见到 arkAssetId 就回 asset://），不是由 descriptor
+        // 决定。所以角色白名单必须在这里再拦一道：descriptor 没声明 arkAssetId 时，预检那道
+        // 白名单是不会跑的——比如一个已入库的图片被放进首帧槽位。放过去就是拿一个未验证的
+        // 角色去花一次钱。
+        if (!ASSET_LIBRARY.roles.includes(descriptor.role)) {
+          throw new ProductionSubmissionError(
+            'MEDIA_ARK_ROLE_UNSUPPORTED',
+            `media.${descriptor.slotId}`,
+            `「${descriptor.role}」这个槽位不能用素材库素材（官方只对 reference_* 给了示例，`
+            + `其余角色未经验证）。这份素材已经入库，所以它会以素材库素材的形式送出去——`
+            + `请改用参考图片槽位，或换一份未入库的素材。`,
+          );
+        }
         // 素材库素材的字节在方舟手里，我方 OSS 那份只是登记时取回来的副本——复验它的字节
         // 证明不了方舟那边还认这份素材。改成问方舟本人：还活着吗？在同一个项目里吗？
         if (verifyBytes) {
