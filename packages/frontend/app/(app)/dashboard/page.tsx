@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import TrendChart from '@/components/charts/TrendChart';
+import { ChartNoAxesCombined, CircleCheck, CircleDollarSign, Info, TrendingUp, TriangleAlert } from 'lucide-react';
 
 export default function DashboardPage() {
   const [overview, setOverview] = useState<ConsumptionOverview | null>(null);
@@ -101,8 +102,8 @@ export default function DashboardPage() {
       <Card>
         <CardContent className="pt-6">
           <div className="flex flex-col items-center justify-center py-12 text-center">
-            <div className="text-4xl mb-4">⚠️</div>
-            <h3 className="text-lg font-semibold mb-2">加载失败</h3>
+            <TriangleAlert className="mb-4 size-8 text-destructive" />
+            <h3 className="text-lg font-normal mb-2">加载失败</h3>
             <p className="text-sm text-muted-foreground mb-4">{error}</p>
             <Button onClick={fetchData}>重试</Button>
           </div>
@@ -115,13 +116,13 @@ export default function DashboardPage() {
     <div className="space-y-6">
       {/* 管理员模式提示 */}
       {isAdmin && (
-        <Card className="border-blue-200 bg-blue-50">
+        <Card className="border-border bg-primary">
           <CardContent className="pt-6">
             <div className="flex items-start gap-3">
-              <div className="text-2xl">ℹ️</div>
+              <Info className="size-5 shrink-0 text-primary-foreground" />
               <div>
-                <p className="font-medium text-blue-900">管理员模式</p>
-                <p className="text-sm text-blue-700 mt-1">
+                <p className="font-normal text-primary">管理员模式</p>
+                <p className="text-sm text-primary mt-1">
                   您当前以管理员身份登录。个人消费看板暂不支持管理员模式。
                 </p>
               </div>
@@ -135,11 +136,11 @@ export default function DashboardPage() {
         {/* 今日消费 */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">今日消费</CardTitle>
-            <span className="text-2xl">💰</span>
+            <CardTitle className="text-sm font-normal">今日消费</CardTitle>
+            <CircleDollarSign className="size-5 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
+            <div className="text-2xl font-normal">
               ¥{overview?.todayCny || '0.00'}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
@@ -153,11 +154,11 @@ export default function DashboardPage() {
         {/* 本月消费 */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">本月消费</CardTitle>
-            <span className="text-2xl">📊</span>
+            <CardTitle className="text-sm font-normal">本月消费</CardTitle>
+            <ChartNoAxesCombined className="size-5 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
+            <div className="text-2xl font-normal">
               ¥{overview?.monthCny || '0.00'}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
@@ -171,17 +172,17 @@ export default function DashboardPage() {
         {/* 预警状态 */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">预警状态</CardTitle>
-            <span className="text-2xl">
-              {overview?.alerts?.daily?.triggered || overview?.alerts?.monthly?.triggered ? '⚠️' : '✅'}
-            </span>
+            <CardTitle className="text-sm font-normal">预警状态</CardTitle>
+            {overview?.alerts?.daily?.triggered || overview?.alerts?.monthly?.triggered
+              ? <TriangleAlert className="size-5 text-destructive" />
+              : <CircleCheck className="size-5 text-muted-foreground" />}
           </CardHeader>
           <CardContent>
             {overview?.alerts?.daily?.triggered ||
             overview?.alerts?.monthly?.triggered ? (
               <div>
-                <div className="text-2xl font-bold text-red-600">警告</div>
-                <div className="text-xs text-red-600 mt-1 space-y-1">
+                <div className="text-2xl font-normal text-destructive">警告</div>
+                <div className="text-xs text-destructive mt-1 space-y-1">
                   {overview?.alerts?.daily?.triggered && (
                     <p>• 日消费已达阈值</p>
                   )}
@@ -192,7 +193,7 @@ export default function DashboardPage() {
               </div>
             ) : (
               <div>
-                <div className="text-2xl font-bold text-green-600">正常</div>
+                <div className="text-2xl font-normal text-foreground">正常</div>
                 <p className="text-xs text-muted-foreground mt-1">消费在预算范围内</p>
               </div>
             )}
@@ -242,25 +243,25 @@ export default function DashboardPage() {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4 border-t">
                 <div>
                   <p className="text-xs text-muted-foreground">总消费</p>
-                  <p className="text-lg font-semibold">¥{trends.summary.totalCny}</p>
+                  <p className="text-lg font-normal">¥{trends.summary.totalCny}</p>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">日均消费</p>
-                  <p className="text-lg font-semibold">¥{trends.summary.avgDailyCny}</p>
+                  <p className="text-lg font-normal">¥{trends.summary.avgDailyCny}</p>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">峰值</p>
-                  <p className="text-lg font-semibold">¥{trends.summary.peakDayCny}</p>
+                  <p className="text-lg font-normal">¥{trends.summary.peakDayCny}</p>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">峰值日期</p>
-                  <p className="text-lg font-semibold">{trends.summary.peakDayKey}</p>
+                  <p className="text-lg font-normal">{trends.summary.peakDayKey}</p>
                 </div>
               </div>
             </div>
           ) : (
             <div className="h-64 flex flex-col items-center justify-center text-muted-foreground">
-              <div className="text-4xl mb-2">📈</div>
+              <TrendingUp className="mb-2 size-8" />
               <p>暂无数据</p>
             </div>
           )}

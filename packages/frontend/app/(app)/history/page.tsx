@@ -1,10 +1,57 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Card, CardHeader, CardTitle, CardDescription, CardFooter } from '@appica/ui-react/card';
-import { Badge } from '@appica/ui-react/badge';
-import { Button } from '@appica/ui-react/button';
-import { Spinner } from '@appica/ui-react/spinner';
+import { useRouter } from 'next/navigation';
+import { Check, Copy, Film, Settings2 } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { DataPagination } from '@/components/data-pagination';
+import { PageHeader } from '@/components/page-header';
+import { PageState } from '@/components/page-state';
+import { StatusBadge } from '@/components/status-badge';
+import { writeClipboardText } from '@/lib/clipboard';
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3100/api';
+
+function Spinner() {
+  return <div className="size-8 animate-spin rounded-full border-2 border-muted border-t-foreground" />;
+}
+
+function CopyableWorkflowName({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await writeClipboardText(value, navigator.clipboard);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy workflow name:', err);
+    }
+  };
+
+  return (
+    <div className="flex h-9 min-w-0 items-center rounded-md border bg-muted/40 pl-3 text-sm">
+      <h2 className="min-w-0 flex-1 truncate font-normal" title={value}>{value}</h2>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8 shrink-0"
+        aria-label={copied ? `已复制：${value}` : `复制工作流名称：${value}`}
+        title={copied ? '已复制' : '复制'}
+        onClick={(event) => {
+          event.stopPropagation();
+          void handleCopy();
+        }}
+        onKeyDown={(event) => event.stopPropagation()}
+      >
+        {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+      </Button>
+    </div>
+  );
+}
 
 // Types
 interface Task {
@@ -78,22 +125,6 @@ interface TaskDetail {
   completedAt: string | null;
 }
 
-interface TokenInfo {
-  dailyLimit: number;
-  dailyUsed: number;
-  monthlyLimit: number;
-  monthlyUsed: number;
-}
-
-interface TokenLogsResponse {
-  logs: Array<{
-    id: string;
-    timestamp: string;
-    amount: number;
-    description: string;
-  }>;
-}
-
 interface MediaPreviewProps {
   assetId: string;
   mimeType: string;
@@ -108,10 +139,10 @@ function MediaPreview({ assetId, mimeType, role }: MediaPreviewProps) {
   useEffect(() => {
     const fetchMedia = async () => {
       try {
-        const token = localStorage.getItem('token');
+        const token = localStorage.getItem('auth_token');
         console.log('Fetching media:', { assetId, mimeType, role });
 
-        const response = await fetch(`http://localhost:3001/api/v1/assets/${assetId}/download`, {
+        const response = await fetch(`${API_BASE_URL}/v1/assets/${assetId}/download`, {
           headers: {
             Authorization: `Bearer ${token}`,
           },
@@ -137,11 +168,11 @@ function MediaPreview({ assetId, mimeType, role }: MediaPreviewProps) {
     };
 
     fetchMedia();
-  }, [assetId]);
+  }, [assetId, mimeType, role]);
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-32 bg-gray-50 rounded-lg">
+      <div className="flex items-center justify-center h-32 bg-muted rounded-md">
         <Spinner />
       </div>
     );
@@ -149,18 +180,18 @@ function MediaPreview({ assetId, mimeType, role }: MediaPreviewProps) {
 
   if (error || !mediaUrl) {
     return (
-      <div className="flex items-center justify-center h-32 bg-gray-50 rounded-lg text-gray-400">
+      <div className="flex items-center justify-center h-32 bg-muted rounded-md text-muted-foreground">
         {error || '无法加载'}
       </div>
     );
   }
 
   if (mimeType.startsWith('image/')) {
-    return <img src={mediaUrl} alt={role} className="w-full rounded-lg" />;
+    return <img src={mediaUrl} alt={role} className="w-full rounded-md" />;
   }
 
   if (mimeType.startsWith('video/')) {
-    return <video src={mediaUrl} controls className="w-full rounded-lg" />;
+    return <video src={mediaUrl} controls className="w-full rounded-md" />;
   }
 
   if (mimeType.startsWith('audio/')) {
@@ -168,27 +199,14 @@ function MediaPreview({ assetId, mimeType, role }: MediaPreviewProps) {
   }
 
   return (
-    <div className="flex items-center justify-center h-32 bg-gray-50 rounded-lg text-gray-400">
+    <div className="flex items-center justify-center h-32 bg-muted rounded-md text-muted-foreground">
       {mimeType}
     </div>
   );
 }
 
-function getStatusBadge(status: string) {
-  const variants = {
-    completed: { variant: 'success' as const, label: '已完成' },
-    failed: { variant: 'error' as const, label: '失败' },
-    preview: { variant: 'info' as const, label: '预览' },
-    pending: { variant: 'warning' as const, label: '进行中' },
-  };
-
-  const config = variants[status as keyof typeof variants] || { variant: 'soft' as const, label: status };
-  return <Badge variant={config.variant}>{config.label}</Badge>;
-}
-
-export default function HistoryPageAppica() {
-  const [info, setInfo] = useState<TokenInfo | null>(null);
-  const [logs, setLogs] = useState<TokenLogsResponse | null>(null);
+export default function HistoryPage() {
+  const router = useRouter();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedTask, setSelectedTask] = useState<TaskDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -208,26 +226,19 @@ export default function HistoryPageAppica() {
     }
   };
 
-  useEffect(() => {
-    fetchTasks();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page]);
-
-  const fetchTasks = async () => {
+  async function fetchTasks() {
     setLoading(true);
     try {
-      const token = localStorage.getItem('token');
-      console.log('Token from localStorage:', token);
-
+      const token = localStorage.getItem('auth_token');
       if (!token) {
         setError('请先登录');
         setLoading(false);
         return;
       }
 
-      console.log('Fetching tasks from:', `http://localhost:3001/api/v1/tasks?page=${page}&limit=20`);
+      console.log('Fetching tasks from:', `${API_BASE_URL}/v1/tasks?page=${page}&limit=20`);
 
-      const response = await fetch(`http://localhost:3001/api/v1/tasks?page=${page}&limit=20`, {
+      const response = await fetch(`${API_BASE_URL}/v1/tasks?page=${page}&limit=20`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -259,13 +270,13 @@ export default function HistoryPageAppica() {
     } finally {
       setLoading(false);
     }
-  };
+  }
 
-  const fetchTaskDetail = async (taskId: string) => {
+  async function fetchTaskDetail(taskId: string) {
     setDetailLoading(true);
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`http://localhost:3001/api/v1/tasks/${taskId}/detail`, {
+      const token = localStorage.getItem('auth_token');
+      const response = await fetch(`${API_BASE_URL}/v1/tasks/${taskId}/detail`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -280,319 +291,169 @@ export default function HistoryPageAppica() {
     } finally {
       setDetailLoading(false);
     }
-  };
+  }
+
+  useEffect(() => {
+    const request = window.setTimeout(() => void fetchTasks(), 0);
+    // The selected task is intentionally preserved while paging.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => window.clearTimeout(request);
+  }, [page]);
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <Spinner />
-      </div>
-    );
+    return <PageState kind="loading" title="正在加载任务历史" />;
   }
 
   if (error) {
     return (
-      <div className="container mx-auto p-6">
-        <Card frame="solid">
-          <CardHeader>
-            <CardTitle>❌ 错误</CardTitle>
-          </CardHeader>
-          <div className="px-6 pb-6">
-            <p className="text-red-600 mb-4">{error}</p>
-            <Button onClick={() => window.location.href = '/login'}>前往登录</Button>
-          </div>
-        </Card>
-      </div>
+      <PageState
+        kind="error"
+        title="任务历史加载失败"
+        description={error}
+        action={<Button onClick={() => router.push('/login')}>前往登录</Button>}
+      />
     );
   }
 
   return (
-    <div className="w-full h-screen flex flex-col bg-gradient-to-br from-gray-50 to-gray-100">
-      <div className="container mx-auto px-6 py-6 flex flex-col h-full">
-        <div className="mb-6">
-          <div className="flex items-baseline justify-between">
-            <div>
-              <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                任务历史
-              </h1>
-              <p className="text-sm text-gray-500 mt-1">查看您的视频生成历史记录</p>
-            </div>
-            <div className="text-sm text-gray-400">
-              共 {totalPages} 页 · {tasks.length > 0 ? `${tasks.length} 条记录` : '暂无记录'}
-            </div>
-          </div>
-        </div>
+    <div className="flex min-h-0 flex-1 flex-col gap-6">
+      <PageHeader
+        title="任务历史"
+        description="查看视频生成任务、输出结果和提交参数。"
+        actions={<Badge variant="outline">共 {tasks.length} 条</Badge>}
+      />
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 flex-1 overflow-hidden min-h-0">
-        {/* Left: Task List */}
-        <div className="flex flex-col overflow-y-auto pr-2 -mr-2">
+      <div className="grid min-h-0 flex-1 gap-6 lg:grid-cols-[minmax(18rem,0.8fr)_minmax(0,1.2fr)]">
+        <section className="flex min-h-0 flex-col gap-4" aria-label="任务列表">
           {tasks.length === 0 ? (
-            <div className="pl-1 pr-2 pt-1">
-              <Card frame="solid">
-                <div className="flex items-center justify-center h-32 text-gray-400">
-                  暂无任务记录
-                </div>
-              </Card>
-            </div>
+            <PageState kind="empty" title="暂无任务记录" description="完成一次视频生成后，任务会显示在这里。" />
           ) : (
-            <div className="space-y-2 pl-1 pr-2 pt-1 pb-4">{tasks.map((task) => (
-              <Card
-                key={task.id}
-                frame="glass"
-                className={`cursor-pointer transition-all duration-200 hover:shadow-md bg-white ml-1 mr-1 ${
-                  selectedTask?.id === task.id
-                    ? 'ring-2 ring-blue-500 shadow-md'
-                    : 'hover:ring-1 hover:ring-blue-200'
-                }`}
-                contentProps={{
-                  onClick: () => fetchTaskDetail(task.id),
-                }}
-              >
-                <div className="px-4 py-3">
-                  <div className="flex items-start justify-between gap-2 mb-2">
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-sm font-semibold text-gray-800 truncate">
-                        {task.workflowName || '未知工作流'}
-                      </h3>
-                      <p className="text-xs text-gray-500 mt-0.5">
-                        {new Date(task.createdAt).toLocaleString('zh-CN', {
-                          month: '2-digit',
-                          day: '2-digit',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
-                      </p>
+            <div className="min-h-0 space-y-2 overflow-y-auto pr-1">
+              {tasks.map((task) => (
+                <Card
+                  key={task.id}
+                  role="button"
+                  tabIndex={0}
+                  data-state={selectedTask?.id === task.id ? 'selected' : undefined}
+                  className="cursor-pointer transition-colors hover:bg-accent data-[state=selected]:border-foreground data-[state=selected]:bg-accent"
+                  onClick={() => fetchTaskDetail(task.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') fetchTaskDetail(task.id);
+                  }}
+                >
+                  <CardContent className="space-y-3 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        {task.workflowName ? (
+                          <CopyableWorkflowName value={task.workflowName} />
+                        ) : (
+                          <h2 className="h-9 truncate px-3 py-2 text-sm font-normal text-muted-foreground">未知工作流</h2>
+                        )}
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {new Date(task.createdAt).toLocaleString('zh-CN')}
+                        </p>
+                      </div>
+                      <StatusBadge status={task.status} />
                     </div>
-                    {getStatusBadge(task.status)}
-                  </div>
-                  <p className="text-xs text-gray-600 line-clamp-2 leading-relaxed mb-2">
-                    {task.promptPreview}
-                  </p>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-gray-400">💰 ¥{task.cost.reserved}</span>
-                    {task.hasOutput && (
-                      <span className="text-green-600 text-xs">✓ 已生成</span>
-                    )}
-                  </div>
-                </div>
-              </Card>
-            ))}
+                    <p className="line-clamp-2 text-sm leading-relaxed text-muted-foreground">{task.promptPreview}</p>
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span>预占 ¥{task.cost.reserved}</span>
+                      {task.hasOutput ? <span>已有输出</span> : null}
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
             </div>
           )}
+          <DataPagination page={page} totalPages={totalPages} onPageChange={setPage} />
+        </section>
 
-          {/* Pagination */}
-          <div className="flex justify-center gap-2 pb-4 pl-1 pr-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page === 1}
-              onClick={() => setPage(page - 1)}
-              className="transition-all hover:scale-105"
-            >
-              ← 上一页
-            </Button>
-            <span className="px-4 py-2 text-sm font-medium bg-white rounded-lg shadow-sm">
-              第 {page} / {totalPages} 页
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page === totalPages}
-              onClick={() => setPage(page + 1)}
-              className="transition-all hover:scale-105"
-            >
-              下一页 →
-            </Button>
-          </div>
-        </div>
-
-        {/* Right: Task Detail */}
-        <div className="flex flex-col overflow-y-auto pr-2 -mr-2 pl-1">
+        <section className="min-h-0 overflow-y-auto" aria-label="任务详情">
           {detailLoading ? (
-            <Card frame="solid">
-              <div className="flex items-center justify-center h-64">
-                <Spinner />
-              </div>
-            </Card>
+            <PageState kind="loading" title="正在加载任务详情" />
           ) : selectedTask ? (
-            <div className="space-y-4 pb-6">
-              {/* 主体：生成结果视频 */}
+            <div className="space-y-4">
               {selectedTask.status === 'completed' && selectedTask.assets.length > 0 && (
-                <Card frame="solid" className="border-2 border-blue-200 bg-gradient-to-br from-blue-50 to-white shadow-lg">
-                  <CardHeader>
-                    <CardTitle className="text-lg flex items-center gap-2">
-                      <span className="text-2xl">🎬</span>
-                      <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                        生成结果
-                      </span>
-                    </CardTitle>
+                <Card>
+                  <CardHeader className="border-b bg-muted/50">
+                    <CardTitle className="flex items-center gap-2 text-base"><Film className="size-4" />生成结果</CardTitle>
                   </CardHeader>
-                  <div className="px-6 pb-6">
+                  <CardContent className="space-y-3 pt-6">
                     {selectedTask.assets
                       .filter((asset) => asset.role === 'output')
                       .map((asset) => (
-                        <div key={asset.id} className="rounded-xl overflow-hidden shadow-xl">
-                          <MediaPreview
-                            assetId={asset.id}
-                            mimeType={asset.mimeType}
-                            role={asset.role}
-                          />
-                        </div>
+                        <MediaPreview key={asset.id} assetId={asset.id} mimeType={asset.mimeType} role={asset.role} />
                       ))}
-                  </div>
+                  </CardContent>
                 </Card>
               )}
 
-              {/* 错误信息 */}
               {selectedTask.status === 'failed' && selectedTask.errorMessage && (
-                <Card frame="solid" className="border-2 border-red-200 bg-gradient-to-br from-red-50 to-white shadow-lg">
-                  <CardHeader>
-                    <CardTitle className="text-lg text-red-700 flex items-center gap-2">
-                      <span className="text-2xl">❌</span>
-                      <span>错误信息</span>
-                    </CardTitle>
-                  </CardHeader>
-                  <div className="px-6 pb-6">
-                    <div className="bg-red-100 border border-red-200 rounded-lg p-4">
-                      <p className="text-sm text-red-700 leading-relaxed">{selectedTask.errorMessage}</p>
-                    </div>
-                  </div>
-                </Card>
+                <PageState kind="error" title="任务执行失败" description={selectedTask.errorMessage} />
               )}
 
-              {/* 关键信息：提示词 */}
-              <Card frame="solid" className="bg-white shadow-md">
-                <CardHeader>
+              <Card>
+                <CardHeader className="border-b bg-muted/50">
                   <div className="flex items-center justify-between">
-                    <CardTitle className="text-base flex items-center gap-2 text-gray-700">
-                      <span className="text-xl">📝</span>
-                      <span>提示词</span>
-                    </CardTitle>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => copyToClipboard(selectedTask.submissionDetails.prompt.text)}
-                      className="flex items-center gap-1 text-xs transition-all hover:scale-105"
-                    >
-                      {copied ? (
-                        <>
-                          <span>✓</span>
-                          <span>已复制</span>
-                        </>
-                      ) : (
-                        <>
-                          <span>📋</span>
-                          <span>复制</span>
-                        </>
-                      )}
+                    <CardTitle className="text-base">提示词</CardTitle>
+                    <Button variant="outline" size="sm" onClick={() => copyToClipboard(selectedTask.submissionDetails.prompt.text)}>
+                      <Copy className="size-4" />{copied ? '已复制' : '复制'}
                     </Button>
                   </div>
                 </CardHeader>
-                <div className="px-6 pb-6">
-                  <div className="bg-gradient-to-br from-gray-50 to-white border border-gray-200 rounded-lg p-4 relative group">
-                    <p className="text-sm whitespace-pre-wrap leading-relaxed text-gray-700">
-                      {selectedTask.submissionDetails.prompt.text}
-                    </p>
-                  </div>
-                </div>
+                <CardContent className="pt-6"><p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{selectedTask.submissionDetails.prompt.text}</p></CardContent>
               </Card>
 
-              {/* 次要信息区域 - 视觉弱化 */}
-              <div className="space-y-3 opacity-75">
-                {/* 生成参数 - 精简显示 */}
-                <Card frame="glass" className="bg-white/50 backdrop-blur-sm">
-                  <CardHeader>
-                    <CardTitle className="text-sm text-gray-600 flex items-center gap-2">
-                      <span>⚙️</span>
-                      <span>生成参数</span>
-                    </CardTitle>
+              <div className="space-y-4">
+                <Card>
+                  <CardHeader className="border-b bg-muted/50">
+                    <CardTitle className="flex items-center gap-2 text-base"><Settings2 className="size-4" />生成参数</CardTitle>
                   </CardHeader>
-                  <div className="px-6 pb-4">
-                    <div className="flex flex-wrap gap-2 text-xs">
-                      <span className="bg-gradient-to-r from-blue-100 to-blue-50 border border-blue-200 px-3 py-1.5 rounded-full font-medium text-blue-700">
-                        {selectedTask.submissionDetails.generation.model}
-                      </span>
-                      <span className="bg-gradient-to-r from-green-100 to-green-50 border border-green-200 px-3 py-1.5 rounded-full font-medium text-green-700">
-                        ⏱️ {selectedTask.submissionDetails.generation.duration}秒
-                      </span>
-                      <span className="bg-gradient-to-r from-purple-100 to-purple-50 border border-purple-200 px-3 py-1.5 rounded-full font-medium text-purple-700">
-                        📐 {selectedTask.submissionDetails.generation.resolution}
-                      </span>
-                      <span className="bg-gradient-to-r from-orange-100 to-orange-50 border border-orange-200 px-3 py-1.5 rounded-full font-medium text-orange-700">
-                        🎞️ {selectedTask.submissionDetails.generation.ratio}
-                      </span>
+                  <CardContent className="pt-6">
+                    <div className="flex flex-wrap gap-2">
+                      <Badge variant="secondary">{selectedTask.submissionDetails.generation.model}</Badge>
+                      <Badge variant="outline">{selectedTask.submissionDetails.generation.duration} 秒</Badge>
+                      <Badge variant="outline">{selectedTask.submissionDetails.generation.resolution}</Badge>
+                      <Badge variant="outline">{selectedTask.submissionDetails.generation.ratio}</Badge>
                     </div>
-                  </div>
+                  </CardContent>
                 </Card>
 
-                {/* 输入媒体 */}
                 {selectedTask.submissionDetails.media.length > 0 && (
-                  <Card frame="glass" className="bg-white/50 backdrop-blur-sm">
-                    <CardHeader>
-                      <CardTitle className="text-sm text-gray-600 flex items-center gap-2">
-                        <span>🖼️</span>
-                        <span>输入媒体</span>
-                      </CardTitle>
+                  <Card>
+                    <CardHeader className="border-b bg-muted/50">
+                      <CardTitle className="text-base">输入媒体</CardTitle>
                     </CardHeader>
-                    <div className="px-6 pb-4 space-y-3">
+                    <CardContent className="space-y-4 pt-6">
                       {selectedTask.submissionDetails.media.map((media, idx) => (
-                        <div key={idx}>
-                          <p className="text-xs text-gray-500 mb-2 flex items-center gap-1">
-                            <span className="font-medium">{media.role}</span>
-                            <span className="text-gray-400">({media.mimeType})</span>
-                          </p>
-                          <div className="rounded-lg overflow-hidden shadow-md">
-                            <MediaPreview
-                              assetId={media.assetId}
-                              mimeType={media.mimeType}
-                              role={media.role}
-                            />
-                          </div>
+                        <div key={`${media.assetId}-${idx}`} className="space-y-2">
+                          <p className="text-xs text-muted-foreground">{media.role} · {media.mimeType}</p>
+                          <MediaPreview assetId={media.assetId} mimeType={media.mimeType} role={media.role} />
                         </div>
                       ))}
-                    </div>
+                    </CardContent>
                   </Card>
                 )}
 
-                {/* 工作流信息 - 最次要 */}
-                <details className="group">
-                  <summary className="cursor-pointer list-none">
-                    <Card frame="glass" className="group-open:mb-2 bg-white/30 hover:bg-white/50 transition-all">
-                      <div className="px-6 py-3 flex items-center justify-between">
-                        <span className="text-xs text-gray-500 flex items-center gap-2">
-                          <span>🔧</span>
-                          <span>工作流详情</span>
-                        </span>
-                        <span className="text-xs text-gray-400 group-open:rotate-180 transition-transform duration-200">
-                          ▼
-                        </span>
-                      </div>
-                    </Card>
-                  </summary>
-                  <Card frame="glass" className="bg-white/50">
-                    <div className="px-6 py-4 space-y-2 text-xs">
+                <details className="group overflow-hidden rounded-md border bg-card text-card-foreground shadow-sm">
+                  <summary className="cursor-pointer bg-muted/50 px-6 py-4 text-sm font-normal">工作流详情</summary>
+                  <div className="space-y-2 border-t p-6 text-xs">
                       <div className="flex items-start gap-2">
-                        <span className="text-gray-500 min-w-[48px]">名称：</span>
-                        <span className="font-medium text-gray-700">{selectedTask.submissionDetails.workflow.name}</span>
+                        <span className="text-muted-foreground min-w-[48px]">名称：</span>
+                        <span className="font-normal text-foreground">{selectedTask.submissionDetails.workflow.name}</span>
                       </div>
                       <div className="flex items-start gap-2">
-                        <span className="text-gray-500 min-w-[48px]">Key：</span>
-                        <span className="font-mono text-gray-600 break-all">{selectedTask.submissionDetails.workflow.key}</span>
+                        <span className="text-muted-foreground min-w-[48px]">Key：</span>
+                        <span className="font-mono text-muted-foreground break-all">{selectedTask.submissionDetails.workflow.key}</span>
                       </div>
-                    </div>
-                  </Card>
+                  </div>
                 </details>
               </div>
             </div>
           ) : (
-            <Card frame="solid">
-              <div className="flex items-center justify-center h-64 text-gray-400">
-                请选择一个任务查看详情
-              </div>
-            </Card>
+            <PageState kind="empty" title="请选择任务" description="从左侧列表选择一项查看输出、提示词和生成参数。" />
           )}
-        </div>
-      </div>
+        </section>
       </div>
     </div>
   );

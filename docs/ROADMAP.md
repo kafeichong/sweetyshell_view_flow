@@ -438,3 +438,226 @@ git diff --check
 ## 8. 修订记录
 
 - 2026-09-15：根据职责讨论与F01–F15评审替换旧路线图。允许在正式上线前替换错误设计；从固定参考图/Preview扩展目标调整为八工作流完整开发。实施计划仍仅在本文件维护，分析与评审按日期归档。
+
+## 9. 前端 shadcn/ui 单一设计系统实施计划（2026-09-20）
+
+> **执行要求：** 确认执行方式后按 F1–F6 顺序执行；每个阶段先运行针对性失败检查，再修改生产代码并复验。本节遵守项目“计划只写入 ROADMAP”的规则，替代技能默认的独立计划文件。
+
+**目标：** 将 `packages/frontend` 的所有正式页面统一为 shadcn/ui New York v4，彻底清除旧渐变、固定色阶、玻璃效果、大阴影和页面自定义圆角体系，同时保持现有 API、鉴权和业务行为不变。
+
+**架构：** `components.json`、`app/globals.css` 和 `components/ui/*` 是唯一视觉基础；少量 `components/page-*` 业务公共组件统一页面标题、状态、状态 Badge 和分页。正式页面只组合公共组件和语义 token，数据请求与事件逻辑继续留在各自页面。
+
+**技术栈：** Next.js 16、React 19、TypeScript、Tailwind CSS 4、shadcn/ui New York、Radix UI、Node Test Runner、ESLint。
+
+**规格依据：** [前端 shadcn/ui 单一设计系统改造规格](./superpowers/specs/2026-09-20-frontend-shadcn-design-system-design.md)。
+
+### 9.1 全局约束
+
+- `components.json` 必须保持 `style: "new-york"`、`baseColor: "zinc"` 和 `cssVariables: true`。
+- 页面视觉颜色只能来自 `background`、`foreground`、`card`、`muted`、`primary`、`secondary`、`accent`、`destructive`、`border`、`input` 和 `ring` 语义 token。
+- 正式路由文件不得保留装饰性渐变、玻璃效果、固定 Tailwind 色阶和 `shadow-md/lg/xl/2xl`。
+- 普通容器圆角由 shadcn 组件决定；`rounded-full` 仅用于头像、状态点和加载环等必须为圆形的元素。
+- 不修改 Backend、Worker、数据库、API 合约、鉴权规则或付费执行链。
+- 不覆盖工作区中与本计划无关的已有修改，不删除用户截图或仓库外资产。
+- Git 提交、推送、部署和真实环境验收不由本计划自动授权，分别记录。
+
+### 9.2 Review Focus
+
+| 高风险输入或状态 | 应有行为 | 所属阶段 |
+| --- | --- | --- |
+| Backend 不可用或返回 401/403/404/500 | 页面使用统一错误状态，不因视觉迁移崩溃或丢失登录跳转 | F3–F5 |
+| 空列表、单页和多页数据 | 空状态与分页稳定，第一页/末页按钮正确禁用 | F3–F5 |
+| 长 prompt、长用户名、长错误信息 | 可换行或截断，不撑破 Card、表格和窄屏布局 | F3–F5 |
+| 窄屏和 Sidebar 收起 | 内容不被遮挡，表格可横向滚动，Header 保留触发按钮 | F2–F6 |
+| loading、selected、disabled、focus | 统一使用 Skeleton、语义选中态、禁用态和可见 focus ring | F2–F6 |
+
+### F1：建立可执行的样式边界
+
+**文件：**
+
+- 新增：`packages/frontend/tests/shadcn-style-contract.test.mjs`
+- 修改：`packages/frontend/package.json`（仅当现有 `npm test` 未覆盖该文件时）
+
+**接口：**
+
+- 输入：`app/**/page.tsx`、`app/**/layout.tsx`、`components/**/*.tsx` 的源码文本。
+- 输出：对旧视觉模式给出包含文件名和匹配项的测试失败；允许 `rounded-full` 等明确白名单。
+
+- [ ] **F1.1 写失败测试。** 测试递归收集正式路由和正式组件，排除 `page-old.tsx`、`page-appica.tsx` 与测试文件；对以下模式逐项断言为空：
+
+```js
+const forbidden = [
+  /bg-gradient-|from-(?:gray|blue|purple|pink|green|orange|red)-|to-(?:gray|blue|purple|pink|green|orange|red)-/,
+  /backdrop-blur|bg-white\//,
+  /shadow-(?:md|lg|xl|2xl)/,
+  /(?:bg|text|border|ring)-(?:gray|blue|purple|pink|green|orange|red)-\d{2,3}/,
+  /rounded-(?:lg|xl|2xl|3xl)/,
+];
+```
+
+- [ ] **F1.2 运行 RED。** 在 `packages/frontend` 执行 `node --test tests/shadcn-style-contract.test.mjs`；预期因 `/history`、`/showcase`、`/tokens` 等现有旧样式失败，并打印实际命中文件。
+- [ ] **F1.3 固化例外。** 只允许语义必要的 `rounded-full`；媒体自身不额外套页面圆角。若第三方 `components/ui` 的 shadcn 原始实现包含合法阴影或圆角，只按精确文件/组件白名单处理，不放宽业务页面规则。
+- [ ] **F1.4 运行现有测试。** 执行 `npm test`，确认新合同测试是唯一预期新增失败，`api-url` 和 Sidebar 测试仍通过。
+
+### F2：收口全局基础与公共页面模式
+
+**文件：**
+
+- 修改：`packages/frontend/app/globals.css`
+- 检查并按需修改：`packages/frontend/components/ui/{button,card,badge,avatar,separator,sidebar}.tsx`
+- 新增：`packages/frontend/components/ui/input.tsx`
+- 新增：`packages/frontend/components/ui/select.tsx`
+- 新增：`packages/frontend/components/ui/table.tsx`
+- 新增：`packages/frontend/components/ui/skeleton.tsx`
+- 新增：`packages/frontend/components/ui/alert.tsx`
+- 新增：`packages/frontend/components/page-header.tsx`
+- 新增：`packages/frontend/components/page-state.tsx`
+- 新增：`packages/frontend/components/status-badge.tsx`
+- 新增：`packages/frontend/components/data-pagination.tsx`
+- 测试：`packages/frontend/tests/shadcn-style-contract.test.mjs`
+
+**接口：**
+
+```ts
+type PageHeaderProps = {
+  title: string;
+  description?: string;
+  actions?: React.ReactNode;
+};
+
+type PageStateProps = {
+  kind: 'loading' | 'empty' | 'error';
+  title?: string;
+  description?: string;
+  action?: React.ReactNode;
+};
+
+type StatusBadgeProps = {
+  status: string;
+  label?: string;
+};
+
+type DataPaginationProps = {
+  page: number;
+  totalPages: number;
+  total?: number;
+  onPageChange: (page: number) => void;
+};
+```
+
+- [ ] **F2.1 扩展失败测试。** 加入公共组件存在性及 `PageHeader`、`PageState`、`StatusBadge`、`DataPagination` 导出检查；运行定向测试，预期因文件尚不存在失败。
+- [ ] **F2.2 安装或生成缺少的 shadcn 组件。** 使用当前项目版本对应的 shadcn New York 源码；不重写已有 Sidebar，不引入第二套 UI 包。
+- [ ] **F2.3 清理全局 CSS。** 保留官方 New York token、base layer 和 Sidebar token；删除 `.eyebrow`、`.showcase-card` 等页面特有 utility，不能把旧样式转移到全局类中隐藏。
+- [ ] **F2.4 实现公共页面组件。** `PageState` 的 loading 使用 Skeleton，error 使用 Alert destructive 语义，empty 使用 muted 文本；`StatusBadge` 把任务状态映射到 shadcn Badge 变体，不写固定色阶；分页在第一页和末页禁用对应按钮。
+- [ ] **F2.5 运行定向测试和类型检查。** 执行 `node --test tests/shadcn-style-contract.test.mjs` 和 `npx tsc --noEmit`；此时样式合同仍可因未迁移页面失败，但不得再因公共组件缺失失败。
+
+### F3：将 `/history` 建成参考实现
+
+**文件：**
+
+- 修改：`packages/frontend/app/(app)/history/page.tsx`
+- 修改：`packages/frontend/app/(app)/layout.tsx`
+- 复用：`components/page-header.tsx`、`page-state.tsx`、`status-badge.tsx`、`data-pagination.tsx`
+- 测试：`packages/frontend/tests/shadcn-style-contract.test.mjs`
+
+**行为保持：** 现有任务读取、自动选中第一项、翻页、媒体预览、错误展示、登录跳转和详情数据均保持；只重构呈现层与必要的 Hook 声明顺序。
+
+- [ ] **F3.1 为 `/history` 增加失败断言。** 断言页面使用四个公共页面组件，且源码不包含旧渐变、固定色阶、大阴影、玻璃效果和普通容器自定义大圆角；运行定向测试并观察失败。
+- [ ] **F3.2 统一 App Shell。** Layout 只提供 Sidebar、Header、触发器和内容容器；页面不再使用 `h-screen` 或独立全屏背景覆盖 Shell。
+- [ ] **F3.3 迁移 Header 与状态。** 使用 `PageHeader` 和 `PageState` 替换当前独立标题、加载、错误和空状态；错误信息保留原业务文案和登录操作。
+- [ ] **F3.4 迁移任务列表。** 列表项使用 `Card`/`Button` 语义状态，选中项使用 `bg-accent text-accent-foreground` 或 `ring-ring`；长 prompt 使用 `line-clamp` 和可访问标题，不用蓝色 ring 或阴影。
+- [ ] **F3.5 迁移详情区。** 输出媒体、失败原因、Prompt、参数和输入素材统一使用 Card、Separator、Badge；删除 emoji 标题、渐变文字和彩色胶囊。
+- [ ] **F3.6 迁移分页。** 使用 `DataPagination`，覆盖第一页、末页、总页数为 0/1 的禁用逻辑。
+- [ ] **F3.7 修正触及文件的静态问题。** 将 Effect 内异步请求改成声明顺序稳定的函数或 Effect 内函数；catch 使用 `unknown` 和 Axios 类型守卫；删除未使用 import，不改变请求地址。
+- [ ] **F3.8 验证参考页。** 执行定向样式测试、`npx eslint "app/(app)/history/page.tsx" "app/(app)/layout.tsx"`、`npx tsc --noEmit` 和 `npm test`。
+
+### F4：迁移 Dashboard、Alerts、Reconciliation、Tokens、Users
+
+**文件：**
+
+- 修改：`packages/frontend/app/(app)/dashboard/page.tsx`
+- 修改：`packages/frontend/app/(app)/alerts/page.tsx`
+- 修改：`packages/frontend/app/(app)/reconciliation/page.tsx`
+- 修改：`packages/frontend/app/(app)/tokens/page.tsx`
+- 修改：`packages/frontend/app/users/page.tsx`
+- 复用：F2 公共组件和 `components/ui/*`
+- 测试：`packages/frontend/tests/shadcn-style-contract.test.mjs`
+
+- [ ] **F4.1 按页面加入失败断言。** 每个页面断言使用 `PageHeader`，正式表单不出现带自定义边框/圆角的原生 input/select/button，状态显示使用公共组件；运行定向测试并观察实际失败。
+- [ ] **F4.2 迁移 Dashboard。** 统一指标 Card、提示 Alert、趋势 Card 和时间范围 Button；保留 Recharts 数据与交互，不改统计请求。
+- [ ] **F4.3 迁移 Alerts。** 用 Select/Input/Button/Table/StatusBadge 统一筛选、列表和状态；长消息允许换行，窄屏表格外层使用 `overflow-x-auto`。
+- [ ] **F4.4 迁移 Reconciliation。** 汇总、筛选、异常提示和表格使用统一组件；金额和状态含义不变。
+- [ ] **F4.5 迁移 Tokens。** 替换原生输入和选择器；状态、统计和记录区域使用 Badge/Card/Table；保留 Token 创建、筛选和使用记录逻辑。
+- [ ] **F4.6 迁移 Users。** 统一用户列表、操作按钮、表单或 Dialog 视觉；保留现有权限与 API 行为。
+- [ ] **F4.7 消除触及文件的 ESLint 问题。** 只处理这些页面中的 Hook 依赖、声明顺序、`any` 和未使用 import；不扩展到无关后端代码。
+- [ ] **F4.8 阶段验证。** 运行 `npm test`、`npx tsc --noEmit` 和上述五个页面的定向 ESLint。
+
+### F5：迁移 Login、Showcase、详情页和根路由
+
+**文件：**
+
+- 修改：`packages/frontend/app/login/page.tsx`
+- 修改：`packages/frontend/app/(app)/showcase/page.tsx`
+- 修改：`packages/frontend/app/(app)/showcase/[taskId]/page.tsx`
+- 修改：`packages/frontend/app/page.tsx`
+- 保持：`packages/frontend/lib/api.ts`、`packages/frontend/lib/api-routes.ts` 的已验证 URL 组合语义
+- 测试：`packages/frontend/tests/api-url.test.mjs`、`shadcn-style-contract.test.mjs`
+
+- [ ] **F5.1 加入失败断言。** 覆盖登录表单、案例 Card、媒体容器、作者 Avatar、详情参数和根路由重定向/入口，运行测试并确认旧紫粉渐变、玻璃效果和阴影被捕获。
+- [ ] **F5.2 迁移 Login。** 使用 Card、Label、Input、Button、Alert；保持现有凭证存储、登录 API、403/404 错误处理和登录后跳转。
+- [ ] **F5.3 迁移 Showcase 列表。** 使用 PageHeader、PageState、Card、Avatar、Badge、DataPagination；媒体缺失显示 muted 占位，不再使用紫粉视觉或浮起动画。
+- [ ] **F5.4 迁移 Showcase 详情。** 返回操作、视频、任务信息、参数和错误状态使用公共组件；长 Prompt 可换行；下载 URL 与详情 URL 不变。
+- [ ] **F5.5 检查根路由。** 保留既有导航行为，只移除与 App Shell 冲突的独立旧背景或样式。
+- [ ] **F5.6 回归 API URL。** 执行 `node --test tests/api-url.test.mjs`，必须继续断言 `http://localhost:3001/api/v1/showcase/tasks`，禁止重新出现 `/api/api/v1`。
+- [ ] **F5.7 阶段验证。** 运行 `npm test`、`npx tsc --noEmit` 和本阶段文件的定向 ESLint。
+
+### F6：清理旧实现并完成全站验收
+
+**文件：**
+
+- 删除候选：`packages/frontend/app/(app)/history/page-old.tsx`
+- 删除候选：`packages/frontend/app/(app)/history/page-appica.tsx`
+- 修改：`docs/PROJECT_STATUS.md`（只在实现和验证实际完成后记录事实）
+- 修改：本节复选框（只按真实完成情况更新）
+
+- [ ] **F6.1 做引用和功能对照。** 执行：
+
+```bash
+rg -n "page-old|page-appica|HistoryPageAppica" packages/frontend
+git diff --no-index packages/frontend/app/\(app\)/history/page-old.tsx packages/frontend/app/\(app\)/history/page.tsx
+git diff --no-index packages/frontend/app/\(app\)/history/page-appica.tsx packages/frontend/app/\(app\)/history/page.tsx
+```
+
+确认候选文件无 import/路由引用，且正式页已保留所需任务列表、详情、媒体、分页和错误行为。
+
+- [ ] **F6.2 删除确认无用的旧页面副本。** 仅删除上述已核对文件；不删除截图、测试或用户未提交资产。
+- [ ] **F6.3 运行全量静态验证。** 在 `packages/frontend` 执行：
+
+```bash
+npm test
+npx tsc --noEmit
+npx eslint app components lib tests
+npm run build -- --webpack
+git diff --check
+```
+
+期望测试、TypeScript 和构建通过；ESLint 不得有本轮新增问题。若仍有仓库既有问题，逐项给出文件与规则，不笼统声称全绿。
+
+- [ ] **F6.4 启动本地运行时。** 在 Backend/数据库可用的前提下启动前端，并确认 `.env.local` 的 API Base URL 与 Backend 全局 `/api` 前缀只组合一次；不要求为了纯前端样式验证重新部署 Docker 镜像。
+- [ ] **F6.5 桌面逐页验收。** 检查 `/login`、`/dashboard`、`/history`、`/showcase`、案例详情、`/alerts`、`/reconciliation`、`/tokens`、`/users`；保存必要截图，记录真实数据或未登录边界。
+- [ ] **F6.6 窄屏逐页验收。** 检查 Sidebar、Header、表格滚动、长文本、按钮和 focus ring；不能以桌面构建成功代替移动布局验收。
+- [ ] **F6.7 更新当前事实。** 只有上述实际完成后，才在 `docs/PROJECT_STATUS.md` 写入修改文件、验证命令、退出码、浏览器证据和未验证项；不把本计划文字复制为已完成事实。
+
+### 9.3 完成门禁
+
+- [ ] 正式路由的样式合同测试全部通过，旧设计模式命中数为 0。
+- [ ] `/history` 和其他正式页面只使用 shadcn/ui New York v4 体系。
+- [ ] 不再保留未引用的旧页面实现。
+- [ ] `npm test`、TypeScript、生产构建与 `git diff --check` 通过。
+- [ ] ESLint 没有本轮新增问题，既有问题有精确记录。
+- [ ] Desktop 与窄屏页面验收分别有证据；需要 Backend 的真实数据验收与纯静态验收明确区分。
+- [ ] 提交、推送、部署、Docker 更新和用户验收只按实际动作记录，互不代替。
+
+### 9.4 修订记录
+
+- 2026-09-20：根据已确认的单一设计系统规格新增 F1–F6；选定 shadcn/ui New York v4 为唯一视觉体系，先以 `/history` 建立参考实现，再完成全站迁移和旧实现清理。

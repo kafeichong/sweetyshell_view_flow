@@ -8,6 +8,22 @@
 
 ## 0. 本轮交付判断
 
+### 2026-09-20：Frontend 收口为 shadcn/ui New York 单一视觉体系（本地工作区，未提交/未部署）
+
+`packages/frontend/components.json` 继续以 `style=new-york`、`baseColor=zinc`、CSS Variables 为唯一设计源。正式页面已清除旧蓝紫渐变、玻璃效果、固定 Tailwind 色阶、装饰性大阴影和页面级大圆角；`/history` 已改为统一 Page Header、状态、选中态、详情 Card、Badge 与分页结构。登录、预警、对账、Token、Users 和案例页面的原生表单/旧固定色同步迁移到 shadcn 风格组件或语义 token。
+
+新增 `tests/shadcn-style-contract.test.mjs`，会扫描正式 `app` 页面与业务组件并拒绝旧视觉模式、固定白黑/警告色以及绕过公共组件的原生表单控件。测试在迁移前实际捕获 28 组旧样式，迁移后通过。未被路由引用的 `history/page-old.tsx`、`history/page-appica.tsx` 已在引用与功能项核对后移除。
+
+本地验证（`packages/frontend`）：
+
+- `npm test`：4 passed；
+- `npx tsc --noEmit`：退出码 0；
+- `npm run build -- --webpack`：退出码 0，11 个正式路由全部完成构建；
+- `git diff --check`：退出码 0；
+- `npx eslint app components lib tests`：**未通过**，23 errors / 11 warnings。主要为旧页面既有的 Effect 调用声明顺序、Effect 同步 setState 和历史 `any`；本轮不把测试/构建通过表述为 ESLint 全绿。
+
+运行时边界：尝试启动当前前端时，3000 端口被旧进程占用，当前代码启动到 3001；但 Chrome 自动化创建标签超时、内置浏览器不可用，因此尚无桌面/窄屏逐页截图验收证据。Backend 3001 同时未作为本轮样式验收的可用真实数据服务。本条只代表本地代码、测试、类型和生产构建状态，**不代表提交、推送、Docker 部署或用户视觉验收完成**。
+
 ### 2026-09-17：私域素材库通路已接通，`asset://` 在真实账号上验证通过（分支 `feat/ark-asset-library`，**未部署**）
 
 **要解决的问题**：方舟 Seedance 2.5/2.0 **不接受含真人人脸的参考素材直传**（输入审核会拦），官方唯一合规通路是素材先入方舟私域素材库、生成时用 `asset://<asset ID>` 指代。此前本系统**没有任何一处能产生 `asset://`**，合同里的 `media.humanFacePolicy` 只记录了这条边界、零代码读取。

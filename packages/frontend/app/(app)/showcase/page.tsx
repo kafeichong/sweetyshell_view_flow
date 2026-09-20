@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
 import api from '@/lib/api';
+import { showcaseRoutes } from '@/lib/api-routes';
 
 interface ShowcaseTask {
   id: string;
@@ -60,7 +61,7 @@ export default function ShowcasePage() {
     setError(null);
 
     try {
-      const response = await api.get<ShowcaseResponse>('/api/v1/showcase/tasks', {
+      const response = await api.get<ShowcaseResponse>(showcaseRoutes.list, {
         params: { page, limit: 12 },
       });
 
@@ -75,7 +76,7 @@ export default function ShowcasePage() {
           .map(async (task) => {
             try {
               const videoResponse = await api.get<VideoPreview>(
-                `/api/v1/tasks/showcase/videos/${task.outputAssetId}`
+                showcaseRoutes.video(task.outputAssetId!)
               );
               urls.set(task.outputAssetId!, videoResponse.data.downloadUrl);
             } catch (err) {
@@ -101,7 +102,7 @@ export default function ShowcasePage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
             </svg>
           </div>
-          <h1 className="text-3xl font-bold mb-4">案例广场</h1>
+          <h1 className="text-3xl font-normal mb-4">案例广场</h1>
           <p className="text-lg text-muted-foreground mb-6">{error}</p>
         </Card>
       </div>
@@ -113,7 +114,7 @@ export default function ShowcasePage() {
       <div className="container mx-auto px-4 py-8 max-w-7xl">
         <div className="mb-8">
           <p className="eyebrow mb-2">SHOWCASE</p>
-          <h1 className="text-3xl font-bold mb-2">案例广场</h1>
+          <h1 className="text-3xl font-normal mb-2">案例广场</h1>
           <div className="flex items-center gap-4 text-sm text-muted-foreground">
             <span>浏览团队成员的优秀视频生成案例</span>
             {total > 0 && (
@@ -135,11 +136,11 @@ export default function ShowcasePage() {
               {tasks.map((task) => (
                 <Card
                   key={task.id}
-                  className="showcase-card overflow-hidden border-purple-100 hover:border-purple-300 hover:shadow-xl transition-all duration-300 break-inside-avoid mb-6 cursor-pointer bg-white/80 backdrop-blur-sm"
+                  className="mb-6 cursor-pointer break-inside-avoid overflow-hidden transition-colors hover:bg-accent"
                   onClick={() => router.push(`/showcase/${task.id}`)}
                 >
                   {task.outputAssetId && (
-                    <div className="relative bg-gradient-to-br from-purple-50 to-pink-50">
+                    <div className="relative ">
                       {videoUrls.has(task.outputAssetId) ? (
                         <video src={videoUrls.get(task.outputAssetId)} className="w-full h-auto" preload="metadata" playsInline muted />
                       ) : (
@@ -151,18 +152,18 @@ export default function ShowcasePage() {
                         </div>
                       )}
                       {task.parameters.duration && (
-                        <Badge className="absolute bottom-2 right-2 bg-black/75 text-white border-0">{task.parameters.duration}s</Badge>
+                        <Badge className="absolute bottom-2 right-2 bg-foreground/75 text-primary-foreground border-0">{task.parameters.duration}s</Badge>
                       )}
                     </div>
                   )}
                   <CardHeader>
                     <div className="flex items-center gap-3 mb-3">
                       <Avatar className="h-8 w-8">
-                        <AvatarFallback className="bg-gradient-to-br from-purple-400 to-pink-400 text-white text-xs font-semibold">
+                        <AvatarFallback className="text-primary-foreground text-xs font-normal">
                           {task.creatorName.charAt(0).toUpperCase()}
                         </AvatarFallback>
                       </Avatar>
-                      <span className="text-sm font-medium">{task.creatorName}</span>
+                      <span className="text-sm font-normal">{task.creatorName}</span>
                       {task.workflowName && <Badge variant="outline" className="ml-auto text-xs">{task.workflowName}</Badge>}
                     </div>
                     <CardTitle className="text-base line-clamp-2 leading-snug">{task.promptPreview || '无提示词'}</CardTitle>
