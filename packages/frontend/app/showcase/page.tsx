@@ -1,14 +1,17 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Card, CardHeader, CardTitle, CardDescription, CardFooter } from '@appica/ui-react/card';
-import { Badge } from '@appica/ui-react/badge';
-import { Button } from '@appica/ui-react/button';
-import { Spinner } from '@appica/ui-react/spinner';
+import { useRouter } from 'next/navigation';
+import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Separator } from '@/components/ui/separator';
 import api from '@/lib/api';
 
 interface ShowcaseTask {
   id: string;
+  creatorName: string;
   workflowName: string | null;
   status: string;
   promptPreview: string;
@@ -20,6 +23,12 @@ interface ShowcaseTask {
   };
   completedAt: string | null;
   hasOutput: boolean;
+  outputAssetId?: string;
+}
+
+interface VideoPreview {
+  downloadUrl: string;
+  expiresIn: number;
 }
 
 interface ShowcaseResponse {
@@ -33,11 +42,14 @@ interface ShowcaseResponse {
 }
 
 export default function ShowcasePage() {
+  const router = useRouter();
   const [tasks, setTasks] = useState<ShowcaseTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [videoUrls, setVideoUrls] = useState<Map<string, string>>(new Map());
 
   useEffect(() => {
     fetchShowcaseTasks();
@@ -48,15 +60,31 @@ export default function ShowcasePage() {
     setError(null);
 
     try {
-      // 暂时使用通用任务列表接口，只显示已完成且有输出的任务
       const response = await api.get<ShowcaseResponse>('/api/v1/showcase/tasks', {
         params: { page, limit: 12 },
       });
 
       setTasks(response.data.tasks);
       setTotalPages(response.data.pagination.totalPages);
+      setTotal(response.data.pagination.total);
+
+      const urls = new Map<string, string>();
+      await Promise.all(
+        response.data.tasks
+          .filter(task => task.outputAssetId)
+          .map(async (task) => {
+            try {
+              const videoResponse = await api.get<VideoPreview>(
+                `/api/v1/tasks/showcase/videos/${task.outputAssetId}`
+              );
+              urls.set(task.outputAssetId!, videoResponse.data.downloadUrl);
+            } catch (err) {
+              console.error(`Failed to fetch video for asset ${task.outputAssetId}:`, err);
+            }
+          })
+      );
+      setVideoUrls(urls);
     } catch (err: any) {
-      // 如果showcase接口不可用，显示友好提示
       console.error('Failed to fetch showcase tasks:', err);
       setError('案例广场功能暂未完全就绪，敬请期待');
     } finally {
@@ -66,139 +94,109 @@ export default function ShowcasePage() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800">
-        <div className="container mx-auto px-4 py-16">
-          <div className="max-w-2xl mx-auto">
-            <Card className="p-8 text-center">
-              <div className="mb-6">
-                <svg
-                  className="mx-auto h-16 w-16 text-gray-400"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
-                  />
-                </svg>
-              </div>
-
-              <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-4">
-                案例广场
-              </h1>
-
-              <p className="text-lg text-gray-600 dark:text-gray-300 mb-6">
-                {error}
-              </p>
-
-              <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4 text-left">
-                <h3 className="font-semibold text-blue-900 dark:text-blue-100 mb-2">
-                  即将推出的功能
-                </h3>
-                <ul className="text-sm text-blue-800 dark:text-blue-200 space-y-2">
-                  <li>• 查看团队成员的已完成视频生成案例</li>
-                  <li>• 学习和参考其他成员的提示词和参数配置</li>
-                  <li>• 促进团队协作和知识共享</li>
-                </ul>
-              </div>
-            </Card>
+      <div className="min-h-screen flex items-center justify-center p-4">
+        <Card className="max-w-2xl w-full p-8 text-center">
+          <div className="mb-6">
+            <svg className="mx-auto h-16 w-16 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+            </svg>
           </div>
-        </div>
+          <h1 className="text-3xl font-bold mb-4">案例广场</h1>
+          <p className="text-lg text-muted-foreground mb-6">{error}</p>
+        </Card>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800">
-      <div className="container mx-auto px-4 py-8">
+    <div className="min-h-screen">
+      <div className="container mx-auto px-4 py-8 max-w-7xl">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2">
-            案例广场
-          </h1>
-          <p className="text-gray-600 dark:text-gray-400">
-            浏览团队成员的优秀视频生成案例
-          </p>
+          <p className="eyebrow mb-2">SHOWCASE</p>
+          <h1 className="text-3xl font-bold mb-2">案例广场</h1>
+          <div className="flex items-center gap-4 text-sm text-muted-foreground">
+            <span>浏览团队成员的优秀视频生成案例</span>
+            {total > 0 && (
+              <>
+                <Separator orientation="vertical" className="h-4" />
+                <span>{total} 个案例</span>
+              </>
+            )}
+          </div>
         </div>
 
         {loading ? (
           <div className="flex justify-center items-center h-64">
-            <Spinner size="lg" />
+            <div className="text-muted-foreground">加载中...</div>
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+            <div className="columns-1 sm:columns-2 lg:columns-3 gap-6">
               {tasks.map((task) => (
-                <Card key={task.id} className="overflow-hidden hover:shadow-lg transition-shadow">
-                  <CardHeader>
-                    <div className="flex justify-between items-start mb-2">
-                      <Badge variant={task.status === 'completed' ? 'success' : 'default'}>
-                        {task.status}
-                      </Badge>
-                      {task.workflowName && (
-                        <span className="text-xs text-gray-500 dark:text-gray-400">
-                          {task.workflowName}
-                        </span>
+                <Card
+                  key={task.id}
+                  className="showcase-card overflow-hidden border-purple-100 hover:border-purple-300 hover:shadow-xl transition-all duration-300 break-inside-avoid mb-6 cursor-pointer bg-white/80 backdrop-blur-sm"
+                  onClick={() => router.push(`/showcase/${task.id}`)}
+                >
+                  {task.outputAssetId && (
+                    <div className="relative bg-gradient-to-br from-purple-50 to-pink-50">
+                      {videoUrls.has(task.outputAssetId) ? (
+                        <video src={videoUrls.get(task.outputAssetId)} className="w-full h-auto" preload="metadata" playsInline muted />
+                      ) : (
+                        <div className="w-full aspect-video flex items-center justify-center">
+                          <svg className="w-16 h-16 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                        </div>
+                      )}
+                      {task.parameters.duration && (
+                        <Badge className="absolute bottom-2 right-2 bg-black/75 text-white border-0">{task.parameters.duration}s</Badge>
                       )}
                     </div>
-                    <CardTitle className="text-lg line-clamp-2">
-                      {task.promptPreview || '无提示词'}
-                    </CardTitle>
-                    <CardDescription>
-                      <div className="flex flex-wrap gap-2 mt-2">
-                        {task.parameters.model && (
-                          <Badge variant="outline">{task.parameters.model}</Badge>
-                        )}
-                        {task.parameters.duration && (
-                          <Badge variant="outline">{task.parameters.duration}s</Badge>
-                        )}
-                        {task.parameters.resolution && (
-                          <Badge variant="outline">{task.parameters.resolution}</Badge>
-                        )}
-                      </div>
-                    </CardDescription>
+                  )}
+                  <CardHeader>
+                    <div className="flex items-center gap-3 mb-3">
+                      <Avatar className="h-8 w-8">
+                        <AvatarFallback className="bg-gradient-to-br from-purple-400 to-pink-400 text-white text-xs font-semibold">
+                          {task.creatorName.charAt(0).toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                      <span className="text-sm font-medium">{task.creatorName}</span>
+                      {task.workflowName && <Badge variant="outline" className="ml-auto text-xs">{task.workflowName}</Badge>}
+                    </div>
+                    <CardTitle className="text-base line-clamp-2 leading-snug">{task.promptPreview || '无提示词'}</CardTitle>
+                    <div className="flex items-center gap-2 text-xs flex-wrap mt-3 text-muted-foreground">
+                      {task.parameters.model && <span>{task.parameters.model}</span>}
+                      {task.parameters.resolution && (
+                        <>
+                          <Separator orientation="vertical" className="h-3" />
+                          <span>{task.parameters.resolution}</span>
+                        </>
+                      )}
+                      {task.parameters.ratio && (
+                        <>
+                          <Separator orientation="vertical" className="h-3" />
+                          <span>{task.parameters.ratio}</span>
+                        </>
+                      )}
+                    </div>
                   </CardHeader>
-                  <CardFooter className="flex justify-between items-center">
-                    <span className="text-sm text-gray-500 dark:text-gray-400">
-                      {task.completedAt
-                        ? new Date(task.completedAt).toLocaleDateString('zh-CN')
-                        : '进行中'}
-                    </span>
-                    <Button variant="outline" size="sm" onClick={() => window.location.href = `/history?taskId=${task.id}`}>
-                      查看详情
-                    </Button>
-                  </CardFooter>
                 </Card>
               ))}
             </div>
 
             {tasks.length === 0 && (
               <div className="text-center py-12">
-                <p className="text-gray-500 dark:text-gray-400">暂无案例展示</p>
+                <p className="text-muted-foreground">暂无案例展示</p>
               </div>
             )}
 
             {totalPages > 1 && (
-              <div className="flex justify-center gap-2">
-                <Button
-                  variant="outline"
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={page === 1}
-                >
-                  上一页
-                </Button>
-                <span className="flex items-center px-4">
-                  第 {page} / {totalPages} 页
-                </span>
-                <Button
-                  variant="outline"
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  disabled={page === totalPages}
-                >
-                  下一页
-                </Button>
+              <div className="flex justify-center gap-2 mt-8">
+                <Button variant="outline" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>上一页</Button>
+                <span className="flex items-center px-4 text-sm text-muted-foreground">第 {page} / {totalPages} 页</span>
+                <Button variant="outline" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages}>下一页</Button>
               </div>
             )}
           </>
