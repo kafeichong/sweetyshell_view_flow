@@ -1,6 +1,21 @@
 import { Injectable } from '@nestjs/common';
 import { createHash, randomBytes } from 'crypto';
 import { PrismaService } from '../prisma.service';
+import { hasActorBusinessData } from './actor-data';
+
+export class CredentialHasDataError extends Error {
+  constructor() {
+    super('CREDENTIAL_HAS_DATA');
+    this.name = 'CredentialHasDataError';
+  }
+}
+
+export class CredentialNotFoundError extends Error {
+  constructor() {
+    super('CREDENTIAL_NOT_FOUND');
+    this.name = 'CredentialNotFoundError';
+  }
+}
 
 @Injectable()
 export class CredentialsService {
@@ -52,6 +67,47 @@ export class CredentialsService {
       where: { actorId },
       data: { status: 'revoked' },
       select: { actorId: true, status: true, updatedAt: true },
+    });
+  }
+
+  async activate(actorId: string) {
+    return this.prisma.actorCredential.update({
+      where: { actorId },
+      data: { status: 'active' },
+      select: { actorId: true, status: true, updatedAt: true },
+    });
+  }
+
+  async rotateToken(actorId: string) {
+    const token = `vf_${randomBytes(32).toString('hex')}`;
+    await this.prisma.actorCredential.update({
+      where: { actorId },
+      data: {
+        tokenHash: this.hashToken(token),
+        lastUsedAt: null,
+        lastIpAddress: null,
+      },
+      select: { actorId: true },
+    });
+    return { actorId, token };
+  }
+
+  async deleteUnused(actorId: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const credential = await tx.actorCredential.findUnique({
+        where: { actorId },
+        select: { actorId: true, usageCount: true },
+      });
+      if (!credential) throw new CredentialNotFoundError();
+
+      if (credential.usageCount > 0 || await hasActorBusinessData(tx, actorId)) {
+        throw new CredentialHasDataError();
+      }
+
+      return tx.actorCredential.delete({
+        where: { actorId },
+        select: { actorId: true },
+      });
     });
   }
 }

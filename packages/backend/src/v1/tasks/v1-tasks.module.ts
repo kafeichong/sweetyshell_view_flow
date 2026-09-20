@@ -12,5 +12,6 @@ import { PrismaService } from '../../prisma.service';
   imports: [AuthModule, TasksModule, AssetsModule],
   controllers: [V1TasksController, TaskShowcaseController],
   providers: [TaskListService, TaskShowcaseService, PrismaService],
+  exports: [TaskListService],
 })
 export class V1TasksModule {}

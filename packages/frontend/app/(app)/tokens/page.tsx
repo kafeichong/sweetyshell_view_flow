@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
 import type { TokenInfo, TokenLogsResponse } from '@/types/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,6 +11,7 @@ import { Select } from '@/components/ui/select';
 import { Download, RefreshCw } from 'lucide-react';
 
 export default function TokensPage() {
+  const router = useRouter();
   const [info, setInfo] = useState<TokenInfo | null>(null);
   const [logs, setLogs] = useState<TokenLogsResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -25,9 +27,13 @@ export default function TokensPage() {
 
   useEffect(() => {
     const mode = localStorage.getItem('auth_mode');
+    if (mode !== 'admin') {
+      router.replace('/dashboard');
+      return;
+    }
     setIsAdmin(mode === 'admin');
     fetchData();
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     if (selectedActorId) {
@@ -126,7 +132,7 @@ export default function TokensPage() {
   if (loading) {
     return (
       <div>
-        <h1 className="text-2xl font-normal text-foreground mb-6">Token管理</h1>
+        <h1 className="text-2xl font-normal text-foreground mb-6">用户 Token 管理</h1>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           {[1, 2, 3].map((i) => (
             <Card key={i}>
@@ -146,7 +152,7 @@ export default function TokensPage() {
   if (error) {
     return (
       <div>
-        <h1 className="text-2xl font-normal text-foreground mb-6">Token管理</h1>
+        <h1 className="text-2xl font-normal text-foreground mb-6">用户 Token 管理</h1>
         <Card>
           <CardContent className="pt-6">
             <div className="text-destructive">
@@ -154,7 +160,7 @@ export default function TokensPage() {
               <p className="text-sm mt-1">{error}</p>
               <Button
                 onClick={fetchData}
-                className="mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary"
+                className="mt-4"
               >
                 重试
               </Button>
@@ -168,10 +174,15 @@ export default function TokensPage() {
   return (
     <div>
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-6">
-        <h1 className="text-2xl font-normal text-foreground">Token管理</h1>
+        <div>
+          <h1 className="text-2xl font-normal text-foreground">用户 Token 管理</h1>
+          <p className="mt-1 text-sm text-muted-foreground">查看用户调用凭证、额度、费用状态和使用记录。</p>
+        </div>
         <Button
           onClick={fetchData}
-          className="text-sm text-muted-foreground hover:text-foreground self-start sm:self-auto"
+          variant="ghost"
+          size="sm"
+          className="self-start sm:self-auto"
         >
           <RefreshCw className="size-4" />刷新
         </Button>
@@ -218,6 +229,9 @@ export default function TokensPage() {
                       限额
                     </th>
                     <th className="px-4 py-3 text-left text-xs font-normal text-muted-foreground uppercase tracking-wider">
+                      费用状态
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-normal text-muted-foreground uppercase tracking-wider">
                       最后使用
                     </th>
                     <th className="px-4 py-3 text-left text-xs font-normal text-muted-foreground uppercase tracking-wider">
@@ -260,18 +274,26 @@ export default function TokensPage() {
                           <div>月: ¥{token.monthlyLimitCny || '无限制'}</div>
                         </td>
                         <td className="px-4 py-4 whitespace-nowrap text-sm text-muted-foreground">
+                          <div>今日实际花费: ¥{token.spending?.dailySettled || '0.000000'}</div>
+                          <div>本月实际花费: ¥{token.spending?.monthlySettled || '0.000000'}</div>
+                          <div>已预占: ¥{token.spending?.reserved || '0.000000'}</div>
+                          <div>待审核: ¥{token.spending?.review || '0.000000'}</div>
+                        </td>
+                        <td className="px-4 py-4 whitespace-nowrap text-sm text-muted-foreground">
                           {token.lastUsedAt
                             ? new Date(token.lastUsedAt).toLocaleString('zh-CN')
                             : '从未使用'}
                         </td>
                         <td className="px-4 py-4 whitespace-nowrap text-sm">
                           <Button
+                            variant="link"
+                            size="sm"
                             onClick={() => {
                               setSelectedActorId(token.actorId);
                               // 滚动到使用记录区域
                               document.getElementById('usage-logs')?.scrollIntoView({ behavior: 'smooth' });
                             }}
-                            className="text-primary hover:text-primary"
+                            className="h-auto p-0"
                           >
                             查看日志
                           </Button>
@@ -374,9 +396,11 @@ export default function TokensPage() {
         <CardHeader>
           <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
             <CardTitle>使用记录</CardTitle>
-            <Button
-              onClick={exportToCSV}
-              className="px-3 py-1.5 text-sm bg-secondary text-primary-foreground rounded-md hover:bg-secondary self-start sm:self-auto"
+                <Button
+                  onClick={exportToCSV}
+                  variant="secondary"
+                  size="sm"
+                  className="self-start sm:self-auto"
             >
               <Download className="size-4" />导出 CSV
             </Button>
@@ -444,8 +468,8 @@ export default function TokensPage() {
                         <td className="py-3 px-4">
                           <span
                             className={`px-2 py-1 rounded text-xs font-normal whitespace-nowrap ${
-                              log.method === 'GET'
-                                ? 'bg-primary text-primary'
+                                  log.method === 'GET'
+                                    ? 'bg-primary text-primary-foreground'
                                 : log.method === 'POST'
                                 ? 'bg-secondary text-foreground'
                                 : log.method === 'PUT' || log.method === 'PATCH'
@@ -488,13 +512,15 @@ export default function TokensPage() {
           {(searchEndpoint || filterMethod || filterStatus) && (
             <div className="mt-4 text-sm text-muted-foreground">
               显示 {filteredLogs.length} / {logs?.logs.length || 0} 条记录
-              <Button
-                onClick={() => {
+                  <Button
+                    variant="link"
+                    size="sm"
+                    onClick={() => {
                   setSearchEndpoint('');
                   setFilterMethod('');
                   setFilterStatus('');
                 }}
-                className="ml-4 text-primary hover:text-primary"
+                    className="ml-2 h-auto p-0"
               >
                 清除过滤
               </Button>

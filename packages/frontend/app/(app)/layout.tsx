@@ -64,7 +64,8 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     '/dashboard': '消费看板',
     '/history': '任务历史',
     '/showcase': '案例广场',
-    '/tokens': 'Token管理',
+    '/users': '用户管理',
+    '/tokens': '用户 Token 管理',
     '/alerts': '预警管理',
     '/reconciliation': '对账管理',
   };

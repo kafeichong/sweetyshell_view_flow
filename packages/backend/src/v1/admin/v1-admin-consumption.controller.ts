@@ -5,6 +5,7 @@ import { ReconciliationService } from './reconciliation.service';
 import { TokenManagementService } from '../tokens/token-management.service';
 import { PrismaService } from '../../prisma.service';
 import { Prisma } from '@prisma/client';
+import { ConsumptionService } from '../consumption/consumption.service';
 
 class SubmitReconciliationDto {
   monthKey: string;
@@ -24,6 +25,7 @@ export class V1AdminConsumptionController {
     private readonly reconciliation: ReconciliationService,
     private readonly tokenManagement: TokenManagementService,
     private readonly prisma: PrismaService,
+    private readonly consumption: ConsumptionService,
   ) {}
 
   // ============ 对账管理 ============
@@ -56,6 +58,19 @@ export class V1AdminConsumptionController {
   }
 
   // ============ 费用汇总 ============
+
+  @Get('consumption/overview')
+  @ApiOperation({ summary: '全局今日与本月费用概览' })
+  async getConsumptionOverview() {
+    return this.consumption.getGlobalOverview();
+  }
+
+  @Get('consumption/trends')
+  @ApiOperation({ summary: '全局费用趋势' })
+  async getConsumptionTrends(@Query('days') days?: string) {
+    const daysCount = days ? Math.min(Math.max(parseInt(days, 10) || 30, 1), 90) : 30;
+    return this.consumption.getGlobalTrends(daysCount);
+  }
 
   @Get('consumption/summary')
   @ApiOperation({ summary: '全局费用汇总' })
@@ -110,7 +125,7 @@ export class V1AdminConsumptionController {
   // ============ Token管理 ============
 
   @Get('tokens')
-  @ApiOperation({ summary: '列出所有Token' })
+  @ApiOperation({ summary: '列出所有用户 Token 及当前费用状态' })
   async listAllTokens() {
     return this.tokenManagement.listAllTokens();
   }

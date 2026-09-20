@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Check, Copy, Film, Settings2 } from 'lucide-react';
+import { Check, Copy, Film, Settings2, ZoomIn } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -10,9 +10,23 @@ import { DataPagination } from '@/components/data-pagination';
 import { PageHeader } from '@/components/page-header';
 import { PageState } from '@/components/page-state';
 import { StatusBadge } from '@/components/status-badge';
+import { ImageLightbox } from '@/components/image-lightbox';
 import { writeClipboardText } from '@/lib/clipboard';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3100/api';
+
+function historyRequestContext() {
+  const token = localStorage.getItem('auth_token') || '';
+  const authMode = localStorage.getItem('auth_mode');
+  const headers: Record<string, string> = authMode === 'admin'
+    ? { 'x-admin-token': token }
+    : { Authorization: `Bearer ${token}` };
+  return {
+    isAdmin: authMode === 'admin',
+    token,
+    headers,
+  };
+}
 
 function Spinner() {
   return <div className="size-8 animate-spin rounded-full border-2 border-muted border-t-foreground" />;
@@ -129,9 +143,11 @@ interface MediaPreviewProps {
   assetId: string;
   mimeType: string;
   role: string;
+  onImageLoaded?: (assetId: string, url: string) => void;
+  onImageClick?: (assetId: string) => void;
 }
 
-function MediaPreview({ assetId, mimeType, role }: MediaPreviewProps) {
+function MediaPreview({ assetId, mimeType, role, onImageLoaded, onImageClick }: MediaPreviewProps) {
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -139,13 +155,14 @@ function MediaPreview({ assetId, mimeType, role }: MediaPreviewProps) {
   useEffect(() => {
     const fetchMedia = async () => {
       try {
-        const token = localStorage.getItem('auth_token');
+        const { isAdmin, headers } = historyRequestContext();
         console.log('Fetching media:', { assetId, mimeType, role });
 
-        const response = await fetch(`${API_BASE_URL}/v1/assets/${assetId}/download`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
+        const mediaPath = isAdmin
+          ? `/v1/admin/history/assets/${assetId}/download`
+          : `/v1/assets/${assetId}/download`;
+        const response = await fetch(`${API_BASE_URL}${mediaPath}`, {
+          headers,
         });
 
         console.log('Media response:', response.status);
@@ -154,6 +171,7 @@ function MediaPreview({ assetId, mimeType, role }: MediaPreviewProps) {
           const data = await response.json();
           console.log('Media URL obtained:', data.downloadUrl ? 'yes' : 'no');
           setMediaUrl(data.downloadUrl);
+          if (mimeType.startsWith('image/')) onImageLoaded?.(assetId, data.downloadUrl);
         } else {
           const errorText = await response.text();
           console.error('Failed to fetch media:', response.status, errorText);
@@ -168,7 +186,7 @@ function MediaPreview({ assetId, mimeType, role }: MediaPreviewProps) {
     };
 
     fetchMedia();
-  }, [assetId, mimeType, role]);
+  }, [assetId, mimeType, role, onImageLoaded]);
 
   if (loading) {
     return (
@@ -187,7 +205,22 @@ function MediaPreview({ assetId, mimeType, role }: MediaPreviewProps) {
   }
 
   if (mimeType.startsWith('image/')) {
-    return <img src={mediaUrl} alt={role} className="w-full rounded-md" />;
+    if (!onImageClick) return <img src={mediaUrl} alt={role} className="w-full rounded-md" />;
+
+    return (
+      <Button
+        type="button"
+        variant="ghost"
+        className="group relative h-auto w-full p-0"
+        aria-label="放大查看输入图片"
+        onClick={() => onImageClick(assetId)}
+      >
+        <img src={mediaUrl} alt={role} className="w-full rounded-md" />
+        <span className="absolute right-2 top-2 flex size-8 items-center justify-center rounded-md border bg-background/90 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+          <ZoomIn className="size-4" />
+        </span>
+      </Button>
+    );
   }
 
   if (mimeType.startsWith('video/')) {
@@ -215,6 +248,25 @@ export default function HistoryPage() {
   const [totalPages, setTotalPages] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [inputImageUrls, setInputImageUrls] = useState<Record<string, string>>({});
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
+
+  const handleInputImageLoaded = useCallback((assetId: string, url: string) => {
+    setInputImageUrls((current) => current[assetId] === url ? current : { ...current, [assetId]: url });
+  }, []);
+
+  const inputImageAssets = selectedTask?.submissionDetails.media
+    .filter((media) => media.mimeType.startsWith('image/') && inputImageUrls[media.assetId]) ?? [];
+  const lightboxImages = inputImageAssets.map((media) => ({
+    id: media.assetId,
+    src: inputImageUrls[media.assetId],
+    alt: media.role,
+  }));
+
+  const openInputImage = (assetId: string) => {
+    const index = inputImageAssets.findIndex((media) => media.assetId === assetId);
+    if (index >= 0) setPreviewIndex(index);
+  };
 
   const copyToClipboard = async (text: string) => {
     try {
@@ -229,19 +281,20 @@ export default function HistoryPage() {
   async function fetchTasks() {
     setLoading(true);
     try {
-      const token = localStorage.getItem('auth_token');
+      const { isAdmin, token, headers } = historyRequestContext();
       if (!token) {
         setError('请先登录');
         setLoading(false);
         return;
       }
 
-      console.log('Fetching tasks from:', `${API_BASE_URL}/v1/tasks?page=${page}&limit=20`);
+      const tasksPath = isAdmin ? '/v1/admin/history/tasks' : '/v1/tasks';
+      console.log('Fetching tasks from:', `${API_BASE_URL}${tasksPath}?page=${page}&limit=20`);
 
-      const response = await fetch(`${API_BASE_URL}/v1/tasks?page=${page}&limit=20`, {
+      const response = await fetch(`${API_BASE_URL}${tasksPath}?page=${page}&limit=20`, {
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${token}`,
+          ...headers,
           'Content-Type': 'application/json',
         },
       });
@@ -274,12 +327,14 @@ export default function HistoryPage() {
 
   async function fetchTaskDetail(taskId: string) {
     setDetailLoading(true);
+    setPreviewIndex(null);
     try {
-      const token = localStorage.getItem('auth_token');
-      const response = await fetch(`${API_BASE_URL}/v1/tasks/${taskId}/detail`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+      const { isAdmin, headers } = historyRequestContext();
+      const detailPath = isAdmin
+        ? `/v1/admin/history/tasks/${taskId}`
+        : `/v1/tasks/${taskId}/detail`;
+      const response = await fetch(`${API_BASE_URL}${detailPath}`, {
+        headers,
       });
 
       if (response.ok) {
@@ -316,14 +371,14 @@ export default function HistoryPage() {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-6">
+    <div className="mx-auto flex min-h-0 w-full max-w-[1600px] flex-1 flex-col gap-6">
       <PageHeader
         title="任务历史"
         description="查看视频生成任务、输出结果和提交参数。"
         actions={<Badge variant="outline">共 {tasks.length} 条</Badge>}
       />
 
-      <div className="grid min-h-0 flex-1 gap-6 lg:grid-cols-[minmax(18rem,0.8fr)_minmax(0,1.2fr)]">
+      <div className="grid min-h-0 flex-1 gap-6 lg:grid-cols-[clamp(17rem,32.5%,22rem)_minmax(0,1fr)]">
         <section className="flex min-h-0 flex-col gap-4" aria-label="任务列表">
           {tasks.length === 0 ? (
             <PageState kind="empty" title="暂无任务记录" description="完成一次视频生成后，任务会显示在这里。" />
@@ -335,7 +390,7 @@ export default function HistoryPage() {
                   role="button"
                   tabIndex={0}
                   data-state={selectedTask?.id === task.id ? 'selected' : undefined}
-                  className="cursor-pointer transition-colors hover:bg-accent data-[state=selected]:border-foreground data-[state=selected]:bg-accent"
+                  className="cursor-pointer transition-colors hover:bg-accent data-[state=selected]:border-foreground/25 data-[state=selected]:bg-accent"
                   onClick={() => fetchTaskDetail(task.id)}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' || event.key === ' ') fetchTaskDetail(task.id);
@@ -428,7 +483,13 @@ export default function HistoryPage() {
                       {selectedTask.submissionDetails.media.map((media, idx) => (
                         <div key={`${media.assetId}-${idx}`} className="space-y-2">
                           <p className="text-xs text-muted-foreground">{media.role} · {media.mimeType}</p>
-                          <MediaPreview assetId={media.assetId} mimeType={media.mimeType} role={media.role} />
+                          <MediaPreview
+                            assetId={media.assetId}
+                            mimeType={media.mimeType}
+                            role={media.role}
+                            onImageLoaded={handleInputImageLoaded}
+                            onImageClick={openInputImage}
+                          />
                         </div>
                       ))}
                     </CardContent>
@@ -455,6 +516,12 @@ export default function HistoryPage() {
           )}
         </section>
       </div>
+      <ImageLightbox
+        images={lightboxImages}
+        index={previewIndex}
+        onIndexChange={setPreviewIndex}
+        onClose={() => setPreviewIndex(null)}
+      />
     </div>
   );
 }

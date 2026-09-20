@@ -9,7 +9,8 @@ import { Separator } from '@/components/ui/separator';
 import api from '@/lib/api';
 import { showcaseRoutes } from '@/lib/api-routes';
 import { writeClipboardText } from '@/lib/clipboard';
-import { ArrowLeft, Check, Copy } from 'lucide-react';
+import { ImageLightbox } from '@/components/image-lightbox';
+import { ArrowLeft, Check, Copy, ZoomIn } from 'lucide-react';
 
 interface TaskDetail {
   id: string;
@@ -31,8 +32,32 @@ interface TaskDetail {
     sizeBytes: number;
     expiresIn: number;
   };
+  inputAssets: Array<{
+    id: string;
+    role: string;
+    mimeType: string;
+    sizeBytes: number | null;
+    metadata: {
+      kind?: string;
+      width?: number;
+      height?: number;
+      durationSeconds?: number;
+    } | null;
+    downloadUrl: string;
+    expiresIn: number;
+  }>;
   createdAt: string;
   completedAt: string | null;
+}
+
+function inputRoleLabel(role: string, mimeType: string) {
+  const labels: Record<string, string> = {
+    reference_image: '参考图片',
+    first_frame: '首帧图片',
+    last_frame: '尾帧图片',
+    reference_video: '参考视频',
+  };
+  return labels[role] || (mimeType.startsWith('image/') ? '输入图片' : '输入视频');
 }
 
 export default function ShowcaseDetailPage() {
@@ -44,6 +69,13 @@ export default function ShowcaseDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [promptCopied, setPromptCopied] = useState(false);
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
+  const imageAssets = task?.inputAssets.filter((asset) => asset.mimeType.startsWith('image/')) ?? [];
+  const lightboxImages = imageAssets.map((asset) => ({
+    id: asset.id,
+    src: asset.downloadUrl,
+    alt: inputRoleLabel(asset.role, asset.mimeType),
+  }));
 
   useEffect(() => {
     fetchTaskDetail();
@@ -55,7 +87,7 @@ export default function ShowcaseDetailPage() {
 
     try {
       const response = await api.get<TaskDetail>(showcaseRoutes.detail(taskId));
-      setTask(response.data);
+      setTask({ ...response.data, inputAssets: response.data.inputAssets ?? [] });
     } catch (err: any) {
       console.error('Failed to fetch task detail:', err);
       setError(err.response?.data?.message || '加载失败');
@@ -164,6 +196,57 @@ export default function ShowcaseDetailPage() {
               </CardContent>
             </Card>
 
+            {task.inputAssets.length > 0 && (
+              <Card className="border-border bg-card">
+                <CardHeader className="border-b bg-muted/50">
+                  <CardTitle className="text-base">参考素材</CardTitle>
+                </CardHeader>
+                <CardContent className="pt-6">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    {task.inputAssets.map((asset) => (
+                      <figure key={`${asset.role}-${asset.id}`} className="overflow-hidden rounded-md border bg-muted/30">
+                        {asset.mimeType.startsWith('image/') ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            className="group relative h-auto w-full rounded-none p-0"
+                            aria-label="放大查看参考图片"
+                            onClick={() => setPreviewIndex(imageAssets.findIndex((image) => image.id === asset.id))}
+                          >
+                            <img
+                              src={asset.downloadUrl}
+                              alt={inputRoleLabel(asset.role, asset.mimeType)}
+                              className="aspect-video w-full bg-background object-contain"
+                            />
+                            <span className="absolute right-2 top-2 flex size-8 items-center justify-center rounded-md border bg-background/90 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+                              <ZoomIn className="size-4" />
+                            </span>
+                          </Button>
+                        ) : (
+                          <video
+                            src={asset.downloadUrl}
+                            controls
+                            preload="metadata"
+                            playsInline
+                            className="aspect-video w-full bg-foreground object-contain"
+                          />
+                        )}
+                        <figcaption className="space-y-1 border-t p-3 text-xs">
+                          <div>{inputRoleLabel(asset.role, asset.mimeType)}</div>
+                          <div className="text-muted-foreground">
+                            {asset.metadata?.width && asset.metadata?.height
+                              ? `${asset.metadata.width} × ${asset.metadata.height}`
+                              : asset.mimeType}
+                            {asset.metadata?.durationSeconds ? ` · ${asset.metadata.durationSeconds} 秒` : ''}
+                          </div>
+                        </figcaption>
+                      </figure>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             <Card className="border-border bg-card">
               <CardHeader className="border-b bg-muted/50">
                 <CardTitle className="text-base">生成参数</CardTitle>
@@ -223,6 +306,13 @@ export default function ShowcaseDetailPage() {
           </div>
         </div>
       </div>
+
+      <ImageLightbox
+        images={lightboxImages}
+        index={previewIndex}
+        onIndexChange={setPreviewIndex}
+        onClose={() => setPreviewIndex(null)}
+      />
     </div>
   );
 }

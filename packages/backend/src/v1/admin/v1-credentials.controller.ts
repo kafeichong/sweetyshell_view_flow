@@ -1,7 +1,22 @@
-import { Body, Controller, Param, Patch, Post, UseGuards, BadRequestException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  ConflictException,
+  Controller,
+  Delete,
+  NotFoundException,
+  Param,
+  Patch,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { AdminTokenGuard } from '../../auth/admin-token.guard';
-import { CredentialsService } from '../../auth/credentials.service';
+import {
+  CredentialHasDataError,
+  CredentialNotFoundError,
+  CredentialsService,
+} from '../../auth/credentials.service';
 import { PrismaService } from '../../prisma.service';
 import { Prisma } from '@prisma/client';
 import { CreateCredentialDto } from './dto/create-credential.dto';
@@ -28,6 +43,44 @@ export class V1CredentialsController {
   @Patch(':actorId/revoke')
   revoke(@Param('actorId') actorId: string) {
     return this.credentials.revoke(actorId);
+  }
+
+  @Patch(':actorId/activate')
+  activate(@Param('actorId') actorId: string) {
+    return this.credentials.activate(actorId);
+  }
+
+  @Post(':actorId/rotate-token')
+  rotateToken(
+    @Param('actorId') actorId: string,
+    @Body() body: { confirmActorId?: string },
+  ) {
+    if (body?.confirmActorId !== actorId) {
+      throw new BadRequestException('confirmActorId must exactly match actorId');
+    }
+    return this.credentials.rotateToken(actorId);
+  }
+
+  @Delete(':actorId')
+  async deleteUnused(
+    @Param('actorId') actorId: string,
+    @Body() body: { confirmActorId?: string },
+  ) {
+    if (body?.confirmActorId !== actorId) {
+      throw new BadRequestException('confirmActorId must exactly match actorId');
+    }
+
+    try {
+      return await this.credentials.deleteUnused(actorId);
+    } catch (error) {
+      if (error instanceof CredentialNotFoundError) {
+        throw new NotFoundException('Credential not found');
+      }
+      if (error instanceof CredentialHasDataError) {
+        throw new ConflictException('User has historical data and can only be disabled');
+      }
+      throw error;
+    }
   }
 
   @Patch(':actorId/limits')

@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -8,11 +9,11 @@ import {
   ChevronsUpDown,
   CircleDollarSign,
   Clapperboard,
-  GalleryVerticalEnd,
   History,
   LayoutDashboard,
   LogOut,
   ShieldCheck,
+  Users,
 } from 'lucide-react';
 import {
   Sidebar,
@@ -58,12 +59,13 @@ export function AppSidebar({
   ...props
 }: AppSidebarProps) {
   const pathname = usePathname();
-  const managementItems = [
-    { href: '/tokens', label: 'Token 管理', icon: ShieldCheck },
-    ...(authMode === 'user'
-      ? [{ href: '/alerts', label: '预警管理', icon: BellRing }]
-      : [{ href: '/reconciliation', label: '对账管理', icon: CircleDollarSign }]),
-  ];
+  const managementItems = authMode === 'user'
+    ? [{ href: '/alerts', label: '预警管理', icon: BellRing }]
+    : [
+        { href: '/users', label: '用户管理', icon: Users },
+        { href: '/tokens', label: '用户 Token', icon: ShieldCheck },
+        { href: '/reconciliation', label: '对账管理', icon: CircleDollarSign },
+      ];
   const groups = [...navigation, { label: '管理', items: managementItems }];
 
   return (
@@ -73,12 +75,11 @@ export function AppSidebar({
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild>
               <Link href="/dashboard">
-                <div className="flex aspect-square size-8 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground">
-                  <GalleryVerticalEnd className="size-4" />
+                <div className="flex aspect-square size-8 items-center justify-center rounded-md border bg-background">
+                  <Image src="/favicon.svg" alt="糖果壳" width={24} height={18} className="h-auto w-6" priority />
                 </div>
                 <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-normal">Video Flow</span>
-                  <span className="truncate text-xs">Console</span>
+                  <span className="truncate font-normal">糖果壳®SweetyShell®</span>
                 </div>
               </Link>
             </SidebarMenuButton>

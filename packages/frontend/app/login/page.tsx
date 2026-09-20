@@ -78,7 +78,7 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
-          <CardTitle>{process.env.NEXT_PUBLIC_APP_NAME || 'Video Flow Console'}</CardTitle>
+          <CardTitle>{process.env.NEXT_PUBLIC_APP_NAME || '糖果壳®SweetyShell®'}</CardTitle>
           <CardDescription>消费管理与数据分析平台</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">

@@ -17,6 +17,7 @@
 | 系统边界和技术约束是什么？ | [architecture/seedance-integration-baseline.md](./architecture/seedance-integration-baseline.md) |
 | Production 如何防重复、恢复和顺序生成下一版？ | [ADR-0001：Production 执行槽](./architecture/adr/0001-production-execution-slot.md) |
 | 怎么部署、怎么回滚？ | [runbooks/deploy-and-rollback.md](./runbooks/deploy-and-rollback.md) |
+| 消费看板金额如何统计、接口如何验证？ | [runbooks/consumption-dashboard.md](./runbooks/consumption-dashboard.md) |
 | 创意同事怎么用？ | [runbooks/creative-user-guide.md](./runbooks/creative-user-guide.md) |
 | 历史上都分析过什么？ | [archive/README.md](./archive/README.md) |
 
@@ -81,6 +82,8 @@
 | [runbooks/preview-acceptance.md](./runbooks/preview-acceptance.md) | Preview 零付费验收清单与 2026-09-11 实测记录 |
 | [runbooks/creative-user-guide.md](./runbooks/creative-user-guide.md) | **交给创意同事的那本**：安装步骤、四条已开放模板与素材要求、提示词写法（官方公式 + 示例）、槽位留空约定、凭证安全、查询/取片、报障要提供什么 |
 | [runbooks/local-manual-test.md](./runbooks/local-manual-test.md) | ComfyUI 本地隔离验收：一键启动测试 Backend/PostgreSQL/Worker/Fake Provider/Fake OSS，执行真实 Queue、落盘和播放；不构成 Ark 正式验收证据 |
+| [runbooks/showcase-public-media.md](./runbooks/showcase-public-media.md) | 案例详情公开输入图片/视频的接口字段、公开边界和本地验收方式 |
+| [runbooks/user-token-management.md](./runbooks/user-token-management.md) | 管理员用户 Token 列表、费用字段口径、权限边界和验收方式 |
 | [runbooks/creative-one-click-script.md](./runbooks/creative-one-click-script.md) | 旧一键脚本的停用状态与恢复条件；当前不得用于创建新任务 |
 | [runbooks/domain-and-https.md](./runbooks/domain-and-https.md) | `ai.sweetyshell.com` 域名、Nginx 与证书配置 |
 

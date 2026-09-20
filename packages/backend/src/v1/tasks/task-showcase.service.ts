@@ -164,6 +164,40 @@ export class TaskShowcaseService {
 
     const plan = task.executionPlan as any;
     const outputAsset = task.assets[0];
+    const inputMedia = Array.isArray(plan?.media)
+      ? plan.media.filter((item: any) => (
+        typeof item?.assetId === 'string'
+        && typeof item?.mimeType === 'string'
+        && (item.mimeType.startsWith('image/') || item.mimeType.startsWith('video/'))
+      ))
+      : [];
+    const inputAssetIds = inputMedia.map((item: any) => item.assetId);
+    const inputAssetRows = inputAssetIds.length > 0
+      ? await this.prisma.asset.findMany({
+        // Public showcase policy: publish only frozen image/video inputs referenced by this task.
+        where: { id: { in: inputAssetIds }, role: 'input' },
+        select: {
+          id: true,
+          objectKey: true,
+          mimeType: true,
+          sizeBytes: true,
+          mediaMetadata: true,
+        },
+      })
+      : [];
+    const inputAssetMap = new Map(inputAssetRows.map((asset) => [asset.id, asset]));
+    const inputAssets = inputMedia.flatMap((descriptor: any) => {
+      const asset = inputAssetMap.get(descriptor.assetId);
+      if (!asset) return [];
+      return [{
+        id: asset.id,
+        role: descriptor.role,
+        mimeType: asset.mimeType || descriptor.mimeType,
+        sizeBytes: asset.sizeBytes === null ? null : Number(asset.sizeBytes),
+        metadata: asset.mediaMetadata || descriptor.metadata || null,
+        ...this.presign.createDownloadUrl(asset.objectKey),
+      }];
+    });
 
     return {
       id: task.id,
@@ -185,6 +219,7 @@ export class TaskShowcaseService {
         sizeBytes: outputAsset.sizeBytes === null ? null : Number(outputAsset.sizeBytes),
         ...this.presign.createDownloadUrl(outputAsset.objectKey),
       } : null,
+      inputAssets,
       createdAt: task.createdAt,
       completedAt: task.completedAt,
     };

@@ -10,9 +10,9 @@ interface TrendChartProps {
 export default function TrendChart({ data }: TrendChartProps) {
   // 转换数据格式供Recharts使用
   const chartData = data.map((item) => ({
-    date: item.dayKey.slice(5), // "2026-09-17" -> "09-17"
-    fullDate: item.dayKey,
-    amount: parseFloat(item.totalCny),
+    date: item.date.slice(5), // "2026-09-17" -> "09-17"
+    fullDate: item.date,
+    amount: parseFloat(item.amount),
     tasks: item.taskCount,
   }));
 
