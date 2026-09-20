@@ -78,6 +78,22 @@ interface TaskDetail {
   completedAt: string | null;
 }
 
+interface TokenInfo {
+  dailyLimit: number;
+  dailyUsed: number;
+  monthlyLimit: number;
+  monthlyUsed: number;
+}
+
+interface TokenLogsResponse {
+  logs: Array<{
+    id: string;
+    timestamp: string;
+    amount: number;
+    description: string;
+  }>;
+}
+
 interface MediaPreviewProps {
   assetId: string;
   mimeType: string;
@@ -126,7 +142,7 @@ function MediaPreview({ assetId, mimeType, role }: MediaPreviewProps) {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-32 bg-gray-50 rounded-lg">
-        <Spinner size="md" />
+        <Spinner />
       </div>
     );
   }
@@ -269,7 +285,7 @@ export default function HistoryPageAppica() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen">
-        <Spinner size="lg" />
+        <Spinner />
       </div>
     );
   }
@@ -395,7 +411,7 @@ export default function HistoryPageAppica() {
           {detailLoading ? (
             <Card frame="solid">
               <div className="flex items-center justify-center h-64">
-                <Spinner size="lg" />
+                <Spinner />
               </div>
             </Card>
           ) : selectedTask ? (

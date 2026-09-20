@@ -20,7 +20,7 @@ describe('ApiCredentialGuard', () => {
   });
 
   it('rejects requests without a bearer token', async () => {
-    const guard = new ApiCredentialGuard(credentials as never);
+    const guard = new ApiCredentialGuard(credentials as never, {} as never);
     await expect(guard.canActivate(context)).rejects.toMatchObject({ status: 401 });
   });
 
@@ -28,7 +28,7 @@ describe('ApiCredentialGuard', () => {
     credentials.authenticate.mockResolvedValue(null);
     request.headers = { authorization: 'Bearer invalid' };
 
-    const guard = new ApiCredentialGuard(credentials as never);
+    const guard = new ApiCredentialGuard(credentials as never, {} as never);
     await expect(guard.canActivate(context)).rejects.toMatchObject({ status: 403 });
   });
 
@@ -37,7 +37,7 @@ describe('ApiCredentialGuard', () => {
     credentials.authenticate.mockResolvedValue(actor);
     request.headers = { authorization: 'Bearer token' };
 
-    const guard = new ApiCredentialGuard(credentials as never);
+    const guard = new ApiCredentialGuard(credentials as never, {} as never);
     await expect(guard.canActivate(context)).resolves.toBe(true);
     expect(request.actor).toEqual(actor);
   });

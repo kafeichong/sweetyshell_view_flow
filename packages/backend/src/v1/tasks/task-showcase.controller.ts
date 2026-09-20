@@ -1,4 +1,4 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Query, SetMetadata } from '@nestjs/common';
 import { TaskShowcaseService } from './task-showcase.service';
 
 @Controller('v1/showcase')
@@ -6,6 +6,7 @@ export class TaskShowcaseController {
   constructor(private readonly showcaseService: TaskShowcaseService) {}
 
   @Get('tasks')
+  @SetMetadata('isPublic', true)
   async getShowcaseTasks(
     @Query('page') page = '1',
     @Query('limit') limit = '20',

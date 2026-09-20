@@ -26,7 +26,13 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col">
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider
+          defaultTheme="light"
+          enableSystem={false}
+          forcedTheme="light"
+        >
+          {children}
+        </ThemeProvider>
       </body>
     </html>
   );
