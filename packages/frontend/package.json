@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@appica/ui-react": "^1.1.0",
     "@hookform/resolvers": "^5.9.1",
     "@tanstack/react-table": "^9.2.4",
     "axios": "^1.20.0",

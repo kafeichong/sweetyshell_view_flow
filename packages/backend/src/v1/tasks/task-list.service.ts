@@ -48,16 +48,14 @@ export interface TaskSummary {
 }
 
 export interface TaskDetail {
-  task: {
-    id: string;
-    actorId: string | null;
-    status: string;
-    deliveryStatus: string | null;
-    createdAt: Date;
-    updatedAt: Date;
-    completedAt: Date | null;
-    errorMsg: string | null;
-  };
+  id: string;
+  actorId: string | null;
+  status: string;
+  deliveryStatus: string | null;
+  errorMessage: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  completedAt: Date | null;
   submissionDetails: {
     workflow: {
       key: string | null;
@@ -116,8 +114,9 @@ export interface TaskDetail {
     finishedAt: Date | null;
   }>;
   assets: Array<{
-    assetId: string;
+    id: string;
     role: string;
+    mediaType: string;
     objectKey: string;
     mimeType: string | null;
     sizeBytes: number | null;
@@ -255,16 +254,14 @@ export class TaskListService {
     const plan = task.executionPlan as any;
 
     return {
-      task: {
-        id: task.id,
-        actorId: task.actorId,
-        status: task.status,
-        deliveryStatus: task.deliveryStatus,
-        createdAt: task.createdAt,
-        updatedAt: task.updatedAt,
-        completedAt: task.completedAt,
-        errorMsg: task.errorMsg,
-      },
+      id: task.id,
+      actorId: task.actorId,
+      status: task.status,
+      deliveryStatus: task.deliveryStatus,
+      errorMessage: task.errorMsg,
+      createdAt: task.createdAt,
+      updatedAt: task.updatedAt,
+      completedAt: task.completedAt,
       submissionDetails: {
         workflow: {
           key: plan?.workflowKey || null,
@@ -323,8 +320,9 @@ export class TaskListService {
         finishedAt: attempt.finishedAt,
       })),
       assets: task.assets.map((asset: any) => ({
-        assetId: asset.id,
+        id: asset.id,
         role: asset.role,
+        mediaType: asset.mediaType,
         objectKey: asset.objectKey,
         mimeType: asset.mimeType,
         sizeBytes: typeof asset.sizeBytes === 'bigint' ? Number(asset.sizeBytes) : asset.sizeBytes,

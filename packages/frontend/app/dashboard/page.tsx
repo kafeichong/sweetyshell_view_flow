@@ -259,7 +259,7 @@ export default function DashboardPage() {
           </div>
         </CardHeader>
         <CardContent>
-          {trends && trends.trends.length > 0 ? (
+          {trends && trends.trends.length > 0 && trends.summary ? (
             <div>
               <TrendChart data={trends.trends} />
               <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">

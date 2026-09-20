@@ -1,26 +1,29 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import api from '@/lib/api';
+import { Card, CardHeader, CardTitle, CardDescription, CardFooter } from '@appica/ui-react/card';
+import { Badge } from '@appica/ui-react/badge';
+import { Button } from '@appica/ui-react/button';
+import { Spinner } from '@appica/ui-react/spinner';
 
-interface TaskItem {
+// Types
+interface Task {
   id: string;
   workflowKey: string | null;
   workflowName: string | null;
   status: string;
   deliveryStatus: string | null;
   parameters: {
-    duration?: number;
-    resolution?: string;
-    ratio?: string;
-    model?: string;
+    duration: number;
+    resolution: string;
+    ratio: string;
+    model: string;
   };
   promptPreview: string;
   cost: {
-    reserved: string | null;
+    reserved: string;
     settled: string | null;
-    status: string | null;
+    status: string;
   };
   createdAt: string;
   completedAt: string | null;
@@ -29,326 +32,551 @@ interface TaskItem {
 }
 
 interface TaskDetail {
-  task: {
-    id: string;
-    status: string;
-    deliveryStatus: string | null;
-    createdAt: string;
-    completedAt: string | null;
-    errorMsg: string | null;
-  };
+  id: string;
+  status: string;
+  deliveryStatus: string | null;
+  errorMessage: string | null;
   submissionDetails: {
     workflow: {
-      key: string | null;
-      name: string | null;
-    };
-    generation: {
-      model?: string;
-      duration?: number;
-      resolution?: string;
-      ratio?: string;
+      key: string;
+      name: string;
+      version: string;
     };
     prompt: {
       text: string;
     };
+    generation: {
+      model: string;
+      duration: number;
+      resolution: string;
+      ratio: string;
+      outputFormat: string;
+      generateAudio: boolean;
+      watermark: boolean;
+    };
     media: Array<{
       role: string;
       assetId: string;
-      mimeType?: string;
+      mimeType: string;
+      sizeBytes: number;
+      metadata?: {
+        kind: string;
+        width?: number;
+        height?: number;
+        duration?: number;
+      };
     }>;
   };
   assets: Array<{
-    assetId: string;
+    id: string;
     role: string;
-    objectKey: string;
-    mimeType: string | null;
+    mediaType: string;
+    mimeType: string;
+    sizeBytes: number;
   }>;
+  createdAt: string;
+  completedAt: string | null;
 }
 
-export default function HistoryPage() {
-  const router = useRouter();
-  const [tasks, setTasks] = useState<TaskItem[]>([]);
+interface MediaPreviewProps {
+  assetId: string;
+  mimeType: string;
+  role: string;
+}
+
+function MediaPreview({ assetId, mimeType, role }: MediaPreviewProps) {
+  const [mediaUrl, setMediaUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchMedia = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        console.log('Fetching media:', { assetId, mimeType, role });
+
+        const response = await fetch(`http://localhost:3001/api/v1/assets/${assetId}/download`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        console.log('Media response:', response.status);
+
+        if (response.ok) {
+          const data = await response.json();
+          console.log('Media URL obtained:', data.downloadUrl ? 'yes' : 'no');
+          setMediaUrl(data.downloadUrl);
+        } else {
+          const errorText = await response.text();
+          console.error('Failed to fetch media:', response.status, errorText);
+          setError(`加载失败: ${response.status}`);
+        }
+      } catch (error) {
+        console.error('Failed to fetch media:', error);
+        setError(`网络错误: ${error}`);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchMedia();
+  }, [assetId]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-32 bg-gray-50 rounded-lg">
+        <Spinner size="md" />
+      </div>
+    );
+  }
+
+  if (error || !mediaUrl) {
+    return (
+      <div className="flex items-center justify-center h-32 bg-gray-50 rounded-lg text-gray-400">
+        {error || '无法加载'}
+      </div>
+    );
+  }
+
+  if (mimeType.startsWith('image/')) {
+    return <img src={mediaUrl} alt={role} className="w-full rounded-lg" />;
+  }
+
+  if (mimeType.startsWith('video/')) {
+    return <video src={mediaUrl} controls className="w-full rounded-lg" />;
+  }
+
+  if (mimeType.startsWith('audio/')) {
+    return <audio src={mediaUrl} controls className="w-full" />;
+  }
+
+  return (
+    <div className="flex items-center justify-center h-32 bg-gray-50 rounded-lg text-gray-400">
+      {mimeType}
+    </div>
+  );
+}
+
+function getStatusBadge(status: string) {
+  const variants = {
+    completed: { variant: 'success' as const, label: '已完成' },
+    failed: { variant: 'error' as const, label: '失败' },
+    preview: { variant: 'info' as const, label: '预览' },
+    pending: { variant: 'warning' as const, label: '进行中' },
+  };
+
+  const config = variants[status as keyof typeof variants] || { variant: 'soft' as const, label: status };
+  return <Badge variant={config.variant}>{config.label}</Badge>;
+}
+
+export default function HistoryPageAppica() {
+  const [info, setInfo] = useState<TokenInfo | null>(null);
+  const [logs, setLogs] = useState<TokenLogsResponse | null>(null);
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedTask, setSelectedTask] = useState<TaskDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
-  const [mediaUrls, setMediaUrls] = useState<Record<string, string>>({});
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  };
 
   useEffect(() => {
-    const mode = localStorage.getItem('auth_mode');
-    if (mode === 'admin') {
-      alert('管理员账号无法查看任务历史');
-      router.push('/dashboard');
-      return;
-    }
-
     fetchTasks();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page]);
 
   const fetchTasks = async () => {
+    setLoading(true);
     try {
-      setLoading(true);
-      const res = await api.get('/v1/tasks', {
-        params: { page, limit: 20 },
+      const token = localStorage.getItem('token');
+      console.log('Token from localStorage:', token);
+
+      if (!token) {
+        setError('请先登录');
+        setLoading(false);
+        return;
+      }
+
+      console.log('Fetching tasks from:', `http://localhost:3001/api/v1/tasks?page=${page}&limit=20`);
+
+      const response = await fetch(`http://localhost:3001/api/v1/tasks?page=${page}&limit=20`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
       });
-      setTasks(res.data.tasks);
-      setTotalPages(res.data.pagination.totalPages);
+
+      console.log('Response status:', response.status, response.statusText);
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log('Tasks loaded:', data.tasks.length, 'Total pages:', data.pagination.totalPages);
+        setTasks(data.tasks);
+        setTotalPages(data.pagination.totalPages);
+        setError(null);
+
+        // Auto-select first task
+        if (data.tasks.length > 0 && !selectedTask) {
+          fetchTaskDetail(data.tasks[0].id);
+        }
+      } else {
+        const errorText = await response.text();
+        console.error('API Error:', response.status, errorText);
+        setError(`加载失败: ${response.status} - ${errorText}`);
+      }
     } catch (error) {
-      console.error('Failed to fetch tasks:', error);
-      alert('获取任务列表失败');
+      console.error('Fetch error:', error);
+      setError(`网络错误: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setLoading(false);
     }
   };
 
   const fetchTaskDetail = async (taskId: string) => {
+    setDetailLoading(true);
     try {
-      setDetailLoading(true);
-      setSelectedTask(null);
-      setMediaUrls({});
+      const token = localStorage.getItem('token');
+      const response = await fetch(`http://localhost:3001/api/v1/tasks/${taskId}/detail`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
 
-      const res = await api.get(`/v1/tasks/${taskId}/detail`);
-      const detail: TaskDetail = res.data;
-      setSelectedTask(detail);
-
-      // 获取所有媒体资源的下载链接
-      const urls: Record<string, string> = {};
-
-      // 获取输入媒体
-      for (const media of detail.submissionDetails.media) {
-        try {
-          const mediaRes = await api.get(`/v1/assets/${media.assetId}/download`);
-          urls[media.assetId] = mediaRes.data.downloadUrl;
-        } catch (err) {
-          console.error(`Failed to get download URL for ${media.assetId}:`, err);
-        }
+      if (response.ok) {
+        const data = await response.json();
+        setSelectedTask(data);
       }
-
-      // 获取输出媒体
-      if (detail.task.deliveryStatus === 'ready') {
-        try {
-          const outputRes = await api.get(`/v1/assets/tasks/${taskId}/result`);
-          urls[outputRes.data.assetId] = outputRes.data.downloadUrl;
-        } catch (err) {
-          console.error(`Failed to get output URL for task ${taskId}:`, err);
-        }
-      }
-
-      setMediaUrls(urls);
     } catch (error) {
       console.error('Failed to fetch task detail:', error);
-      alert('获取任务详情失败');
     } finally {
       setDetailLoading(false);
     }
   };
 
-  const getStatusBadge = (status: string) => {
-    const statusMap: Record<string, { label: string; color: string }> = {
-      pending: { label: '等待中', color: 'bg-gray-100 text-gray-700' },
-      processing: { label: '生成中', color: 'bg-blue-100 text-blue-700' },
-      completed: { label: '已完成', color: 'bg-green-100 text-green-700' },
-      failed: { label: '失败', color: 'bg-red-100 text-red-700' },
-    };
-    const info = statusMap[status] || { label: status, color: 'bg-gray-100 text-gray-700' };
+  if (loading) {
     return (
-      <span className={`px-2 py-1 rounded text-xs font-medium ${info.color}`}>
-        {info.label}
-      </span>
+      <div className="flex items-center justify-center h-screen">
+        <Spinner size="lg" />
+      </div>
     );
-  };
+  }
 
-  const renderMediaPreview = (assetId: string, mimeType?: string, role?: string) => {
-    const url = mediaUrls[assetId];
-    if (!url) {
-      return <div className="w-full h-48 bg-gray-100 rounded flex items-center justify-center">加载中...</div>;
-    }
-
-    const isVideo = mimeType?.startsWith('video/');
-    const isImage = mimeType?.startsWith('image/');
-
-    if (isVideo) {
-      return (
-        <video
-          src={url}
-          controls
-          className="w-full rounded"
-          style={{ maxHeight: '400px' }}
-        />
-      );
-    } else if (isImage) {
-      return (
-        <img
-          src={url}
-          alt={role || 'Media'}
-          className="w-full rounded"
-          style={{ maxHeight: '400px', objectFit: 'contain' }}
-        />
-      );
-    } else {
-      return <div className="text-sm text-gray-500">不支持的媒体类型: {mimeType}</div>;
-    }
-  };
+  if (error) {
+    return (
+      <div className="container mx-auto p-6">
+        <Card frame="solid">
+          <CardHeader>
+            <CardTitle>❌ 错误</CardTitle>
+          </CardHeader>
+          <div className="px-6 pb-6">
+            <p className="text-red-600 mb-4">{error}</p>
+            <Button onClick={() => window.location.href = '/login'}>前往登录</Button>
+          </div>
+        </Card>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4 md:p-8">
-      <div className="max-w-7xl mx-auto">
-        <h1 className="text-3xl font-bold mb-8 text-gray-800">任务历史</h1>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* 左侧：任务列表 */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-xl font-semibold mb-4">任务列表</h2>
-
-            {loading ? (
-              <div className="text-center py-8">加载中...</div>
-            ) : tasks.length === 0 ? (
-              <div className="text-center py-8 text-gray-500">暂无任务</div>
-            ) : (
-              <div className="space-y-3">
-                {tasks.map((task) => (
-                  <div
-                    key={task.id}
-                    onClick={() => fetchTaskDetail(task.id)}
-                    className={`p-4 border rounded-lg cursor-pointer hover:bg-gray-50 transition ${
-                      selectedTask?.task.id === task.id ? 'border-blue-500 bg-blue-50' : 'border-gray-200'
-                    }`}
-                  >
-                    <div className="flex justify-between items-start mb-2">
-                      <div className="flex-1">
-                        <div className="font-medium text-gray-800">{task.workflowName || '未知工作流'}</div>
-                        <div className="text-xs text-gray-500 mt-1">
-                          {new Date(task.createdAt).toLocaleString('zh-CN')}
-                        </div>
-                      </div>
-                      {getStatusBadge(task.status)}
-                    </div>
-                    <div className="text-sm text-gray-600 line-clamp-2">{task.promptPreview}</div>
-                    {task.cost.settled && (
-                      <div className="text-xs text-gray-500 mt-2">成本: ¥{task.cost.settled}</div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* 分页 */}
-            {totalPages > 1 && (
-              <div className="flex justify-center gap-2 mt-6">
-                <button
-                  onClick={() => setPage(Math.max(1, page - 1))}
-                  disabled={page === 1}
-                  className="px-4 py-2 border rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-                >
-                  上一页
-                </button>
-                <span className="px-4 py-2">
-                  {page} / {totalPages}
-                </span>
-                <button
-                  onClick={() => setPage(Math.min(totalPages, page + 1))}
-                  disabled={page === totalPages}
-                  className="px-4 py-2 border rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-                >
-                  下一页
-                </button>
-              </div>
-            )}
+    <div className="w-full h-screen flex flex-col bg-gradient-to-br from-gray-50 to-gray-100">
+      <div className="container mx-auto px-6 py-6 flex flex-col h-full">
+        <div className="mb-6">
+          <div className="flex items-baseline justify-between">
+            <div>
+              <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+                任务历史
+              </h1>
+              <p className="text-sm text-gray-500 mt-1">查看您的视频生成历史记录</p>
+            </div>
+            <div className="text-sm text-gray-400">
+              共 {totalPages} 页 · {tasks.length > 0 ? `${tasks.length} 条记录` : '暂无记录'}
+            </div>
           </div>
+        </div>
 
-          {/* 右侧：任务详情 */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-xl font-semibold mb-4">任务详情</h2>
-
-            {!selectedTask ? (
-              <div className="text-center py-16 text-gray-500">
-                ← 点击左侧任务查看详情
-              </div>
-            ) : detailLoading ? (
-              <div className="text-center py-16">加载中...</div>
-            ) : (
-              <div className="space-y-6">
-                {/* 工作流信息 */}
-                <div>
-                  <h3 className="font-semibold text-gray-700 mb-2">🔧 工作流</h3>
-                  <div className="text-sm space-y-1">
-                    <div><span className="text-gray-600">名称:</span> {selectedTask.submissionDetails.workflow.name}</div>
-                    <div><span className="text-gray-600">Key:</span> <code className="text-xs bg-gray-100 px-1 py-0.5 rounded">{selectedTask.submissionDetails.workflow.key}</code></div>
-                  </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 flex-1 overflow-hidden min-h-0">
+        {/* Left: Task List */}
+        <div className="flex flex-col overflow-y-auto pr-2 -mr-2">
+          {tasks.length === 0 ? (
+            <div className="pl-1 pr-2 pt-1">
+              <Card frame="solid">
+                <div className="flex items-center justify-center h-32 text-gray-400">
+                  暂无任务记录
                 </div>
-
-                {/* 提示词 */}
-                <div>
-                  <h3 className="font-semibold text-gray-700 mb-2">📝 提示词</h3>
-                  <div className="text-sm bg-gray-50 p-3 rounded whitespace-pre-wrap">
-                    {selectedTask.submissionDetails.prompt.text}
-                  </div>
-                </div>
-
-                {/* 生成参数 */}
-                <div>
-                  <h3 className="font-semibold text-gray-700 mb-2">⚙️ 生成参数</h3>
-                  <div className="text-sm space-y-1">
-                    {selectedTask.submissionDetails.generation.duration && (
-                      <div><span className="text-gray-600">时长:</span> {selectedTask.submissionDetails.generation.duration}秒</div>
-                    )}
-                    {selectedTask.submissionDetails.generation.resolution && (
-                      <div><span className="text-gray-600">分辨率:</span> {selectedTask.submissionDetails.generation.resolution}</div>
-                    )}
-                    {selectedTask.submissionDetails.generation.ratio && (
-                      <div><span className="text-gray-600">比例:</span> {selectedTask.submissionDetails.generation.ratio}</div>
-                    )}
-                    {selectedTask.submissionDetails.generation.model && (
-                      <div><span className="text-gray-600">模型:</span> {selectedTask.submissionDetails.generation.model}</div>
-                    )}
-                  </div>
-                </div>
-
-                {/* 输入媒体 */}
-                {selectedTask.submissionDetails.media.length > 0 && (
-                  <div>
-                    <h3 className="font-semibold text-gray-700 mb-2">🖼️ 输入媒体</h3>
-                    <div className="space-y-4">
-                      {selectedTask.submissionDetails.media.map((media, index) => (
-                        <div key={media.assetId}>
-                          <div className="text-xs text-gray-500 mb-1">
-                            {media.role} ({media.mimeType})
-                          </div>
-                          {renderMediaPreview(media.assetId, media.mimeType, media.role)}
-                        </div>
-                      ))}
+              </Card>
+            </div>
+          ) : (
+            <div className="space-y-2 pl-1 pr-2 pt-1 pb-4">{tasks.map((task) => (
+              <Card
+                key={task.id}
+                frame="glass"
+                className={`cursor-pointer transition-all duration-200 hover:shadow-md bg-white ml-1 mr-1 ${
+                  selectedTask?.id === task.id
+                    ? 'ring-2 ring-blue-500 shadow-md'
+                    : 'hover:ring-1 hover:ring-blue-200'
+                }`}
+                contentProps={{
+                  onClick: () => fetchTaskDetail(task.id),
+                }}
+              >
+                <div className="px-4 py-3">
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <div className="flex-1 min-w-0">
+                      <h3 className="text-sm font-semibold text-gray-800 truncate">
+                        {task.workflowName || '未知工作流'}
+                      </h3>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {new Date(task.createdAt).toLocaleString('zh-CN', {
+                          month: '2-digit',
+                          day: '2-digit',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </p>
                     </div>
+                    {getStatusBadge(task.status)}
                   </div>
-                )}
+                  <p className="text-xs text-gray-600 line-clamp-2 leading-relaxed mb-2">
+                    {task.promptPreview}
+                  </p>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-gray-400">💰 ¥{task.cost.reserved}</span>
+                    {task.hasOutput && (
+                      <span className="text-green-600 text-xs">✓ 已生成</span>
+                    )}
+                  </div>
+                </div>
+              </Card>
+            ))}
+            </div>
+          )}
 
-                {/* 输出视频 */}
-                {selectedTask.task.deliveryStatus === 'ready' && (
-                  <div>
-                    <h3 className="font-semibold text-gray-700 mb-2">🎬 生成结果</h3>
+          {/* Pagination */}
+          <div className="flex justify-center gap-2 pb-4 pl-1 pr-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page === 1}
+              onClick={() => setPage(page - 1)}
+              className="transition-all hover:scale-105"
+            >
+              ← 上一页
+            </Button>
+            <span className="px-4 py-2 text-sm font-medium bg-white rounded-lg shadow-sm">
+              第 {page} / {totalPages} 页
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page === totalPages}
+              onClick={() => setPage(page + 1)}
+              className="transition-all hover:scale-105"
+            >
+              下一页 →
+            </Button>
+          </div>
+        </div>
+
+        {/* Right: Task Detail */}
+        <div className="flex flex-col overflow-y-auto pr-2 -mr-2 pl-1">
+          {detailLoading ? (
+            <Card frame="solid">
+              <div className="flex items-center justify-center h-64">
+                <Spinner size="lg" />
+              </div>
+            </Card>
+          ) : selectedTask ? (
+            <div className="space-y-4 pb-6">
+              {/* 主体：生成结果视频 */}
+              {selectedTask.status === 'completed' && selectedTask.assets.length > 0 && (
+                <Card frame="solid" className="border-2 border-blue-200 bg-gradient-to-br from-blue-50 to-white shadow-lg">
+                  <CardHeader>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <span className="text-2xl">🎬</span>
+                      <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+                        生成结果
+                      </span>
+                    </CardTitle>
+                  </CardHeader>
+                  <div className="px-6 pb-6">
                     {selectedTask.assets
                       .filter((asset) => asset.role === 'output')
                       .map((asset) => (
-                        <div key={asset.assetId}>
-                          {renderMediaPreview(asset.assetId, asset.mimeType || undefined, 'output')}
+                        <div key={asset.id} className="rounded-xl overflow-hidden shadow-xl">
+                          <MediaPreview
+                            assetId={asset.id}
+                            mimeType={asset.mimeType}
+                            role={asset.role}
+                          />
                         </div>
                       ))}
                   </div>
-                )}
+                </Card>
+              )}
 
-                {/* 错误信息 */}
-                {selectedTask.task.errorMsg && (
-                  <div>
-                    <h3 className="font-semibold text-red-600 mb-2">❌ 错误信息</h3>
-                    <div className="text-sm bg-red-50 text-red-700 p-3 rounded">
-                      {selectedTask.task.errorMsg}
+              {/* 错误信息 */}
+              {selectedTask.status === 'failed' && selectedTask.errorMessage && (
+                <Card frame="solid" className="border-2 border-red-200 bg-gradient-to-br from-red-50 to-white shadow-lg">
+                  <CardHeader>
+                    <CardTitle className="text-lg text-red-700 flex items-center gap-2">
+                      <span className="text-2xl">❌</span>
+                      <span>错误信息</span>
+                    </CardTitle>
+                  </CardHeader>
+                  <div className="px-6 pb-6">
+                    <div className="bg-red-100 border border-red-200 rounded-lg p-4">
+                      <p className="text-sm text-red-700 leading-relaxed">{selectedTask.errorMessage}</p>
                     </div>
                   </div>
+                </Card>
+              )}
+
+              {/* 关键信息：提示词 */}
+              <Card frame="solid" className="bg-white shadow-md">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-base flex items-center gap-2 text-gray-700">
+                      <span className="text-xl">📝</span>
+                      <span>提示词</span>
+                    </CardTitle>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => copyToClipboard(selectedTask.submissionDetails.prompt.text)}
+                      className="flex items-center gap-1 text-xs transition-all hover:scale-105"
+                    >
+                      {copied ? (
+                        <>
+                          <span>✓</span>
+                          <span>已复制</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>📋</span>
+                          <span>复制</span>
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </CardHeader>
+                <div className="px-6 pb-6">
+                  <div className="bg-gradient-to-br from-gray-50 to-white border border-gray-200 rounded-lg p-4 relative group">
+                    <p className="text-sm whitespace-pre-wrap leading-relaxed text-gray-700">
+                      {selectedTask.submissionDetails.prompt.text}
+                    </p>
+                  </div>
+                </div>
+              </Card>
+
+              {/* 次要信息区域 - 视觉弱化 */}
+              <div className="space-y-3 opacity-75">
+                {/* 生成参数 - 精简显示 */}
+                <Card frame="glass" className="bg-white/50 backdrop-blur-sm">
+                  <CardHeader>
+                    <CardTitle className="text-sm text-gray-600 flex items-center gap-2">
+                      <span>⚙️</span>
+                      <span>生成参数</span>
+                    </CardTitle>
+                  </CardHeader>
+                  <div className="px-6 pb-4">
+                    <div className="flex flex-wrap gap-2 text-xs">
+                      <span className="bg-gradient-to-r from-blue-100 to-blue-50 border border-blue-200 px-3 py-1.5 rounded-full font-medium text-blue-700">
+                        {selectedTask.submissionDetails.generation.model}
+                      </span>
+                      <span className="bg-gradient-to-r from-green-100 to-green-50 border border-green-200 px-3 py-1.5 rounded-full font-medium text-green-700">
+                        ⏱️ {selectedTask.submissionDetails.generation.duration}秒
+                      </span>
+                      <span className="bg-gradient-to-r from-purple-100 to-purple-50 border border-purple-200 px-3 py-1.5 rounded-full font-medium text-purple-700">
+                        📐 {selectedTask.submissionDetails.generation.resolution}
+                      </span>
+                      <span className="bg-gradient-to-r from-orange-100 to-orange-50 border border-orange-200 px-3 py-1.5 rounded-full font-medium text-orange-700">
+                        🎞️ {selectedTask.submissionDetails.generation.ratio}
+                      </span>
+                    </div>
+                  </div>
+                </Card>
+
+                {/* 输入媒体 */}
+                {selectedTask.submissionDetails.media.length > 0 && (
+                  <Card frame="glass" className="bg-white/50 backdrop-blur-sm">
+                    <CardHeader>
+                      <CardTitle className="text-sm text-gray-600 flex items-center gap-2">
+                        <span>🖼️</span>
+                        <span>输入媒体</span>
+                      </CardTitle>
+                    </CardHeader>
+                    <div className="px-6 pb-4 space-y-3">
+                      {selectedTask.submissionDetails.media.map((media, idx) => (
+                        <div key={idx}>
+                          <p className="text-xs text-gray-500 mb-2 flex items-center gap-1">
+                            <span className="font-medium">{media.role}</span>
+                            <span className="text-gray-400">({media.mimeType})</span>
+                          </p>
+                          <div className="rounded-lg overflow-hidden shadow-md">
+                            <MediaPreview
+                              assetId={media.assetId}
+                              mimeType={media.mimeType}
+                              role={media.role}
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
                 )}
+
+                {/* 工作流信息 - 最次要 */}
+                <details className="group">
+                  <summary className="cursor-pointer list-none">
+                    <Card frame="glass" className="group-open:mb-2 bg-white/30 hover:bg-white/50 transition-all">
+                      <div className="px-6 py-3 flex items-center justify-between">
+                        <span className="text-xs text-gray-500 flex items-center gap-2">
+                          <span>🔧</span>
+                          <span>工作流详情</span>
+                        </span>
+                        <span className="text-xs text-gray-400 group-open:rotate-180 transition-transform duration-200">
+                          ▼
+                        </span>
+                      </div>
+                    </Card>
+                  </summary>
+                  <Card frame="glass" className="bg-white/50">
+                    <div className="px-6 py-4 space-y-2 text-xs">
+                      <div className="flex items-start gap-2">
+                        <span className="text-gray-500 min-w-[48px]">名称：</span>
+                        <span className="font-medium text-gray-700">{selectedTask.submissionDetails.workflow.name}</span>
+                      </div>
+                      <div className="flex items-start gap-2">
+                        <span className="text-gray-500 min-w-[48px]">Key：</span>
+                        <span className="font-mono text-gray-600 break-all">{selectedTask.submissionDetails.workflow.key}</span>
+                      </div>
+                    </div>
+                  </Card>
+                </details>
               </div>
-            )}
-          </div>
+            </div>
+          ) : (
+            <Card frame="solid">
+              <div className="flex items-center justify-center h-64 text-gray-400">
+                请选择一个任务查看详情
+              </div>
+            </Card>
+          )}
         </div>
+      </div>
       </div>
     </div>
   );

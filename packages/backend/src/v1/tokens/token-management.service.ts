@@ -14,6 +14,7 @@ export interface TokenInfo {
 }
 
 export interface TokenUsageLogEntry {
+  id: string;
   endpoint: string;
   method: string;
   statusCode: number;
@@ -107,6 +108,7 @@ export class TokenManagementService {
 
     return {
       logs: items.map((log) => ({
+        id: log.id,
         endpoint: log.endpoint,
         method: log.method,
         statusCode: log.statusCode,
