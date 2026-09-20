@@ -3,6 +3,24 @@
 import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+  SidebarTrigger,
+} from '@/components/ui/sidebar';
+import { Button } from '@/components/ui/button';
+import { Separator } from '@/components/ui/separator';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -13,7 +31,6 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const pathname = usePathname();
   const [authMode, setAuthMode] = useState<'user' | 'admin' | null>(null);
   const [userName, setUserName] = useState<string>('用户');
-  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     // 检查登录状态
@@ -39,128 +56,127 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   if (!authMode) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="text-gray-500">加载中...</div>
+        <div className="text-muted-foreground">加载中...</div>
       </div>
     );
   }
 
   const navItems = [
-    { href: '/dashboard', label: '消费看板', icon: '📊' },
-    { href: '/tokens', label: 'Token管理', icon: '🔑' },
+    { href: '/dashboard', label: '消费看板', icon: '📊', group: '概览' },
+    { href: '/history', label: '任务历史', icon: '📜', group: '任务' },
+    { href: '/showcase', label: '案例广场', icon: '🎬', group: '任务' },
+    { href: '/tokens', label: 'Token管理', icon: '🔑', group: '管理' },
     ...(authMode === 'user'
       ? [
-          { href: '/history', label: '任务历史', icon: '📜' },
-          { href: '/alerts', label: '预警管理', icon: '⚠️' },
+          { href: '/alerts', label: '预警管理', icon: '⚠️', group: '管理' },
         ]
       : []),
     ...(authMode === 'admin'
       ? [
-          { href: '/reconciliation', label: '对账管理', icon: '💰' },
+          { href: '/reconciliation', label: '对账管理', icon: '💰', group: '管理' },
         ]
       : []),
   ];
 
+  // 按 group 分组
+  const groupedNavItems = navItems.reduce((acc, item) => {
+    if (!acc[item.group]) {
+      acc[item.group] = [];
+    }
+    acc[item.group].push(item);
+    return acc;
+  }, {} as Record<string, typeof navItems>);
+
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Top Navigation */}
-      <nav className="bg-white border-b border-gray-200 sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16">
-            <div className="flex items-center">
-              {/* Mobile menu button */}
-              <button
-                onClick={() => setSidebarOpen(!sidebarOpen)}
-                className="lg:hidden mr-2 p-2 rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-100"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                </svg>
-              </button>
-
-              <h1 className="text-xl font-bold text-gray-900">
-                <span className="hidden sm:inline">Video Flow Console</span>
-                <span className="sm:hidden">VF Console</span>
-              </h1>
-              {authMode === 'admin' && (
-                <span className="ml-3 px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded">
-                  管理员
-                </span>
-              )}
+    <SidebarProvider>
+      <div className="flex min-h-screen w-full">
+        <Sidebar>
+          <SidebarHeader className="border-b border-sidebar-border">
+            <div className="flex items-center gap-2 px-4 py-3">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                <span className="text-lg">🎬</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-sm font-semibold">Video Flow</span>
+                <span className="text-xs text-muted-foreground">Console</span>
+              </div>
             </div>
-            <div className="flex items-center gap-2 sm:gap-4">
-              <span className="text-sm text-gray-600 hidden sm:inline">{userName}</span>
-              <button
+          </SidebarHeader>
+
+          <SidebarContent>
+            {Object.entries(groupedNavItems).map(([group, items]) => (
+              <SidebarGroup key={group}>
+                <SidebarGroupLabel>{group}</SidebarGroupLabel>
+                <SidebarGroupContent>
+                  <SidebarMenu>
+                    {items.map((item) => {
+                      const isActive = pathname === item.href;
+                      return (
+                        <SidebarMenuItem key={item.href}>
+                          <SidebarMenuButton asChild isActive={isActive}>
+                            <Link href={item.href}>
+                              <span className="text-lg">{item.icon}</span>
+                              <span>{item.label}</span>
+                            </Link>
+                          </SidebarMenuButton>
+                        </SidebarMenuItem>
+                      );
+                    })}
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </SidebarGroup>
+            ))}
+          </SidebarContent>
+
+          <SidebarFooter className="border-t border-sidebar-border">
+            <div className="p-4">
+              <div className="flex items-center gap-3 mb-3">
+                <Avatar className="h-8 w-8">
+                  <AvatarFallback className="bg-primary text-primary-foreground">
+                    {userName.charAt(0)}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{userName}</p>
+                  {authMode === 'admin' && (
+                    <Badge variant="secondary" className="mt-1">管理员</Badge>
+                  )}
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={handleLogout}
-                className="text-sm text-gray-600 hover:text-gray-900"
+                className="w-full"
               >
-                退出
-              </button>
+                退出登录
+              </Button>
+            </div>
+          </SidebarFooter>
+        </Sidebar>
+
+        <main className="flex-1 flex flex-col overflow-hidden">
+          {/* Header */}
+          <header className="border-b border-border bg-background sticky top-0 z-10">
+            <div className="flex h-16 items-center gap-4 px-6">
+              <SidebarTrigger />
+              <Separator orientation="vertical" className="h-6" />
+              <div className="flex-1">
+                <h1 className="text-lg font-semibold">
+                  {navItems.find(item => item.href === pathname)?.label || 'Dashboard'}
+                </h1>
+              </div>
+            </div>
+          </header>
+
+          {/* Main Content */}
+          <div className="flex-1 overflow-auto">
+            <div className="container mx-auto p-6 max-w-7xl">
+              {children}
             </div>
           </div>
-        </div>
-      </nav>
-
-      <div className="flex max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8">
-        {/* Sidebar - Desktop */}
-        <aside className="hidden lg:block w-64 mr-8">
-          <nav className="space-y-1 sticky top-20">
-            {navItems.map((item) => {
-              const isActive = pathname === item.href;
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`flex items-center px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-                    isActive
-                      ? 'bg-blue-50 text-blue-700'
-                      : 'text-gray-700 hover:bg-gray-100'
-                  }`}
-                >
-                  <span className="mr-3 text-lg">{item.icon}</span>
-                  {item.label}
-                </Link>
-              );
-            })}
-          </nav>
-        </aside>
-
-        {/* Mobile Sidebar Overlay */}
-        {sidebarOpen && (
-          <div
-            className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden"
-            onClick={() => setSidebarOpen(false)}
-          >
-            <aside
-              className="fixed left-0 top-16 bottom-0 w-64 bg-white shadow-xl z-50"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <nav className="space-y-1 p-4">
-                {navItems.map((item) => {
-                  const isActive = pathname === item.href;
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      onClick={() => setSidebarOpen(false)}
-                      className={`flex items-center px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-                        isActive
-                          ? 'bg-blue-50 text-blue-700'
-                          : 'text-gray-700 hover:bg-gray-100'
-                      }`}
-                    >
-                      <span className="mr-3 text-lg">{item.icon}</span>
-                      {item.label}
-                    </Link>
-                  );
-                })}
-              </nav>
-            </aside>
-          </div>
-        )}
-
-        {/* Main Content */}
-        <main className="flex-1 min-w-0">{children}</main>
+        </main>
       </div>
-    </div>
+    </SidebarProvider>
   );
 }
