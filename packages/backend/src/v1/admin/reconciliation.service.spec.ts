@@ -22,6 +22,7 @@ describe('ReconciliationService', () => {
       costReconciliation: {
         upsert: jest.fn(),
         findUnique: jest.fn(),
+        findFirst: jest.fn(),
         findMany: jest.fn(),
       },
       taskBudgetReservation: {
@@ -255,6 +256,18 @@ describe('ReconciliationService', () => {
   });
 
   describe('getReconciliation', () => {
+    it('should query a global reconciliation without passing null to a compound unique key', async () => {
+      prisma.costReconciliation.findFirst.mockResolvedValue(null);
+
+      const result = await service.getReconciliation('2026-09');
+
+      expect(result).toBeNull();
+      expect(prisma.costReconciliation.findFirst).toHaveBeenCalledWith({
+        where: { monthKey: '2026-09', actorId: null },
+      });
+      expect(prisma.costReconciliation.findUnique).not.toHaveBeenCalled();
+    });
+
     it('should return reconciliation record', async () => {
       const record = {
         id: 'recon-1',

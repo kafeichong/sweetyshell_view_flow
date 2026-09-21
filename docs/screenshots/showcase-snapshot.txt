@@ -1,0 +1,159 @@
+- generic [active] [ref=f1e1]:
+  - generic [ref=f1e3]:
+    - generic [ref=f1e4]:
+      - paragraph [ref=f1e5]: SHOWCASE
+      - heading "案例广场" [level=1] [ref=f1e6]
+      - generic [ref=f1e7]:
+        - generic [ref=f1e8]: 浏览团队成员的优秀视频生成案例
+        - generic [ref=f1e21]: 25 个案例
+    - generic [ref=f1e22]:
+      - generic [ref=f1e23] [cursor=pointer]:
+        - generic [ref=f1e24]: 5s
+        - generic [ref=f1e27]:
+          - generic [ref=f1e28]:
+            - generic [ref=f1e29]: C
+            - generic [ref=f1e31]: Creative Pilot
+            - generic [ref=f1e32]: 多模态参考
+          - heading "画外的人刚刚忘记了一件她之前认真提醒过的事情， 现在却像什么都没发生一样和她说话。 她听到对方声音以后没有马上回答。 身体动作先停下来。 眼睛仍然看着原来的方向， 故意不看对方。 呼吸稍微加深..." [level=3] [ref=f1e33]
+          - generic [ref=f1e34]:
+            - generic [ref=f1e35]: doubao-seedance-2-5-260628
+            - generic [ref=f1e36]: 480p
+            - generic [ref=f1e37]: 9:16
+      - generic [ref=f1e38] [cursor=pointer]:
+        - generic [ref=f1e39]: 5s
+        - generic [ref=f1e42]:
+          - generic [ref=f1e43]:
+            - generic [ref=f1e44]: C
+            - generic [ref=f1e46]: Creative Pilot
+            - generic [ref=f1e47]: 多模态参考
+          - heading "独立情境： 画外的人突然说了一句带有明显调侃意味的话， 正好戳中了她不想被说破的小心思。 先不要说话。 她听到以后身体很轻地停顿一下。 原本看向对方的视线短暂躲开， 眼睛向侧下方移动。 嘴唇..." [level=3] [ref=f1e48]
+          - generic [ref=f1e49]:
+            - generic [ref=f1e50]: doubao-seedance-2-5-260628
+            - generic [ref=f1e51]: 720p
+            - generic [ref=f1e52]: 16:9
+      - generic [ref=f1e53] [cursor=pointer]:
+        - generic [ref=f1e54]: 4s
+        - generic [ref=f1e57]:
+          - generic [ref=f1e58]:
+            - generic [ref=f1e59]: C
+            - generic [ref=f1e61]: Creative Pilot
+            - generic [ref=f1e62]: 多模态参考
+          - heading "图片1中的女孩正面朝向镜头，微笑并轻轻点头，镜头缓慢推近。 室内柔和自然光，背景干净" [level=3] [ref=f1e63]
+          - generic [ref=f1e64]:
+            - generic [ref=f1e65]: doubao-seedance-2-5-260628
+            - generic [ref=f1e66]: 480p
+            - generic [ref=f1e67]: 4:3
+      - generic [ref=f1e68] [cursor=pointer]:
+        - generic [ref=f1e69]: 8s
+        - generic [ref=f1e72]:
+          - generic [ref=f1e73]:
+            - generic [ref=f1e74]: C
+            - generic [ref=f1e76]: Creative Pilot
+            - generic [ref=f1e77]: 多模态参考
+          - heading "Create an 8-second image-to-video sequence based closely on the provided reference images, using the..." [level=3] [ref=f1e78]
+          - generic [ref=f1e79]:
+            - generic [ref=f1e80]: doubao-seedance-2-5-260628
+            - generic [ref=f1e81]: 720p
+            - generic [ref=f1e82]: 16:9
+      - generic [ref=f1e83] [cursor=pointer]:
+        - generic [ref=f1e84]: 5s
+        - generic [ref=f1e87]:
+          - generic [ref=f1e88]:
+            - generic [ref=f1e89]: C
+            - generic [ref=f1e91]: Creative Pilot
+            - generic [ref=f1e92]: 多模态参考
+          - heading "在她已经要求他停下后，他继续走近。 她立刻后退一步，在他们之间举起一只手，并锁定目光注视着他。她的表情变得严肃，下巴微微收紧，她说：“离我远点” 说完后，她保持举手姿势，并维持眼神接触片刻，而不是立..." [level=3] [ref=f1e93]
+          - generic [ref=f1e94]:
+            - generic [ref=f1e95]: doubao-seedance-2-5-260628
+            - generic [ref=f1e96]: 720p
+            - generic [ref=f1e97]: 16:9
+      - generic [ref=f1e98] [cursor=pointer]:
+        - generic [ref=f1e99]: 5s
+        - generic [ref=f1e102]:
+          - generic [ref=f1e103]:
+            - generic [ref=f1e104]: "Y"
+            - generic [ref=f1e106]: yuyo
+            - generic [ref=f1e107]: 多模态参考
+          - heading "参考@图像1 中产品的外形、材质与配色，参考@视频1 的运镜节奏，生成一段干净的产品展示视频。主体始终是@图像1 里的那件产品，结构、标识与颜色保持一致。0s-3s：镜头贴近产品缓慢环绕，表面高光随角..." [level=3] [ref=f1e108]
+          - generic [ref=f1e109]:
+            - generic [ref=f1e110]: doubao-seedance-2-5-260628
+            - generic [ref=f1e111]: 720p
+            - generic [ref=f1e112]: 16:9
+      - generic [ref=f1e113] [cursor=pointer]:
+        - generic [ref=f1e114]: 8s
+        - generic [ref=f1e117]:
+          - generic [ref=f1e118]:
+            - generic [ref=f1e119]: 朱
+            - generic [ref=f1e121]: 朱阳
+            - generic [ref=f1e122]: 多模态参考
+          - heading "8秒高级科学视觉短片。 场景为浅色、柔和、梦幻的高亮空间，整体以珍珠白、暖白和极浅灰蓝为主，干净、克制、具有生命科学与高端护肤质感。 画面中央，一颗代表 Ca²⁺ 钙离子 的核心缓慢从柔光中显现。不..." [level=3] [ref=f1e123]
+          - generic [ref=f1e124]:
+            - generic [ref=f1e125]: doubao-seedance-2-5-260628
+            - generic [ref=f1e126]: 720p
+            - generic [ref=f1e127]: 16:9
+      - generic [ref=f1e128] [cursor=pointer]:
+        - generic [ref=f1e129]: 5s
+        - generic [ref=f1e132]:
+          - generic [ref=f1e133]:
+            - generic [ref=f1e134]: C
+            - generic [ref=f1e136]: Creative Pilot
+            - generic [ref=f1e137]: seedance.audio-reference-to-video.v1
+          - heading "画面跟随这段音频的节奏与情绪：主体随音频出现相应的口型与动作，重音处画面同步推进。0s-3s：中景，镜头缓慢推进，主体保持在画面中央并随节奏轻微动作。3s-5s：镜头继续推进，画面与音频收尾同步稳定。..." [level=3] [ref=f1e138]
+          - generic [ref=f1e139]:
+            - generic [ref=f1e140]: doubao-seedance-2-5-260628
+            - generic [ref=f1e141]: 720p
+            - generic [ref=f1e142]: 16:9
+      - generic [ref=f1e143] [cursor=pointer]:
+        - generic [ref=f1e144]: 5s
+        - generic [ref=f1e147]:
+          - generic [ref=f1e148]:
+            - generic [ref=f1e149]: C
+            - generic [ref=f1e151]: Creative Pilot
+            - generic [ref=f1e152]: seedance.audio-reference-to-video.v1
+          - heading "画面跟随这段音频的节奏与情绪：主体随音频出现相应的口型与动作，重音处画面同步推进。0s-3s：中景，镜头缓慢推进，主体保持在画面中央并随节奏轻微动作。3s-5s：镜头继续推进，画面与音频收尾同步稳定。..." [level=3] [ref=f1e153]
+          - generic [ref=f1e154]:
+            - generic [ref=f1e155]: doubao-seedance-2-5-260628
+            - generic [ref=f1e156]: 720p
+            - generic [ref=f1e157]: 16:9
+      - generic [ref=f1e158] [cursor=pointer]:
+        - generic [ref=f1e159]: 5s
+        - generic [ref=f1e162]:
+          - generic [ref=f1e163]:
+            - generic [ref=f1e164]: C
+            - generic [ref=f1e166]: Creative Pilot
+            - generic [ref=f1e167]: seedance.audio-reference-to-video.v1
+          - heading "画面跟随这段音频的节奏与情绪：主体随音频出现相应的口型与动作，重音处画面同步推进。0s-3s：中景，镜头缓慢推进，主体保持在画面中央并随节奏轻微动作。3s-5s：镜头继续推进，画面与音频收尾同步稳定。..." [level=3] [ref=f1e168]
+          - generic [ref=f1e169]:
+            - generic [ref=f1e170]: doubao-seedance-2-5-260628
+            - generic [ref=f1e171]: 720p
+            - generic [ref=f1e172]: 16:9
+      - generic [ref=f1e173] [cursor=pointer]:
+        - generic [ref=f1e174]: "-1s"
+        - generic [ref=f1e177]:
+          - generic [ref=f1e178]:
+            - generic [ref=f1e179]: C
+            - generic [ref=f1e181]: Creative Pilot
+            - generic [ref=f1e182]: 视频编辑
+          - heading "把 @视频1 里的主体替换成一支带把手的白色陶瓷马克杯，画面其余部分、运镜与光线都保持与原视频一致，光影过渡自然。" [level=3] [ref=f1e183]
+          - generic [ref=f1e184]:
+            - generic [ref=f1e185]: doubao-seedance-2-5-260628
+            - generic [ref=f1e186]: 720p
+            - generic [ref=f1e187]: adaptive
+      - generic [ref=f1e188] [cursor=pointer]:
+        - generic [ref=f1e189]: 5s
+        - generic [ref=f1e192]:
+          - generic [ref=f1e193]:
+            - generic [ref=f1e194]: C
+            - generic [ref=f1e196]: Creative Pilot
+            - generic [ref=f1e197]: seedance.audio-reference-to-video.v1
+          - heading "R8 验收：纯音频参考 5 秒，画面跟随这段音乐的节奏与情绪，镜头缓慢推进，主体随重音同步动作。" [level=3] [ref=f1e198]
+          - generic [ref=f1e199]:
+            - generic [ref=f1e200]: doubao-seedance-2-5-260628
+            - generic [ref=f1e201]: 720p
+            - generic [ref=f1e202]: 16:9
+    - generic [ref=f1e203]:
+      - button "上一页" [disabled]
+      - generic [ref=f1e204]: 第 1 / 3 页
+      - button "下一页" [ref=f1e205]
+  - button "Open Next.js Dev Tools" [ref=f1e16] [cursor=pointer]
+  - alert [ref=f1e20]

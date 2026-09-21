@@ -4,6 +4,9 @@ import { useEffect, useState } from 'react';
 import api from '@/lib/api';
 import type { ReconciliationRecord } from '@/types/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 
 export default function ReconciliationPage() {
   const [records, setRecords] = useState<ReconciliationRecord[]>([]);
@@ -73,10 +76,10 @@ export default function ReconciliationPage() {
   if (!isAdmin) {
     return (
       <div>
-        <h1 className="text-2xl font-bold text-gray-900 mb-6">对账管理</h1>
+        <h1 className="text-2xl font-normal text-foreground mb-6">对账管理</h1>
         <Card>
           <CardContent className="pt-6">
-            <div className="text-center text-gray-500 py-8">
+            <div className="text-center text-muted-foreground py-8">
               <p>仅管理员可访问此功能</p>
             </div>
           </CardContent>
@@ -88,10 +91,10 @@ export default function ReconciliationPage() {
   if (loading) {
     return (
       <div>
-        <h1 className="text-2xl font-bold text-gray-900 mb-6">对账管理</h1>
+        <h1 className="text-2xl font-normal text-foreground mb-6">对账管理</h1>
         <Card>
           <CardContent className="pt-6">
-            <div className="h-64 bg-gray-200 rounded animate-pulse"></div>
+            <div className="h-64 bg-muted rounded animate-pulse"></div>
           </CardContent>
         </Card>
       </div>
@@ -101,18 +104,18 @@ export default function ReconciliationPage() {
   if (error) {
     return (
       <div>
-        <h1 className="text-2xl font-bold text-gray-900 mb-6">对账管理</h1>
+        <h1 className="text-2xl font-normal text-foreground mb-6">对账管理</h1>
         <Card>
           <CardContent className="pt-6">
-            <div className="text-red-600">
-              <p className="font-medium">加载失败</p>
+            <div className="text-destructive">
+              <p className="font-normal">加载失败</p>
               <p className="text-sm mt-1">{error}</p>
-              <button
+              <Button
                 onClick={fetchRecords}
-                className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                className="mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary"
               >
                 重试
-              </button>
+              </Button>
             </div>
           </CardContent>
         </Card>
@@ -123,13 +126,13 @@ export default function ReconciliationPage() {
   return (
     <div>
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">对账管理</h1>
-        <button
+        <h1 className="text-2xl font-normal text-foreground">对账管理</h1>
+        <Button
           onClick={() => setShowForm(!showForm)}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 self-start sm:self-auto"
+          className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary self-start sm:self-auto"
         >
           {showForm ? '取消' : '+ 新建对账'}
-        </button>
+        </Button>
       </div>
 
       {/* 对账表单 */}
@@ -142,68 +145,68 @@ export default function ReconciliationPage() {
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm font-normal text-foreground mb-2">
                     月份 (YYYY-MM) *
                   </label>
-                  <input
+                  <Input
                     type="text"
                     placeholder="2026-09"
                     value={formData.monthKey}
                     onChange={(e) => setFormData({ ...formData, monthKey: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full px-4 py-2 border border-border rounded-md focus:ring-2 focus:ring-ring focus:border-transparent"
                     required
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm font-normal text-foreground mb-2">
                     用户ID (可选，留空为全局对账)
                   </label>
-                  <input
+                  <Input
                     type="text"
                     placeholder="留空表示全局对账"
                     value={formData.actorId}
                     onChange={(e) => setFormData({ ...formData, actorId: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full px-4 py-2 border border-border rounded-md focus:ring-2 focus:ring-ring focus:border-transparent"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-normal text-foreground mb-2">
                   第三方平台金额 (CNY) *
                 </label>
-                <input
+                <Input
                   type="number"
                   step="0.01"
                   placeholder="0.00"
                   value={formData.providerBillCny}
                   onChange={(e) => setFormData({ ...formData, providerBillCny: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-4 py-2 border border-border rounded-md focus:ring-2 focus:ring-ring focus:border-transparent"
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-normal text-foreground mb-2">
                   备注 (可选)
                 </label>
                 <textarea
                   placeholder="对账说明..."
                   value={formData.notes}
                   onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-4 py-2 border border-border rounded-md focus:ring-2 focus:ring-ring focus:border-transparent"
                   rows={3}
                 />
               </div>
 
-              <button
+              <Button
                 type="submit"
                 disabled={submitting}
-                className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400"
+                className="w-full px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary disabled:bg-muted"
               >
                 {submitting ? '提交中...' : '提交对账'}
-              </button>
+              </Button>
             </form>
           </CardContent>
         </Card>
@@ -214,7 +217,7 @@ export default function ReconciliationPage() {
         <CardHeader>
           <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
             <CardTitle>对账历史</CardTitle>
-            <div className="text-sm text-gray-600">
+            <div className="text-sm text-muted-foreground">
               共 {records.filter((record) => {
                 if (searchMonth && !record.monthKey.includes(searchMonth)) return false;
                 if (searchUser && !(record.actorName?.toLowerCase().includes(searchUser.toLowerCase()))) return false;
@@ -232,41 +235,41 @@ export default function ReconciliationPage() {
           {/* 搜索和筛选 */}
           <div className="mb-4 space-y-3">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <input
+              <Input
                 type="text"
                 placeholder="搜索月份..."
                 value={searchMonth}
                 onChange={(e) => setSearchMonth(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="px-3 py-2 border border-border rounded-md text-sm focus:ring-2 focus:ring-ring focus:border-transparent"
               />
-              <input
+              <Input
                 type="text"
                 placeholder="搜索用户..."
                 value={searchUser}
                 onChange={(e) => setSearchUser(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="px-3 py-2 border border-border rounded-md text-sm focus:ring-2 focus:ring-ring focus:border-transparent"
               />
-              <select
+              <Select
                 value={filterVariance}
                 onChange={(e) => setFilterVariance(e.target.value as 'all' | 'high' | 'low')}
-                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="px-3 py-2 border border-border rounded-md text-sm focus:ring-2 focus:ring-ring focus:border-transparent"
               >
                 <option value="all">全部差异</option>
                 <option value="high">高差异 (&gt;5%)</option>
                 <option value="low">低差异 (≤5%)</option>
-              </select>
+              </Select>
             </div>
             {(searchMonth || searchUser || filterVariance !== 'all') && (
-              <button
+              <Button
                 onClick={() => {
                   setSearchMonth('');
                   setSearchUser('');
                   setFilterVariance('all');
                 }}
-                className="text-sm text-blue-600 hover:text-blue-800"
+                className="text-sm text-primary hover:text-primary"
               >
                 清除筛选
-              </button>
+              </Button>
             )}
           </div>
 
@@ -275,13 +278,13 @@ export default function ReconciliationPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b">
-                    <th className="text-left py-3 px-4 font-medium text-gray-600">月份</th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-600">用户</th>
-                    <th className="text-right py-3 px-4 font-medium text-gray-600">系统消费</th>
-                    <th className="text-right py-3 px-4 font-medium text-gray-600">平台账单</th>
-                    <th className="text-right py-3 px-4 font-medium text-gray-600">差异</th>
-                    <th className="text-right py-3 px-4 font-medium text-gray-600">差异率</th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-600">对账时间</th>
+                    <th className="text-left py-3 px-4 font-normal text-muted-foreground">月份</th>
+                    <th className="text-left py-3 px-4 font-normal text-muted-foreground">用户</th>
+                    <th className="text-right py-3 px-4 font-normal text-muted-foreground">系统消费</th>
+                    <th className="text-right py-3 px-4 font-normal text-muted-foreground">平台账单</th>
+                    <th className="text-right py-3 px-4 font-normal text-muted-foreground">差异</th>
+                    <th className="text-right py-3 px-4 font-normal text-muted-foreground">差异率</th>
+                    <th className="text-left py-3 px-4 font-normal text-muted-foreground">对账时间</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -301,24 +304,24 @@ export default function ReconciliationPage() {
                     const isHighVariance = Math.abs(variancePercent) > 5;
 
                     return (
-                      <tr key={record.id} className="border-b hover:bg-gray-50">
-                        <td className="py-3 px-4 font-medium">{record.monthKey}</td>
+                      <tr key={record.id} className="border-b hover:bg-muted">
+                        <td className="py-3 px-4 font-normal">{record.monthKey}</td>
                         <td className="py-3 px-4">
-                          {record.actorName || <span className="text-gray-400">全局</span>}
+                          {record.actorName || <span className="text-muted-foreground">全局</span>}
                         </td>
                         <td className="py-3 px-4 text-right">¥{record.systemTotalCny}</td>
                         <td className="py-3 px-4 text-right">¥{record.providerBillCny}</td>
-                        <td className={`py-3 px-4 text-right font-medium ${
-                          isHighVariance ? 'text-red-600' : 'text-gray-900'
+                        <td className={`py-3 px-4 text-right font-normal ${
+                          isHighVariance ? 'text-destructive' : 'text-foreground'
                         }`}>
                           ¥{record.varianceCny}
                         </td>
                         <td className={`py-3 px-4 text-right ${
-                          isHighVariance ? 'text-red-600 font-medium' : 'text-gray-600'
+                          isHighVariance ? 'text-destructive font-normal' : 'text-muted-foreground'
                         }`}>
                           {record.variancePercent}%
                         </td>
-                        <td className="py-3 px-4 text-xs text-gray-600">
+                        <td className="py-3 px-4 text-xs text-muted-foreground">
                           {new Date(record.reconciledAt).toLocaleDateString('zh-CN')}
                         </td>
                       </tr>
@@ -328,7 +331,7 @@ export default function ReconciliationPage() {
               </table>
             </div>
           ) : (
-            <div className="text-center text-gray-400 py-8">暂无对账记录</div>
+            <div className="text-center text-muted-foreground py-8">暂无对账记录</div>
           )}
         </CardContent>
       </Card>

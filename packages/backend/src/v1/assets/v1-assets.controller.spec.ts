@@ -20,6 +20,9 @@ jest.mock('@nestjs/common', () => ({
     }
   },
 }));
+jest.mock('@nestjs/core', () => ({
+  Reflector: class Reflector {},
+}));
 jest.mock('ali-oss', () => class OSS {});
 
 import { V1AssetsController } from './v1-assets.controller';

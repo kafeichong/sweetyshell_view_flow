@@ -5,13 +5,22 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import { CredentialsService } from './credentials.service';
 
 @Injectable()
 export class ApiCredentialGuard implements CanActivate {
-  constructor(private readonly credentials: CredentialsService) {}
+  constructor(
+    private readonly credentials: CredentialsService,
+    private readonly reflector: Reflector,
+  ) {}
 
   async canActivate(context: ExecutionContext) {
+    const isPublic = this.reflector.get<boolean>('isPublic', context.getHandler());
+    if (isPublic) {
+      return true;
+    }
+
     const request = context.switchToHttp().getRequest();
     const authorization = request.headers?.authorization;
     const token = authorization?.startsWith('Bearer ')

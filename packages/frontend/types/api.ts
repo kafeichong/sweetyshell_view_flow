@@ -16,42 +16,48 @@ export interface Actor {
   monthlyLimitCny?: string;
 }
 
+export interface ConsumptionPeriod {
+  settled: string;
+  reserved: string;
+  total: string;
+  taskCount: number;
+  limit?: string | null;
+  remaining?: string | null;
+  alerts?: Array<{
+    type: string;
+    threshold: string;
+    message: string;
+  }>;
+}
+
 // 消费概览
 export interface ConsumptionOverview {
-  todayCny: string;
-  monthCny: string;
-  balance?: string;
-  dailyLimit?: string;
-  monthlyLimit?: string;
-  alerts: {
-    daily?: {
-      enabled: boolean;
-      thresholdCny: string;
-      triggered: boolean;
-    };
-    monthly?: {
-      enabled: boolean;
-      thresholdCny: string;
-      triggered: boolean;
-    };
-  };
+  daily: ConsumptionPeriod;
+  monthly: ConsumptionPeriod;
 }
 
 // 消费趋势
 export interface ConsumptionTrend {
-  dayKey: string;
-  totalCny: string;
+  date: string;
+  amount: string;
   taskCount: number;
 }
 
 export interface ConsumptionTrendsResponse {
   trends: ConsumptionTrend[];
-  summary: {
-    totalCny: string;
-    avgDailyCny: string;
-    peakDayCny: string;
-    peakDayKey: string;
-  };
+}
+
+export interface AdminConsumptionSummary {
+  monthKey: string;
+  totalSettled: string;
+  totalReserved: string;
+  totalTasks: number;
+  byActor: Array<{
+    actorId: string;
+    name: string;
+    settled: string;
+    taskCount: number;
+  }>;
 }
 
 // Token信息

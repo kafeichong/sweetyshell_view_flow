@@ -1,11 +1,17 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
 import type { TokenInfo, TokenLogsResponse } from '@/types/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
+import { Download, RefreshCw } from 'lucide-react';
 
 export default function TokensPage() {
+  const router = useRouter();
   const [info, setInfo] = useState<TokenInfo | null>(null);
   const [logs, setLogs] = useState<TokenLogsResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -21,9 +27,13 @@ export default function TokensPage() {
 
   useEffect(() => {
     const mode = localStorage.getItem('auth_mode');
+    if (mode !== 'admin') {
+      router.replace('/dashboard');
+      return;
+    }
     setIsAdmin(mode === 'admin');
     fetchData();
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     if (selectedActorId) {
@@ -122,15 +132,15 @@ export default function TokensPage() {
   if (loading) {
     return (
       <div>
-        <h1 className="text-2xl font-bold text-gray-900 mb-6">Token管理</h1>
+        <h1 className="text-2xl font-normal text-foreground mb-6">用户 Token 管理</h1>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           {[1, 2, 3].map((i) => (
             <Card key={i}>
               <CardHeader>
-                <div className="h-5 bg-gray-200 rounded animate-pulse w-24"></div>
+                <div className="h-5 bg-muted rounded animate-pulse w-24"></div>
               </CardHeader>
               <CardContent>
-                <div className="h-8 bg-gray-200 rounded animate-pulse w-32"></div>
+                <div className="h-8 bg-muted rounded animate-pulse w-32"></div>
               </CardContent>
             </Card>
           ))}
@@ -142,18 +152,18 @@ export default function TokensPage() {
   if (error) {
     return (
       <div>
-        <h1 className="text-2xl font-bold text-gray-900 mb-6">Token管理</h1>
+        <h1 className="text-2xl font-normal text-foreground mb-6">用户 Token 管理</h1>
         <Card>
           <CardContent className="pt-6">
-            <div className="text-red-600">
-              <p className="font-medium">加载失败</p>
+            <div className="text-destructive">
+              <p className="font-normal">加载失败</p>
               <p className="text-sm mt-1">{error}</p>
-              <button
+              <Button
                 onClick={fetchData}
-                className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                className="mt-4"
               >
                 重试
-              </button>
+              </Button>
             </div>
           </CardContent>
         </Card>
@@ -164,13 +174,18 @@ export default function TokensPage() {
   return (
     <div>
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Token管理</h1>
-        <button
+        <div>
+          <h1 className="text-2xl font-normal text-foreground">用户 Token 管理</h1>
+          <p className="mt-1 text-sm text-muted-foreground">查看用户调用凭证、额度、费用状态和使用记录。</p>
+        </div>
+        <Button
           onClick={fetchData}
-          className="text-sm text-gray-600 hover:text-gray-900 self-start sm:self-auto"
+          variant="ghost"
+          size="sm"
+          className="self-start sm:self-auto"
         >
-          🔄 刷新
-        </button>
+          <RefreshCw className="size-4" />刷新
+        </Button>
       </div>
 
       {/* 管理员模式：用户Token列表 */}
@@ -179,7 +194,7 @@ export default function TokensPage() {
           <CardHeader>
             <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
               <CardTitle>用户Token列表</CardTitle>
-              <div className="text-sm text-gray-600">
+              <div className="text-sm text-muted-foreground">
                 共 {allTokens.length} 个用户
               </div>
             </div>
@@ -187,41 +202,44 @@ export default function TokensPage() {
           <CardContent>
             {/* 搜索过滤 */}
             <div className="mb-4 flex gap-2">
-              <input
+              <Input
                 type="text"
                 placeholder="搜索用户名或ActorId..."
                 value={searchEndpoint}
                 onChange={(e) => setSearchEndpoint(e.target.value)}
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="flex-1 px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </div>
 
             {/* 用户表格 */}
             <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
+              <table className="min-w-full divide-y divide-border">
+                <thead className="bg-muted">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-4 py-3 text-left text-xs font-normal text-muted-foreground uppercase tracking-wider">
                       用户信息
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-4 py-3 text-left text-xs font-normal text-muted-foreground uppercase tracking-wider">
                       ActorId
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-4 py-3 text-left text-xs font-normal text-muted-foreground uppercase tracking-wider">
                       状态
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-4 py-3 text-left text-xs font-normal text-muted-foreground uppercase tracking-wider">
                       限额
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-4 py-3 text-left text-xs font-normal text-muted-foreground uppercase tracking-wider">
+                      费用状态
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-normal text-muted-foreground uppercase tracking-wider">
                       最后使用
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-4 py-3 text-left text-xs font-normal text-muted-foreground uppercase tracking-wider">
                       操作
                     </th>
                   </tr>
                 </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
+                <tbody className="bg-card divide-y divide-border">
                   {allTokens
                     .filter((token) => {
                       if (!searchEndpoint) return true;
@@ -231,46 +249,54 @@ export default function TokensPage() {
                       );
                     })
                     .map((token) => (
-                      <tr key={token.actorId} className="hover:bg-gray-50">
+                      <tr key={token.actorId} className="hover:bg-muted">
                         <td className="px-4 py-4 whitespace-nowrap">
-                          <div className="font-medium text-gray-900">{token.name}</div>
+                          <div className="font-normal text-foreground">{token.name}</div>
                         </td>
                         <td className="px-4 py-4">
-                          <div className="text-sm text-gray-900 font-mono break-all">
+                          <div className="text-sm text-foreground font-mono break-all">
                             {token.actorId}
                           </div>
                         </td>
                         <td className="px-4 py-4 whitespace-nowrap">
                           <span
-                            className={`px-2 py-1 text-xs font-medium rounded-full ${
+                            className={`px-2 py-1 text-xs font-normal rounded-full ${
                               token.status === 'active'
-                                ? 'bg-green-100 text-green-800'
-                                : 'bg-red-100 text-red-800'
+                                ? 'bg-secondary text-foreground'
+                                : 'bg-destructive/10 text-destructive'
                             }`}
                           >
                             {token.status === 'active' ? '活跃' : '停用'}
                           </span>
                         </td>
-                        <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-600">
+                        <td className="px-4 py-4 whitespace-nowrap text-sm text-muted-foreground">
                           <div>日: ¥{token.dailyLimitCny || '无限制'}</div>
                           <div>月: ¥{token.monthlyLimitCny || '无限制'}</div>
                         </td>
-                        <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-600">
+                        <td className="px-4 py-4 whitespace-nowrap text-sm text-muted-foreground">
+                          <div>今日实际花费: ¥{token.spending?.dailySettled || '0.000000'}</div>
+                          <div>本月实际花费: ¥{token.spending?.monthlySettled || '0.000000'}</div>
+                          <div>已预占: ¥{token.spending?.reserved || '0.000000'}</div>
+                          <div>待审核: ¥{token.spending?.review || '0.000000'}</div>
+                        </td>
+                        <td className="px-4 py-4 whitespace-nowrap text-sm text-muted-foreground">
                           {token.lastUsedAt
                             ? new Date(token.lastUsedAt).toLocaleString('zh-CN')
                             : '从未使用'}
                         </td>
                         <td className="px-4 py-4 whitespace-nowrap text-sm">
-                          <button
+                          <Button
+                            variant="link"
+                            size="sm"
                             onClick={() => {
                               setSelectedActorId(token.actorId);
                               // 滚动到使用记录区域
                               document.getElementById('usage-logs')?.scrollIntoView({ behavior: 'smooth' });
                             }}
-                            className="text-blue-600 hover:text-blue-900"
+                            className="h-auto p-0"
                           >
                             查看日志
-                          </button>
+                          </Button>
                         </td>
                       </tr>
                     ))}
@@ -290,7 +316,7 @@ export default function TokensPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-sm text-gray-600 mb-4">
+            <p className="text-sm text-muted-foreground mb-4">
               最近 {logs.logs.length} 条使用记录
             </p>
           </CardContent>
@@ -302,43 +328,43 @@ export default function TokensPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 mb-8">
           <Card>
             <CardHeader>
-            <CardTitle className="text-sm font-medium text-gray-600">
+            <CardTitle className="text-sm font-normal text-muted-foreground">
               总请求数
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl sm:text-3xl font-bold text-gray-900">
+            <div className="text-2xl sm:text-3xl font-normal text-foreground">
               {info?.totalRequests?.toLocaleString() || 0}
             </div>
-            <p className="text-xs text-gray-500 mt-2">累计API调用次数</p>
+            <p className="text-xs text-muted-foreground mt-2">累计API调用次数</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm font-medium text-gray-600">
+            <CardTitle className="text-sm font-normal text-muted-foreground">
               最近24小时
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl sm:text-3xl font-bold text-gray-900">
+            <div className="text-2xl sm:text-3xl font-normal text-foreground">
               {info?.last24hRequests?.toLocaleString() || 0}
             </div>
-            <p className="text-xs text-gray-500 mt-2">过去一天的请求数</p>
+            <p className="text-xs text-muted-foreground mt-2">过去一天的请求数</p>
           </CardContent>
         </Card>
 
         <Card className="sm:col-span-2 lg:col-span-1">
           <CardHeader>
-            <CardTitle className="text-sm font-medium text-gray-600">
+            <CardTitle className="text-sm font-normal text-muted-foreground">
               最近7天
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl sm:text-3xl font-bold text-gray-900">
+            <div className="text-2xl sm:text-3xl font-normal text-foreground">
               {info?.last7dRequests?.toLocaleString() || 0}
             </div>
-            <p className="text-xs text-gray-500 mt-2">过去一周的请求数</p>
+            <p className="text-xs text-muted-foreground mt-2">过去一周的请求数</p>
           </CardContent>
         </Card>
       </div>
@@ -352,12 +378,12 @@ export default function TokensPage() {
           </CardHeader>
           <CardContent>
             <div className="text-sm">
-              <p className="text-gray-600 mb-2">最常用接口:</p>
-              <p className="font-mono text-blue-600 text-xs sm:text-sm break-all">{info.mostUsedEndpoint}</p>
+              <p className="text-muted-foreground mb-2">最常用接口:</p>
+              <p className="font-mono text-primary text-xs sm:text-sm break-all">{info.mostUsedEndpoint}</p>
             </div>
             {info.lastUsedAt && (
               <div className="text-sm mt-4">
-                <p className="text-gray-600 mb-2">最后使用时间:</p>
+                <p className="text-muted-foreground mb-2">最后使用时间:</p>
                 <p className="font-mono text-xs sm:text-sm">{new Date(info.lastUsedAt).toLocaleString('zh-CN')}</p>
               </div>
             )}
@@ -370,28 +396,30 @@ export default function TokensPage() {
         <CardHeader>
           <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
             <CardTitle>使用记录</CardTitle>
-            <button
-              onClick={exportToCSV}
-              className="px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 self-start sm:self-auto"
+                <Button
+                  onClick={exportToCSV}
+                  variant="secondary"
+                  size="sm"
+                  className="self-start sm:self-auto"
             >
-              📥 导出CSV
-            </button>
+              <Download className="size-4" />导出 CSV
+            </Button>
           </div>
         </CardHeader>
         <CardContent>
           {/* 搜索和过滤 */}
           <div className="mb-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <input
+            <Input
               type="text"
               placeholder="搜索接口..."
               value={searchEndpoint}
               onChange={(e) => setSearchEndpoint(e.target.value)}
-              className="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="px-3 py-2 text-sm border border-border rounded-md focus:ring-2 focus:ring-ring focus:border-transparent"
             />
-            <select
+            <Select
               value={filterMethod}
               onChange={(e) => setFilterMethod(e.target.value)}
-              className="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="px-3 py-2 text-sm border border-border rounded-md focus:ring-2 focus:ring-ring focus:border-transparent"
             >
               <option value="">所有方法</option>
               <option value="GET">GET</option>
@@ -399,17 +427,17 @@ export default function TokensPage() {
               <option value="PUT">PUT</option>
               <option value="PATCH">PATCH</option>
               <option value="DELETE">DELETE</option>
-            </select>
-            <select
+            </Select>
+            <Select
               value={filterStatus}
               onChange={(e) => setFilterStatus(e.target.value)}
-              className="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="px-3 py-2 text-sm border border-border rounded-md focus:ring-2 focus:ring-ring focus:border-transparent"
             >
               <option value="">所有状态</option>
               <option value="2xx">2xx 成功</option>
               <option value="4xx">4xx 客户端错误</option>
               <option value="5xx">5xx 服务器错误</option>
-            </select>
+            </Select>
           </div>
 
           {filteredLogs.length > 0 ? (
@@ -418,16 +446,16 @@ export default function TokensPage() {
                 <table className="min-w-full text-sm">
                   <thead>
                     <tr className="border-b">
-                      <th className="text-left py-3 px-4 font-medium text-gray-600 whitespace-nowrap">时间</th>
-                      <th className="text-left py-3 px-4 font-medium text-gray-600 whitespace-nowrap">接口</th>
-                      <th className="text-left py-3 px-4 font-medium text-gray-600 whitespace-nowrap">方法</th>
-                      <th className="text-left py-3 px-4 font-medium text-gray-600 whitespace-nowrap">状态码</th>
-                      <th className="text-left py-3 px-4 font-medium text-gray-600 whitespace-nowrap hidden md:table-cell">IP地址</th>
+                      <th className="text-left py-3 px-4 font-normal text-muted-foreground whitespace-nowrap">时间</th>
+                      <th className="text-left py-3 px-4 font-normal text-muted-foreground whitespace-nowrap">接口</th>
+                      <th className="text-left py-3 px-4 font-normal text-muted-foreground whitespace-nowrap">方法</th>
+                      <th className="text-left py-3 px-4 font-normal text-muted-foreground whitespace-nowrap">状态码</th>
+                      <th className="text-left py-3 px-4 font-normal text-muted-foreground whitespace-nowrap hidden md:table-cell">IP地址</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filteredLogs.map((log) => (
-                      <tr key={log.id} className="border-b hover:bg-gray-50">
+                      <tr key={log.id} className="border-b hover:bg-muted">
                         <td className="py-3 px-4 whitespace-nowrap text-xs sm:text-sm">
                           {new Date(log.createdAt).toLocaleString('zh-CN', {
                             month: '2-digit',
@@ -439,14 +467,14 @@ export default function TokensPage() {
                         <td className="py-3 px-4 font-mono text-xs max-w-xs truncate">{log.endpoint}</td>
                         <td className="py-3 px-4">
                           <span
-                            className={`px-2 py-1 rounded text-xs font-medium whitespace-nowrap ${
-                              log.method === 'GET'
-                                ? 'bg-blue-100 text-blue-700'
+                            className={`px-2 py-1 rounded text-xs font-normal whitespace-nowrap ${
+                                  log.method === 'GET'
+                                    ? 'bg-primary text-primary-foreground'
                                 : log.method === 'POST'
-                                ? 'bg-green-100 text-green-700'
+                                ? 'bg-secondary text-foreground'
                                 : log.method === 'PUT' || log.method === 'PATCH'
-                                ? 'bg-yellow-100 text-yellow-700'
-                                : 'bg-red-100 text-red-700'
+                                ? 'bg-muted text-foreground'
+                                : 'bg-destructive/10 text-destructive'
                             }`}
                           >
                             {log.method}
@@ -454,18 +482,18 @@ export default function TokensPage() {
                         </td>
                         <td className="py-3 px-4">
                           <span
-                            className={`px-2 py-1 rounded text-xs font-medium whitespace-nowrap ${
+                            className={`px-2 py-1 rounded text-xs font-normal whitespace-nowrap ${
                               log.statusCode >= 200 && log.statusCode < 300
-                                ? 'bg-green-100 text-green-700'
+                                ? 'bg-secondary text-foreground'
                                 : log.statusCode >= 400 && log.statusCode < 500
-                                ? 'bg-yellow-100 text-yellow-700'
-                                : 'bg-red-100 text-red-700'
+                                ? 'bg-muted text-foreground'
+                                : 'bg-destructive/10 text-destructive'
                             }`}
                           >
                             {log.statusCode}
                           </span>
                         </td>
-                        <td className="py-3 px-4 font-mono text-xs text-gray-600 hidden md:table-cell">
+                        <td className="py-3 px-4 font-mono text-xs text-muted-foreground hidden md:table-cell">
                           {log.ipAddress || '-'}
                         </td>
                       </tr>
@@ -475,25 +503,27 @@ export default function TokensPage() {
               </div>
             </div>
           ) : (
-            <div className="text-center text-gray-400 py-8">
+            <div className="text-center text-muted-foreground py-8">
               {searchEndpoint || filterMethod || filterStatus ? '没有匹配的记录' : '暂无使用记录'}
             </div>
           )}
 
           {/* 显示过滤结果统计 */}
           {(searchEndpoint || filterMethod || filterStatus) && (
-            <div className="mt-4 text-sm text-gray-600">
+            <div className="mt-4 text-sm text-muted-foreground">
               显示 {filteredLogs.length} / {logs?.logs.length || 0} 条记录
-              <button
-                onClick={() => {
+                  <Button
+                    variant="link"
+                    size="sm"
+                    onClick={() => {
                   setSearchEndpoint('');
                   setFilterMethod('');
                   setFilterStatus('');
                 }}
-                className="ml-4 text-blue-600 hover:text-blue-700"
+                    className="ml-2 h-auto p-0"
               >
                 清除过滤
-              </button>
+              </Button>
             </div>
           )}
         </CardContent>

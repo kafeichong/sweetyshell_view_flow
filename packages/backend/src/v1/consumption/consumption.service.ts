@@ -30,6 +30,18 @@ export interface ConsumptionTrend {
   taskCount: number;
 }
 
+export interface GlobalConsumptionOverview {
+  daily: GlobalConsumptionPeriod;
+  monthly: GlobalConsumptionPeriod;
+}
+
+export interface GlobalConsumptionPeriod {
+  settled: string;
+  reserved: string;
+  total: string;
+  taskCount: number;
+}
+
 @Injectable()
 export class ConsumptionService {
   constructor(
@@ -142,6 +154,78 @@ export class ConsumptionService {
         amount: (t._sum.settledCny || new Prisma.Decimal(0)).toFixed(6),
         taskCount: t._count,
       })),
+    };
+  }
+
+  async getGlobalOverview(): Promise<GlobalConsumptionOverview> {
+    const now = new Date();
+    const shanghaiTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Shanghai' }));
+    const dayKey = shanghaiTime.toISOString().split('T')[0];
+    const monthKey = `${shanghaiTime.getFullYear()}-${String(shanghaiTime.getMonth() + 1).padStart(2, '0')}`;
+
+    const [dailySettled, dailyReserved, monthlySettled, monthlyReserved] = await Promise.all([
+      this.prisma.taskBudgetReservation.aggregate({
+        where: { dayKey, state: 'settled' },
+        _sum: { settledCny: true },
+        _count: true,
+      }),
+      this.prisma.taskBudgetReservation.aggregate({
+        where: { dayKey, state: { in: ['reserved', 'review'] } },
+        _sum: { reservedCny: true },
+        _count: true,
+      }),
+      this.prisma.taskBudgetReservation.aggregate({
+        where: { monthKey, state: 'settled' },
+        _sum: { settledCny: true },
+        _count: true,
+      }),
+      this.prisma.taskBudgetReservation.aggregate({
+        where: { monthKey, state: { in: ['reserved', 'review'] } },
+        _sum: { reservedCny: true },
+        _count: true,
+      }),
+    ]);
+
+    return {
+      daily: this.toGlobalPeriod(dailySettled, dailyReserved),
+      monthly: this.toGlobalPeriod(monthlySettled, monthlyReserved),
+    };
+  }
+
+  async getGlobalTrends(days: number): Promise<{ trends: ConsumptionTrend[] }> {
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+    const startDayKey = startDate.toISOString().split('T')[0];
+
+    const trends = await this.prisma.taskBudgetReservation.groupBy({
+      by: ['dayKey'],
+      where: {
+        state: 'settled',
+        dayKey: { gte: startDayKey },
+      },
+      _sum: { settledCny: true },
+      _count: true,
+      orderBy: { dayKey: 'asc' },
+    });
+
+    return {
+      trends: trends.map((trend) => ({
+        date: trend.dayKey,
+        amount: (trend._sum.settledCny || new Prisma.Decimal(0)).toFixed(6),
+        taskCount: trend._count,
+      })),
+    };
+  }
+
+  private toGlobalPeriod(settledAggregate: any, reservedAggregate: any): GlobalConsumptionPeriod {
+    const settled = settledAggregate._sum.settledCny || new Prisma.Decimal(0);
+    const reserved = reservedAggregate._sum.reservedCny || new Prisma.Decimal(0);
+
+    return {
+      settled: settled.toFixed(6),
+      reserved: reserved.toFixed(6),
+      total: settled.add(reserved).toFixed(6),
+      taskCount: (settledAggregate._count || 0) + (reservedAggregate._count || 0),
     };
   }
 }

@@ -226,4 +226,70 @@ describe('ConsumptionService', () => {
       expect(result.trends[0].taskCount).toBe(0);
     });
   });
+
+  describe('getGlobalOverview', () => {
+    it('returns real daily and monthly settled and pending totals for administrators', async () => {
+      prisma.taskBudgetReservation.aggregate
+        .mockResolvedValueOnce({
+          _sum: { settledCny: new Prisma.Decimal('12.500000') },
+          _count: 3,
+        })
+        .mockResolvedValueOnce({
+          _sum: { reservedCny: new Prisma.Decimal('2.250000') },
+          _count: 1,
+        })
+        .mockResolvedValueOnce({
+          _sum: { settledCny: new Prisma.Decimal('80.000000') },
+          _count: 16,
+        })
+        .mockResolvedValueOnce({
+          _sum: { reservedCny: new Prisma.Decimal('7.500000') },
+          _count: 2,
+        });
+
+      const result = await service.getGlobalOverview();
+
+      expect(result.daily).toEqual({
+        settled: '12.500000',
+        reserved: '2.250000',
+        total: '14.750000',
+        taskCount: 4,
+      });
+      expect(result.monthly).toEqual({
+        settled: '80.000000',
+        reserved: '7.500000',
+        total: '87.500000',
+        taskCount: 18,
+      });
+      expect(prisma.taskBudgetReservation.aggregate).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          where: expect.objectContaining({ state: { in: ['reserved', 'review'] } }),
+        }),
+      );
+    });
+  });
+
+  describe('getGlobalTrends', () => {
+    it('returns global settled consumption grouped by day', async () => {
+      prisma.taskBudgetReservation.groupBy.mockResolvedValue([
+        {
+          dayKey: '2026-09-20',
+          _sum: { settledCny: new Prisma.Decimal('21.750000') },
+          _count: 6,
+        },
+      ]);
+
+      const result = await service.getGlobalTrends(30);
+
+      expect(result.trends).toEqual([
+        { date: '2026-09-20', amount: '21.750000', taskCount: 6 },
+      ]);
+      expect(prisma.taskBudgetReservation.groupBy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.not.objectContaining({ actorId: expect.anything() }),
+        }),
+      );
+    });
+  });
 });

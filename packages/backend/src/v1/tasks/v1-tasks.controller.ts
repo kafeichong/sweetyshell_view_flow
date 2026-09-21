@@ -14,6 +14,7 @@ import {
   Query,
   ServiceUnavailableException,
   UseGuards,
+  SetMetadata,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiHeader, ApiTags } from '@nestjs/swagger';
 import { ApiCredentialGuard } from '../../auth/api-credential.guard';
@@ -24,6 +25,7 @@ import { TasksService } from '../../tasks/tasks.service';
 import { WorkflowCatalogService, WorkflowContractError } from '../../tasks/workflow-catalog.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { TaskListService } from './task-list.service';
+import { TaskShowcaseService } from './task-showcase.service';
 
 @ApiTags('tasks')
 @ApiBearerAuth('actor-token')
@@ -36,11 +38,35 @@ export class V1TasksController {
     private readonly workflowCatalog: WorkflowCatalogService,
     private readonly productionSubmission: ProductionSubmissionService,
     private readonly taskListService: TaskListService,
+    private readonly showcaseService: TaskShowcaseService,
   ) {}
 
   @Get('/workflows')
   workflows() {
     return this.workflowCatalog.directory();
+  }
+
+  @Get('/showcase/tasks')
+  @SetMetadata('isPublic', true)
+  async getShowcaseTasks(
+    @Query('page') page = '1',
+    @Query('limit') limit = '20',
+  ) {
+    const pageNum = Math.max(parseInt(page, 10) || 1, 1);
+    const limitNum = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 100);
+    return this.showcaseService.getShowcaseTasks(pageNum, limitNum);
+  }
+
+  @Get('/showcase/tasks/:id')
+  @SetMetadata('isPublic', true)
+  async getShowcaseTaskDetail(@Param('id') id: string) {
+    return this.showcaseService.getTaskDetail(id);
+  }
+
+  @Get('/showcase/videos/:assetId')
+  @SetMetadata('isPublic', true)
+  async getShowcaseVideoUrl(@Param('assetId') assetId: string) {
+    return this.showcaseService.getVideoPreviewUrl(assetId);
   }
 
   @Get()

@@ -22,7 +22,7 @@ export default function Home() {
 
   return (
     <div className="min-h-screen flex items-center justify-center">
-      <div className="text-gray-500">加载中...</div>
+      <div className="text-muted-foreground">加载中...</div>
     </div>
   );
 }

@@ -48,16 +48,14 @@ export interface TaskSummary {
 }
 
 export interface TaskDetail {
-  task: {
-    id: string;
-    actorId: string | null;
-    status: string;
-    deliveryStatus: string | null;
-    createdAt: Date;
-    updatedAt: Date;
-    completedAt: Date | null;
-    errorMsg: string | null;
-  };
+  id: string;
+  actorId: string | null;
+  status: string;
+  deliveryStatus: string | null;
+  errorMessage: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  completedAt: Date | null;
   submissionDetails: {
     workflow: {
       key: string | null;
@@ -116,8 +114,9 @@ export interface TaskDetail {
     finishedAt: Date | null;
   }>;
   assets: Array<{
-    assetId: string;
+    id: string;
     role: string;
+    mediaType: string;
     objectKey: string;
     mimeType: string | null;
     sizeBytes: number | null;
@@ -146,12 +145,20 @@ export class TaskListService {
   constructor(private readonly prisma: PrismaService) {}
 
   async listTasks(actorId: string, query: TaskListQuery) {
+    return this.listTasksWithScope(query, actorId);
+  }
+
+  async listAllTasks(query: TaskListQuery) {
+    return this.listTasksWithScope(query);
+  }
+
+  private async listTasksWithScope(query: TaskListQuery, actorId?: string) {
     const { page, limit, status, workflowKey, startDate, endDate } = query;
     const skip = (page - 1) * limit;
 
     // 构建查询条件
     const where: Prisma.TaskWhereInput = {
-      actorId,
+      ...(actorId ? { actorId } : {}),
       ...(status && { status }),
       ...(startDate &&
         endDate && {
@@ -204,7 +211,23 @@ export class TaskListService {
   }
 
   async getTaskDetail(actorId: string, taskId: string): Promise<TaskDetail> {
-    const task = await this.prisma.task.findUnique({
+    const task = await this.findTaskDetail(taskId);
+
+    if (!task || task.actorId !== actorId) {
+      throw new NotFoundException('Task not found');
+    }
+
+    return this.formatTaskDetail(task);
+  }
+
+  async getAnyTaskDetail(taskId: string): Promise<TaskDetail> {
+    const task = await this.findTaskDetail(taskId);
+    if (!task) throw new NotFoundException('Task not found');
+    return this.formatTaskDetail(task);
+  }
+
+  private findTaskDetail(taskId: string) {
+    return this.prisma.task.findUnique({
       where: { id: taskId },
       include: {
         executionAttempts: { orderBy: { attemptNo: 'desc' } },
@@ -213,11 +236,6 @@ export class TaskListService {
       },
     });
 
-    if (!task || task.actorId !== actorId) {
-      throw new NotFoundException('Task not found');
-    }
-
-    return this.formatTaskDetail(task);
   }
 
   private formatTaskSummary(task: any): TaskSummary {
@@ -255,16 +273,14 @@ export class TaskListService {
     const plan = task.executionPlan as any;
 
     return {
-      task: {
-        id: task.id,
-        actorId: task.actorId,
-        status: task.status,
-        deliveryStatus: task.deliveryStatus,
-        createdAt: task.createdAt,
-        updatedAt: task.updatedAt,
-        completedAt: task.completedAt,
-        errorMsg: task.errorMsg,
-      },
+      id: task.id,
+      actorId: task.actorId,
+      status: task.status,
+      deliveryStatus: task.deliveryStatus,
+      errorMessage: task.errorMsg,
+      createdAt: task.createdAt,
+      updatedAt: task.updatedAt,
+      completedAt: task.completedAt,
       submissionDetails: {
         workflow: {
           key: plan?.workflowKey || null,
@@ -323,8 +339,9 @@ export class TaskListService {
         finishedAt: attempt.finishedAt,
       })),
       assets: task.assets.map((asset: any) => ({
-        assetId: asset.id,
+        id: asset.id,
         role: asset.role,
+        mediaType: asset.mediaType,
         objectKey: asset.objectKey,
         mimeType: asset.mimeType,
         sizeBytes: typeof asset.sizeBytes === 'bigint' ? Number(asset.sizeBytes) : asset.sizeBytes,

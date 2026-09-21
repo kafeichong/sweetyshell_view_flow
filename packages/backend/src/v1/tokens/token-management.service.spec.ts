@@ -17,12 +17,25 @@ describe('TokenManagementService', () => {
         create: jest.fn(),
         findMany: jest.fn(),
         deleteMany: jest.fn(),
+        count: jest.fn().mockResolvedValue(0),
       },
       actorCredential: {
         findUnique: jest.fn(),
         findMany: jest.fn(),
         update: jest.fn(),
       },
+      taskBudgetReservation: {
+        groupBy: jest.fn(),
+        count: jest.fn().mockResolvedValue(0),
+      },
+      task: {
+        count: jest.fn().mockResolvedValue(0),
+        groupBy: jest.fn(),
+      },
+      asset: { count: jest.fn().mockResolvedValue(0) },
+      preflightRecord: { count: jest.fn().mockResolvedValue(0) },
+      costAlert: { count: jest.fn().mockResolvedValue(0) },
+      costReconciliation: { count: jest.fn().mockResolvedValue(0) },
       $transaction: jest.fn((operations) => Promise.all(operations)),
     };
 
@@ -187,6 +200,7 @@ describe('TokenManagementService', () => {
       expect(result.hasMore).toBe(false);
       expect(result.nextCursor).toBeNull();
       expect(result.logs[0]).toEqual({
+        id: 'log-1',
         endpoint: '/v1/consumption/overview',
         method: 'GET',
         statusCode: 200,
@@ -257,12 +271,67 @@ describe('TokenManagementService', () => {
       ];
 
       prisma.actorCredential.findMany.mockResolvedValue(credentials);
+      prisma.taskBudgetReservation.groupBy
+        .mockResolvedValueOnce([
+          { actorId: 'actor-1', _sum: { settledCny: new Prisma.Decimal('3.250000') } },
+        ])
+        .mockResolvedValueOnce([
+          { actorId: 'actor-1', _sum: { settledCny: new Prisma.Decimal('42.500000') } },
+        ])
+        .mockResolvedValueOnce([
+          { actorId: 'actor-1', state: 'reserved', _sum: { reservedCny: new Prisma.Decimal('5.000000') } },
+          { actorId: 'actor-1', state: 'review', _sum: { reservedCny: new Prisma.Decimal('7.500000') } },
+        ]);
+      prisma.task.groupBy
+        .mockResolvedValueOnce([
+          { actorId: 'actor-1', _count: { _all: 10 } },
+          { actorId: 'actor-2', _count: { _all: 2 } },
+        ])
+        .mockResolvedValueOnce([
+          { createdBy: 'actor-1', _count: { _all: 1 } },
+        ])
+        .mockResolvedValueOnce([
+          { actorId: 'actor-1', _count: { _all: 3 } },
+          { actorId: 'actor-2', _count: { _all: 1 } },
+        ])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([
+          { actorId: 'actor-1', _count: { _all: 8 } },
+          { actorId: 'actor-2', _count: { _all: 1 } },
+        ])
+        .mockResolvedValueOnce([
+          { createdBy: 'actor-1', _count: { _all: 1 } },
+        ]);
 
       const result = await service.listAllTokens();
 
       expect(result).toHaveLength(2);
       expect(result[0].actorId).toBe('actor-1');
       expect(result[1].actorId).toBe('actor-2');
+      expect(result[0].canDelete).toBe(false);
+      expect(result[1].canDelete).toBe(true);
+      expect(result[0].businessUsage).toEqual({
+        totalTasks: 11,
+        monthlyTasks: 3,
+        successfulTasks: 9,
+      });
+      expect(result[1].businessUsage).toEqual({
+        totalTasks: 2,
+        monthlyTasks: 1,
+        successfulTasks: 1,
+      });
+      expect(result[0].spending).toEqual({
+        dailySettled: '3.250000',
+        monthlySettled: '42.500000',
+        reserved: '5.000000',
+        review: '7.500000',
+      });
+      expect(result[1].spending).toEqual({
+        dailySettled: '0.000000',
+        monthlySettled: '0.000000',
+        reserved: '0.000000',
+        review: '0.000000',
+      });
     });
   });
 

@@ -1,6 +1,6 @@
 # Video Flow 项目现状（权威）
 
-> 最后核验：2026-09-15
+> 最后核验：2026-09-21
 > 本轮核验方式：本地源码评审、三包回归、合同资源校验、隔离 PostgreSQL 全新/历史迁移、真实 Nest HTTP/数据库合同，Comfy Desktop + Fake Provider/Fake OSS 的实际 Queue、下载、落盘和播放，以及 R8 在生产环境、真实火山账号上的受控付费验收与收口（真实调用 Provider、真实产生费用，见下）。
 > 本文是**唯一**描述"系统现在是什么样"的文档。任何历史文档与本文冲突时，以本文为准；如果本文与代码冲突，以代码为准并立即更新本文。
 
@@ -8,6 +8,57 @@
 
 ## 0. 本轮交付判断
 
+### 2026-09-21：Backend 全量单测恢复通过（PR #8，未合并/未部署）
+
+PR #8 的 `backend / unit` CI 暴露并已修复 4 个既有测试阻塞：`ApiCredentialGuard` 引入 `Reflector` 后，三个旧 spec 未同步 mock Nest 12 的 `@nestjs/core`，其中任务控制器 spec 还缺少 `SetMetadata` 装饰器 mock；Token 使用日志已经返回游标所需的 `id`，旧断言未同步。修复仅涉及测试装配与断言，没有修改生产 Guard、控制器或服务行为。实现：`packages/backend/src/auth/api-credential.guard.spec.ts`、`packages/backend/src/v1/tasks/v1-tasks.controller.spec.ts`、`packages/backend/src/v1/assets/v1-assets.controller.spec.ts`、`packages/backend/src/v1/tokens/token-management.service.spec.ts`。
+
+本地验证：四个相关 spec 51/51 通过；`npm run build` 通过；Backend 全量 Jest 35 suites、377 tests 全部通过。PR 更新后的 GitHub Actions 仍需重新运行确认，本条不代表已合并或部署。
+
+### 2026-09-21：管理员任务历史鉴权修复（本地 Docker 已更新）
+
+管理员登录后 `/history` 不再把 Admin Token 错当 Actor Bearer Token。新增受 `AdminTokenGuard` 保护的只读接口 `GET /api/v1/admin/history/tasks`、`GET /api/v1/admin/history/tasks/:taskId` 和 `GET /api/v1/admin/history/assets/:assetId/download`；普通用户继续使用 Actor 隔离的 `/api/v1/tasks` 与 `/api/v1/assets`，未放宽数据边界。Frontend 根据 `auth_mode` 选择对应路径和请求头。已重建本地 Docker `video-backend`，Admin Token 实连列表返回 HTTP 200（首屏 20 条），首条任务详情返回 HTTP 200。Backend build 与相关 24 项 Jest、Frontend 28 项测试、TypeScript、Next build、`git diff --check` 均通过。实现：`packages/backend/src/v1/admin/v1-admin-history.controller.ts`、`packages/backend/src/v1/tasks/task-list.service.ts`、`packages/frontend/app/(app)/history/page.tsx`。
+
+### 2026-09-21：消费看板数据契约修复（本地工作区，未提交/未部署）
+
+普通用户消费看板已对齐后端当前的 `daily/monthly` 嵌套结构与趋势字段 `date/amount/taskCount`，不再读取已废弃的 `todayCny/monthCny/dayKey/totalCny`。管理员看板不再使用页面内写死的零值，新增受 `AdminTokenGuard` 保护的全站概览与趋势接口，并展示今日/本月已结算、预占/待复核、任务数、已结算趋势和本月用户排行。金额口径、接口和验证命令见 [消费看板口径与接口](./runbooks/consumption-dashboard.md)。实现：`packages/backend/src/v1/consumption/consumption.service.ts`、`packages/backend/src/v1/admin/v1-admin-consumption.controller.ts`、`packages/frontend/app/(app)/dashboard/page.tsx`、`packages/frontend/components/charts/TrendChart.tsx`。
+
+本地验证：Backend `npm run build` 通过，消费与对账服务 Jest 21/21 通过；Frontend `npm test` 27/27、`npx tsc --noEmit`、`npm run build -- --webpack` 和 `git diff --check` 均通过。Backend 全量 Jest 仍为 30 suites 通过、4 suites 失败：1 个既有 Token 日志 `id` 断言差异，3 个既有 Nest 12 ESM 测试装配错误；本次消费服务用例无失败。已重建本地 Docker `video-backend`（PostgreSQL、Worker 未重建），使用有效 Admin Token 实连 `overview`、`trends?days=30`、`summary` 均返回 HTTP 200；尚未做浏览器视觉验收。
+
+### 2026-09-21：用户 Token 管理收口（本地工作区，未提交/未部署）
+
+普通用户侧边栏已移除 Token 入口，直接访问 `/tokens` 会跳转消费看板；管理员侧边栏改为“用户 Token”。`GET /api/v1/admin/tokens` 继续由 `AdminTokenGuard` 保护，返回的每个用户新增今日/本月已结算、当前预占和待审核四项费用字段。实现：`packages/backend/src/v1/tokens/token-management.service.ts`、`packages/frontend/app/(app)/tokens/page.tsx`、`packages/frontend/components/app-sidebar.tsx`；口径和验收见 [用户 Token 管理](./runbooks/user-token-management.md)。
+
+管理员 `/users` 已将单向“禁用用户”操作改为“访问权限”开关：停用调用 `PATCH /api/v1/admin/credentials/:actorId/revoke`，重新启用调用新增的 `PATCH /api/v1/admin/credentials/:actorId/activate`。启用和停用只改变凭证状态，不替换 `tokenHash`，因此重新启用后原 Token 恢复有效；疑似泄露的 Token 仍须通过重新签发进行轮换。实现：`packages/backend/src/auth/credentials.service.ts`、`packages/backend/src/v1/admin/v1-credentials.controller.ts`、`packages/frontend/app/(app)/users/page.tsx`。定向 Jest 2/2、Backend build、Frontend 29 项测试、TypeScript 检查和 Next Webpack 生产构建通过；默认 Turbopack build 在当前执行环境因内部进程绑定端口返回 `Operation not permitted`。本地 Docker `video-backend` 已重建，启动日志确认 `/activate` 路由加载；使用容器现有 Admin Token 实连启用 `preview-gate-check` 返回 HTTP 200 和 `status=active`。尚没有浏览器视觉验收证据。
+
+创建用户弹窗已拆成表单态与一次性 Token 成功态：成功后不再保留表单和创建按钮，避免误点导致同一 Actor 被重新签发并让旧 Token 失效；成功态提供单独复制、复制并关闭、继续创建，关闭或继续创建都会清除前端内存中的一次性 Token。状态逻辑：`packages/frontend/lib/user-create-dialog.ts`；回归：`packages/frontend/tests/user-create-dialog.test.mjs`。Frontend 31/31、TypeScript 和 Next Webpack 生产构建通过；浏览器自动化连接本地标签超时，尚未完成实际点击验收。
+
+管理员可永久删除完全无数据的空账号。`GET /api/v1/admin/tokens` 新增服务端 `canDelete` 判定；只有 `usageCount=0` 且没有任务、素材、预算、预检、预警、对账和 Token 日志时，前端才显示删除入口。`DELETE /api/v1/admin/credentials/:actorId` 要求 body 中 `confirmActorId` 完全匹配，并在事务内重新检查；有历史数据返回 409。实现：`packages/backend/src/auth/actor-data.ts`、`packages/backend/src/auth/credentials.service.ts`、`packages/frontend/app/(app)/users/page.tsx`。Backend 删除定向 Jest 4/4、列表判定 1/1、Backend build、Frontend 32/32 和 Next Webpack build 通过。已重建本地 Docker Backend；实连列表 HTTP 200，当前 25 个账号中 10 个判定可删除；使用错误确认值调用 DELETE 返回 HTTP 400，未删除任何账号。
+
+用户卡片已补齐独立“轮换 Token”入口。`POST /api/v1/admin/credentials/:actorId/rotate-token` 要求输入完整 Actor ID，成功后旧 Token 立即失效，新 Token 仅显示一次并可复制；轮换只替换哈希及清空最近使用信息，不改变访问状态，停用账号轮换后仍保持停用。Backend 凭证定向 Jest 5/5、Backend build、Frontend 32/32、TypeScript 与 Next Webpack build 通过。本地 Docker Backend 已重建；使用错误确认值实连返回 HTTP 400，未轮换任何现有 Token。
+
+`/users` 用户卡片的主要数据已从日/月额度和 API 使用次数替换为累计生成任务、本月生成任务、成功任务、本月实际花费。任务数包含成功和失败的正式生成任务、排除 Preview；成功兼容 `status=completed` 与 `taskStatus=completed`；本月按上海时区；实际花费只统计已结算 `settledCny`。历史 `actorId IS NULL` 任务按 `createdBy` 回退且不重复计数。Backend 列表统计定向 Jest 1/1、Backend build、Frontend 32/32、TypeScript 与 Next Webpack build 通过；本地 Docker Backend 已重建，实连 HTTP 200：`creative-yuyo` 为 1/1/1、¥7.623000，`creative-zhuyang` 为 4/4/3、¥27.369930（依次为累计/本月/成功/本月实际花费）。
+
+Next Fast Refresh 在接口升级时曾保留旧版 `users` state，导致渲染读取缺失的 `businessUsage.totalTasks`。前端现通过 `packages/frontend/lib/user-business-usage.ts` 在渲染边界兼容新旧响应：缺失任务指标和花费安全显示为 0，当前接口的真实值保持不变。兼容回归 3/3、Frontend 全量 35/35、TypeScript 与 Next Webpack build 通过。
+
+### 2026-09-20：Frontend 收口为 shadcn/ui New York 单一视觉体系（本地工作区，未提交/未部署）
+
+`packages/frontend/components.json` 继续以 `style=new-york`、`baseColor=zinc`、CSS Variables 为唯一设计源。正式页面已清除旧蓝紫渐变、玻璃效果、固定 Tailwind 色阶、装饰性大阴影和页面级大圆角；`/history` 已改为统一 Page Header、状态、选中态、详情 Card、Badge 与分页结构。登录、预警、对账、Token、Users 和案例页面的原生表单/旧固定色同步迁移到 shadcn 风格组件或语义 token。
+
+新增 `tests/shadcn-style-contract.test.mjs`，会扫描正式 `app` 页面与业务组件并拒绝旧视觉模式、固定白黑/警告色以及绕过公共组件的原生表单控件。测试在迁移前实际捕获 28 组旧样式，迁移后通过。未被路由引用的 `history/page-old.tsx`、`history/page-appica.tsx` 已在引用与功能项核对后移除。
+
+本地验证（`packages/frontend`）：
+
+- `npm test`：4 passed；
+- `npx tsc --noEmit`：退出码 0；
+- `npm run build -- --webpack`：退出码 0，11 个正式路由全部完成构建；
+- `git diff --check`：退出码 0；
+- `npx eslint app components lib tests`：**未通过**，23 errors / 11 warnings。主要为旧页面既有的 Effect 调用声明顺序、Effect 同步 setState 和历史 `any`；本轮不把测试/构建通过表述为 ESLint 全绿。
+
+运行时边界：尝试启动当前前端时，3000 端口被旧进程占用，当前代码启动到 3001；但 Chrome 自动化创建标签超时、内置浏览器不可用，因此尚无桌面/窄屏逐页截图验收证据。Backend 3001 同时未作为本轮样式验收的可用真实数据服务。本条只代表本地代码、测试、类型和生产构建状态，**不代表提交、推送、Docker 部署或用户视觉验收完成**。
+
+案例详情公开素材接口已扩展：`GET /api/v1/tasks/showcase/tasks/:id` 从任务冻结的 `executionPlan.media` 中提取明确引用的输入 Asset，只公开 `image/*` 与 `video/*`，保持执行计划顺序并跳过已缺失的历史资产；前端 `/showcase/[taskId]` 以“参考素材”区块展示图片缩略图和视频播放器。当前产品决策为这些输入图片/视频随案例公开，接口继续保持 `isPublic=true`；参考音频不返回。源码：`packages/backend/src/v1/tasks/task-showcase.service.ts`、`packages/frontend/app/(app)/showcase/[taskId]/page.tsx`；接口和验收方式见 [案例广场公开素材接口](./runbooks/showcase-public-media.md)。
+
+本地 Docker 已重建 `video-backend` 并做真实接口验收：案例 `c3ca48af-2df3-4a58-9926-93688ef09f92`（“多模态参考”）返回 3 个 `reference_image`，均含 300 秒签名地址、实际 MIME 和 1611×912 尺寸；数据库中该任务的冻结 `executionPlan.media` 也只有这 3 张图，未记录参考视频。针对性 Backend Jest、Backend build、Frontend 16 项测试、TypeScript 检查和 Next.js Webpack 构建均通过；Backend 全量 Jest 仍有 4 个既有失败（Token 日志断言 1 个，Nest/Jest ESM mock 装配 3 个），与本次公开素材变更无关，不表述为全量测试全绿。
 ### 2026-09-18：客户端素材库两条路补齐；入库时机改到正式提交（分支 `feat/ark-nodes-in-multi-reference`，**未部署**）
 
 **先纠正上一节的状态**：2026-09-17 那条写的是「后端完整，**客户端未做**」——客户端那半已经做了（素材库选择节点、本机文件的上传入库槽位、人像模板）。

@@ -94,14 +94,21 @@ export class ReconciliationService {
    * 获取对账记录
    */
   async getReconciliation(monthKey: string, actorId?: string): Promise<ReconciliationRecord | null> {
-    const record = await this.prisma.costReconciliation.findUnique({
-      where: {
-        monthKey_actorId: {
-          monthKey,
-          actorId: actorId || null,
-        },
-      },
-    });
+    const record = actorId
+      ? await this.prisma.costReconciliation.findUnique({
+          where: {
+            monthKey_actorId: {
+              monthKey,
+              actorId,
+            },
+          },
+        })
+      : await this.prisma.costReconciliation.findFirst({
+          where: {
+            monthKey,
+            actorId: null,
+          },
+        });
 
     return record ? this.mapToRecord(record) : null;
   }
