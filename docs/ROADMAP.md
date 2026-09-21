@@ -661,3 +661,166 @@ git diff --check
 ### 9.4 修订记录
 
 - 2026-09-20：根据已确认的单一设计系统规格新增 F1–F6；选定 shadcn/ui New York v4 为唯一视觉体系，先以 `/history` 建立参考实现，再完成全站迁移和旧实现清理。
+
+## 10. 火山账单直连与用户消费分摊 MVP（2026-09-21 已确认设计）
+
+本节只记录待实现设计。当前消费、费用状态和既有对账能力以 [PROJECT_STATUS](./PROJECT_STATUS.md) 为准；实现完成前不得把本节描述为现状。
+
+### 10.1 目标与成功标准
+
+管理员在 `/reconciliation` 选择账期后，由 Backend 直接调用火山引擎费用中心 OpenAPI 获取正式账单，不再要求人工登录火山后台下载并上传 CSV。系统以当月每个 Actor 已结算的任务用量金额作为分摊基数，生成每个人的账单分摊消费；管理员确认后，管理员和普通用户分别看到全站或本人结果。
+
+MVP 成功必须同时满足：
+
+- 火山账单来源是 Backend 使用账单专用 AK/SK 调用的 `ListBillDetail`，并用 `ListBill` 做账单总额复核；Frontend、Worker 和客户端均不持有账单凭证。
+- 分摊基数只统计正式任务中状态为 `settled` 的 `TaskBudgetReservation.settledCny`；Preview、预占、待复核和无结算依据的任务不进入正常分摊。
+- 每个 Actor 的分摊金额按 `个人 settledCny ÷ 全站 settledCny × Provider 账单总应付金额` 计算。
+- 使用 `Decimal(18,6)` 和确定性尾差处理；全部 Actor 分摊合计必须逐位等于 Provider 账单总应付金额，差额必须为 `0.000000`。
+- 用户只能读取自己的分摊结果；管理员可以预览和确认全站结果。
+- 分摊金额不覆盖 `settledCny`，不写入 `ExecutionAttempt.billedCostCny`，不改变生产额度、预占、准入或 Worker 付费执行行为。
+
+### 10.2 术语和金额口径
+
+| 名称 | 权威来源 | 含义 |
+| --- | --- | --- |
+| 用量结算 | `TaskBudgetReservation.settledCny` | Provider 原始 usage 按任务冻结价格计算的执行结算，继续用于额度和生产准入 |
+| Provider 账单总额 | 火山费用中心 OpenAPI | 指定账期经明细与总账复核后的应付金额，包括本 MVP 纳入范围的推理费用、节省计划等账单项目 |
+| 账单分摊消费 | 本系统确认的月度分摊快照 | 将 Provider 账单总额按 Actor 的用量结算占比分配后的财务展示金额 |
+| 账单确认 | 管理员操作 | 将一次预览冻结为可供用户和管理员读取的月度结果；不是 Provider 对单任务金额的确认 |
+
+界面不得把“账单分摊消费”写成“Provider 单任务实扣”。账单未确认时显示“账单未确认”和用量结算金额，不能用 `0` 冒充已确认账单金额。
+
+### 10.3 系统边界
+
+| 组件 | 负责 | 不负责 |
+| --- | --- | --- |
+| Backend | 账单签名调用、分页拉取、字段规范化、总账复核、分摊预览、确认与读取授权 | 不创建 Provider 视频任务，不改变生产额度 |
+| PostgreSQL | 保存账单拉取快照、摘要、分摊基数、分摊结果、算法版本和确认审计 | 不保存明文 AK/SK |
+| Frontend | 账期选择、拉取状态、差异和用户分摊预览、确认操作、本人或全站结果展示 | 不直接调用火山账单 API，不计算权威金额 |
+| Worker / ComfyUI 客户端 | 无本期职责 | 不读取账单、不保存账单凭证、不执行分摊 |
+| 火山费用中心 | 提供正式账单总额和明细 | 不提供本系统 Actor、Task、Attempt 的归属关系 |
+
+### 10.4 外部接口与凭证
+
+MVP 使用火山费用中心服务地址 `https://billing.volcengineapi.com`、服务名 `billing`、API 版本 `2022-01-01`：
+
+- `ListBillDetail`：分页拉取指定账期明细，提取产品、配置、实例、计费单元、用量、单价、原价、折后价、抵扣、抹零和应付金额；保存规范化快照及原始响应摘要。
+- `ListBill`：取得同账期账单汇总，用于独立复核纳入范围的明细合计。
+- `ListSplitBillDetail`、成本摊销接口、TOS 投递和定时自动拉取不进入 MVP。
+
+新增配置只通过 Backend 环境变量注入：
+
+```env
+VOLCENGINE_BILLING_ACCESS_KEY_ID=
+VOLCENGINE_BILLING_SECRET_ACCESS_KEY=
+VOLCENGINE_BILLING_ENDPOINT=https://billing.volcengineapi.com
+VOLCENGINE_BILLING_REGION=cn-north-1
+```
+
+账单 AK/SK 必须使用只读最小权限身份，与 Ark API Key 分离；禁止进入 API 响应、日志、审计正文、数据库、Frontend bundle、Worker 配置或 Git。缺失配置时账单拉取接口明确返回“账单服务未配置”，不得回退到示例数据或已有 CSV。
+
+### 10.5 账单范围和分摊规则
+
+MVP 只支持：
+
+- Provider：火山引擎；
+- 币种：CNY；
+- 单一账期，格式 `YYYY-MM`；
+- 当前已验证的豆包大模型 Seedance 推理费用及与其对应的 AI 节省计划费用；
+- 全账单按 Actor 当月用量结算金额统一比例分摊，不再按模型、实例、输入类型或计费单元二次分组。
+
+分摊候选以账期对应的上海时区自然月筛选 `TaskBudgetReservation`。同一 Actor 的分摊基数为该月全部 `state=settled` 记录的 `settledCny` 合计，任务数为同一集合的去重 `taskId` 数量。
+
+算法步骤：
+
+1. 汇总每个 Actor 的 `usageCostCny` 和 `taskCount`。
+2. 计算 `systemUsageTotalCny = Σ usageCostCny`；若为零而账单总额大于零，阻止分摊。
+3. 计算每个 Actor 的未舍入金额 `providerBillCny × usageCostCny ÷ systemUsageTotalCny`。
+4. 每个金额先向下量化到 6 位小数。
+5. 将尚未分配的百万分之一元按未舍入余数从大到小补齐；余数相同时按 `actorId` 升序，保证相同输入得到相同输出。
+6. 断言 `Σ allocatedCostCny = providerBillCny`，否则不得形成可确认预览。
+
+算法版本必须随确认快照保存。第一版固定为 `actor-settled-proportional-v1`；算法变化不得静默重算已确认月份。
+
+### 10.6 数据生命周期和幂等
+
+最小持久化边界包含“月度账单”和“用户分摊”两类数据：
+
+- 月度账单保存 Provider、账期、拉取时间、Provider 明细摘要哈希、明细数量、账单应付金额、系统用量结算合计、分摊合计、状态、算法版本、确认人和确认时间。
+- 用户分摊保存月度账单 ID、Actor ID、用量结算、任务数、分摊比例、账单分摊消费和计算依据。
+- 同一 Provider + 账期只能有一个当前确认版本；预览刷新不得覆盖已确认结果。
+- 相同 Provider 响应摘要和相同系统分摊基数重复预览必须得到相同结果。
+- 确认采用事务和状态比较更新；重复同一确认幂等返回既有结果，并发确认不能产生两套当前版本。
+- 如需替换已确认月份，MVP 不做直接覆盖。先进入后续“冲正/修订”能力设计；第一版返回冲突并保留原审计记录。
+
+现有 `CostReconciliation` 仅保存月度汇总，无法表达每个 Actor 的冻结分摊结果。实现阶段可以在兼容现有读取接口的前提下扩展或引入最小新表，但不得让现有记录在无证据的情况下被解释为已完成用户分摊。
+
+### 10.7 管理端和用户端流程
+
+管理员 `/reconciliation`：
+
+1. 选择账期并点击“获取火山账单”。
+2. Backend 拉取完整分页，显示账单应付、系统用量结算、参与用户数、参与任务数、未结算任务数、账单与明细复核状态。
+3. 展示每个 Actor 的用量结算、占比、任务数和账单分摊消费。
+4. 存在阻断项时只允许刷新，不显示可执行的确认操作。
+5. 管理员确认后保存冻结结果，页面显示确认人、确认时间、算法版本和来源摘要。
+
+普通用户 `/dashboard`：
+
+- 已确认：显示本人“本月账单分摊消费”和用量结算。
+- 未确认：显示“账单未确认”和用量结算，不显示虚假的分摊金额。
+- 不返回或展示其他 Actor 的金额、比例、任务数或账单数据。
+
+管理员 `/users`：
+
+- 已确认月份优先展示“本月账单分摊消费”。
+- 未确认月份显示“账单未确认”，同时保留用量结算作为业务使用参考。
+
+### 10.8 失败处理与操作责任
+
+以下情况可以保存诊断结果，但必须阻止确认：
+
+- 账单凭证缺失、鉴权失败、权限不足、API 超时或分页不完整；
+- Provider 返回多个账期、非 CNY、未知金额格式、负金额或无法识别的账单类别；
+- `ListBillDetail` 纳入范围合计与 `ListBill` 复核金额不一致；
+- 系统用量结算合计为零而 Provider 账单大于零；
+- 分摊合计不等于 Provider 账单总额；
+- 存在缺失 Actor 的已结算记录；
+- 预览之后、确认之前分摊基数已变化；
+- 同一 Provider + 账期已经存在确认版本。
+
+API 错误只返回稳定错误码和可执行提示；AK/SK、签名头、Provider 原始错误正文和账号敏感信息不得返回浏览器。管理员负责处理账单权限、范围差异和确认；系统不得自动把异常差额分给某个用户。
+
+### 10.9 MVP 非目标
+
+- 不自动定时拉取或自动确认账单。
+- 不上传 CSV 作为正常业务入口；CSV 只保留为人工核验资料，不在本期实现导入功能。
+- 不逐条匹配账单行与 `providerTaskId`。
+- 不按模型、实例、工作流、输入类型、项目或标签分摊。
+- 不支持退款、负账单、跨月冲正、外币和多 Provider。
+- 不修改 `settledCny`、`billedCostCny`、额度、准入或历史 Task。
+- 不把比例分摊描述为 Provider 对单任务或单用户的直接扣款。
+
+### 10.10 规格验收
+
+- [ ] 使用受控账单 API fixture 分页拉取 70 条样例等价数据，得到 `2026-09` Provider 应付总额 `519.350000 CNY`。
+- [ ] `ListBillDetail` 纳入范围合计与 `ListBill` 总额复核通过；缺页、重复页或金额差异会阻止确认。
+- [ ] 按数据库 fixture 中各 Actor 的 `settledCny` 生成确定性分摊，全部用户合计严格为 `519.350000`，差额 `0.000000`。
+- [ ] Preview、reserved、review、无 Actor 和账期外记录不会静默进入正常分摊；无 Actor 的已结算记录会形成阻断项。
+- [ ] 预览后修改任一分摊基数，旧预览确认失败并要求刷新。
+- [ ] 重复和并发确认只形成一个当前确认版本。
+- [ ] 普通用户接口只返回本人结果，管理员接口受 `AdminTokenGuard` 保护并可查看全站预览。
+- [ ] `/reconciliation` 能完成选择账期、拉取、预览和确认；`/dashboard`、`/users` 正确区分未确认与已确认金额。
+- [ ] 账单凭证未进入日志、API 响应、数据库、前端构建产物或测试 fixture。
+- [ ] Backend build、相关 Jest、Frontend tests、TypeScript、Next Webpack build 与 `git diff --check` 通过；外部真实 API 验收与 fixture 自动化验证分别记录。
+
+### 10.11 外部依据和待验证项
+
+- 火山费用中心公开 `ListBill`、`ListBillDetail`、`ListSplitBillDetail` 和成本账单接口，账单 OpenAPI 服务名为 `billing`，支持 SDK 或签名 HTTP 调用。
+- 当前正式账单的标准维度不能提供本系统 Actor、Task 或 Attempt 的关联，因此用户归属由内部已结算任务承担，分摊结果属于本系统计算。
+- 实现前必须用只读最小权限凭证在测试账号验证 `ListBill`、`ListBillDetail` 的实际请求字段、分页合同、返回字段、账期更新时效和本账号 IAM 权限；未验证前不得把公开文档示例字段直接固化成生产解析器。
+- 官方文档：<https://www.volcengine.com/docs/6269/1165275?lang=zh>、<https://docs.volcengine.com/docs/BillingCenter/OpenAPICallInstructions-2?lang=zh>、<https://www.volcengine.com/docs/84627/1321508?lang=zh>。
+
+### 10.12 修订记录
+
+- 2026-09-21：根据用户确认，将人工 CSV 上传方案替换为 Backend 直连火山费用中心；MVP 按 Actor 当月 `settledCny` 统一比例分摊 Provider 正式账单，不建设逐任务账单匹配和完整财务子系统。
