@@ -53,6 +53,43 @@ Next Fast Refresh 在接口升级时曾保留旧版 `users` state，导致渲染
 案例详情公开素材接口已扩展：`GET /api/v1/tasks/showcase/tasks/:id` 从任务冻结的 `executionPlan.media` 中提取明确引用的输入 Asset，只公开 `image/*` 与 `video/*`，保持执行计划顺序并跳过已缺失的历史资产；前端 `/showcase/[taskId]` 以“参考素材”区块展示图片缩略图和视频播放器。当前产品决策为这些输入图片/视频随案例公开，接口继续保持 `isPublic=true`；参考音频不返回。源码：`packages/backend/src/v1/tasks/task-showcase.service.ts`、`packages/frontend/app/(app)/showcase/[taskId]/page.tsx`；接口和验收方式见 [案例广场公开素材接口](./runbooks/showcase-public-media.md)。
 
 本地 Docker 已重建 `video-backend` 并做真实接口验收：案例 `c3ca48af-2df3-4a58-9926-93688ef09f92`（“多模态参考”）返回 3 个 `reference_image`，均含 300 秒签名地址、实际 MIME 和 1611×912 尺寸；数据库中该任务的冻结 `executionPlan.media` 也只有这 3 张图，未记录参考视频。针对性 Backend Jest、Backend build、Frontend 16 项测试、TypeScript 检查和 Next.js Webpack 构建均通过；Backend 全量 Jest 仍有 4 个既有失败（Token 日志断言 1 个，Nest/Jest ESM mock 装配 3 个），与本次公开素材变更无关，不表述为全量测试全绿。
+### 2026-09-18：客户端素材库两条路补齐；入库时机改到正式提交（分支 `feat/ark-nodes-in-multi-reference`，**未部署**）
+
+**先纠正上一节的状态**：2026-09-17 那条写的是「后端完整，**客户端未做**」——客户端那半已经做了（素材库选择节点、本机文件的上传入库槽位、人像模板）。
+
+**补齐**：全模态参考模板（`seedance-multi-reference-preflight-v1`）此前只有本机文件槽位，素材库那条路只在人像模板上有。现在两张画布都接了「从库里选」（`VideoFlowArkAssetInput`）与「本机传一张、提交时入库」（`VideoFlowArkUploadInput`），两个槽位都接在**链尾**——链序决定 `@图像N` / `@视频N` 的编号，接链尾才不动默认提示词。补充一条产品事实：编号只算**实际放进去的素材**（空槽原样透传、不占号），所以库选素材单独用时它就是 `@图像1`。
+
+**修掉一个边界缺陷（人像模板先犯的，这次一并修）**：上传槽位原先在**节点执行时**就 `upload_media` + `publish_ark_asset`。素材节点都在请求节点上游，Preview 与 Production 的 Queue 都会跑到它，而模式要到请求/提交节点才读得出来——于是用户选好文件点 Preview，字节已经出了本机（我方对象存储 + 方舟私域库），而界面同一时刻报的是「Preview 已完成，未上传素材、未生成视频」。这与 `docs/PRODUCT.md`「Preview 不自动上传素材」、README 验收清单第 2 条冲突，也正是不变量 **C01**（「用户选择 Preview 仍可能产生素材出站，违反无上传边界」）描述的那一类。
+
+**改法**：节点的 `inspect` 只读本机、**不发任何网络请求**，在集合条目上留一个 `publish_to_library` 标记；上传 + 入库移到 `CreateTask.submit`——那里本来就按模式分流，本机素材的上传（`upload_media`）也全都发生在那一处。descriptor 因此与普通本机槽位同形（**不带** `arkAssetId`）。后端逐字段比对本就支持这条路径（`still accepts a local file whose bytes were also published to the library`）：`arkAssetId` 只在 descriptor 声明了它时才参与比对，而 URL 形态由 **Asset 行**决定，所以仍然走 `asset://`。副作用是入库要等一次正式提交之后才会出现在素材库下拉里（节点说明已同步改写）。
+
+**证据**：客户端 162 passed（新增两条——节点执行阶段用「一构造就炸」的客户端替身证明不碰网络；提交时才上传 + 绑定入库后的那条 Asset）；后端 `production-submission.service.spec.ts` 20 passed。
+
+**未验证**：**没有在真实 ComfyUI 里 Queue 过**。这条改动只在单测层面成立，真跑需要用户手动 Queue（会真的上传入库）。
+
+**同日：客户端素材库链路首次真实闭环（用户手动 Queue，付费 7.623000 元）**。上面那条修复验的是新行为；这里记的是**修复前**那版客户端（即当前部署的那份）在真实 ComfyUI 上把整条链跑通了——它解掉了上一节留下的「本系统自己的完整链路……**没有串起来真跑过一次**」：预检 → 提交 → 入库（方舟 `Active`）→ `asset://` → Worker → 落盘，全在我们自己的链路里，素材是**含人像**的虚拟人像。
+
+| 项 | 值 |
+| --- | --- |
+| 方舟素材 / 我方 Asset | `asset-20260918135630-s756n` / `1a24012f-84ec-44e0-bf42-42b83a494b12` |
+| 任务 / 槽位 / 工作流 | `909e67ef-1091-4628-bce9-268275c13d56` / `slot-template-portrait-v1` / `seedance.omni-reference.v1` |
+| 走的是素材库 | 冻结请求 `media[0].arkAssetId` 存在（URL 形态由 Asset 行决定）；提交前方舟确认过 `Active`，否则会被 `ARK_ASSET_NOT_ACTIVE` 拦下 |
+| 产物 | `output/video-flow/909e67ef-…-result.mp4`：H.264 1280×720 / **121 帧** / 5.056 秒 / AAC 32kHz 立体声 / 4,811,621 bytes，与回执 `sizeBytes` 逐位一致；`localDeliveryStatus: confirmed` |
+
+**121 = 5 秒 × 24 + 1**——「生成类多一帧」的口径在素材库素材上再次成立。
+
+**这次没覆盖的**：`asset://` 用在 `reference_video` / `reference_audio`；以及**真人人像**（见下）。
+
+**同日的边界更正：真人人像不能靠我们这条链路入库**。上一节把「含真人人脸素材 → 素材库」当成了一条通路，这不完整。官方 [私域真人人像素材资产使用指南](../../docs/arkdocs/私域真人人像素材资产使用指南.md) 要求真人素材多走一道：先由**本人完成真人认证**（H5 认证页 → `resultCode` 为 `10000` → 拿到真人人像素材组的 ID），**入库时方舟拿上传图与认证采集的基准图做面部特征一致性比对，通过才入库**，且需开通高级创作权益包。我们代码里没有这条流程——建组走的是普通 `CreateAssetGroup`（`Name`/`Description`/`ProjectName`，无组类型、无认证基准），照着**虚拟人像**那条做的（本条验证用的也是虚拟人像）。
+
+因此，含人像素材的正确说法是：
+
+- **虚拟人像**：可以从客户端上传入库（本条已验证），也可以在方舟控制台建；
+- **真人人像**：客户端上传这条路走不通。要么先在方舟官方流程里完成认证 + 入库——**入库后它会出现在我们「素材库素材」下拉里，选中即可用**，不需要我们做开发；要么改用**预置虚拟人像**或**本账号近 30 天内模型生成的含人脸产物**（官方「信任模型产物」那条，可直接作输入、不触发审核）。
+
+接口口径核对过、无需改动：`GET /v1/assets/ark` 带的 `groupType: 'AIGC'` 正是官方定义的**虚拟人像**类型（真人像是 `LivenessFace`）。
+
+**另一处口径提醒**：素材必须是**人脸（或软件能识别为人的图）之外**的图，走「本机文件」槽位才安全。方舟的输入审核**按画面判断**，写实的虚拟人像照样会被判成「疑似真人」——这正是上面那次失败的原因（人像图放在了「本机文件」槽位）。虚拟人像**必须**走素材库槽位。
 
 ### 2026-09-17：私域素材库通路已接通，`asset://` 在真实账号上验证通过（分支 `feat/ark-asset-library`，**未部署**）
 
