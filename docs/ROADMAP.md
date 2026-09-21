@@ -824,3 +824,515 @@ API 错误只返回稳定错误码和可执行提示；AK/SK、签名头、Provi
 ### 10.12 修订记录
 
 - 2026-09-21：根据用户确认，将人工 CSV 上传方案替换为 Backend 直连火山费用中心；MVP 按 Actor 当月 `settledCny` 统一比例分摊 Provider 正式账单，不建设逐任务账单匹配和完整财务子系统。
+
+### 10.13 火山账单直连与用户消费分摊实施计划
+
+> **执行要求：** 实施时必须使用 `superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，逐任务执行并在每个任务结束时运行对应验证。所有步骤使用复选框跟踪，未取得真实证据不得勾选。
+
+**目标：** 建成管理员按账期拉取火山正式账单、预览并确认用户比例分摊，普通用户查看本人账单分摊消费的最小闭环。
+
+**架构：** Backend 独占账单 AK/SK，使用火山 SigV4 调用 `ListBillDetail` 和 `ListBill`；账单客户端只产出规范化财务事实。纯函数分摊器读取规范化账单总额和 PostgreSQL 中当月 `settledCny`，生成可复算的预览；确认服务以事务冻结月度账单和 Actor 分摊。Frontend 只调用 Backend，不持有凭证、不自行计算金额。
+
+**技术栈：** NestJS 12、TypeScript 5.7、Prisma 5/PostgreSQL、原生 `fetch` 与 Node `crypto`、Next.js 16、React 19、现有 shadcn/ui New York 组件、Jest、Node test。
+
+**规格：** 本文件 [§10.1–§10.12](#10-火山账单直连与用户消费分摊-mvp2026-09-21-已确认设计)。
+
+#### 全局约束
+
+- 只读账单能力不得创建 Ark/Provider 任务、上传素材或改变生产准入；真实验证只调用费用中心查询接口。
+- `VOLCENGINE_BILLING_ACCESS_KEY_ID`、`VOLCENGINE_BILLING_SECRET_ACCESS_KEY` 只进入 Backend 进程；测试环境发现真实凭证时必须以 `REAL_PROVIDER_CREDENTIAL_FORBIDDEN` 失败。
+- 金额从 Provider 字符串进入后立即使用 `Prisma.Decimal`；业务代码不得用 JavaScript `number` 做金额乘除、舍入或求和。
+- `settledCny` 继续是额度和用量结算权威值；账单分摊是独立快照，不写回 `settledCny` 或 `billedCostCny`。
+- 上海时区账期必须直接使用已存的 `monthKey`，不能用服务器本地时区重新推导历史记录。
+- 现有未跟踪 `packages/backend/src/v1/admin/reconciliation-import.dto.ts` 是 CSV 方案遗留且不属于本计划；实施时不得覆盖、删除或暂存，除非其所有者另行明确授权。
+- 现有 `POST /v1/admin/reconciliation` 手工对账接口先保持兼容；新页面不再调用它。删除或迁移旧接口属于后续清理，不夹带进 MVP。
+- 实现结果只在实际完成后写入 `docs/PROJECT_STATUS.md`；接口变化同步写入 `docs/runbooks/billing-reconciliation.md`。
+
+#### 重点审查的五类输入与失败
+
+1. **Provider 分页缺页、重复页或 Total 改变：** 预览失败，不用已拿到的部分明细继续分摊；Task 2 加分页一致性测试。
+2. **账单含非 CNY、负金额或未知产品：** 保留诊断但阻止确认，绝不静默忽略后仍称总账一致；Task 2 加解析测试。
+3. **系统分摊基数为零、缺失 Actor 或预览后发生变化：** 阻止确认，不把差额分给管理员或最后一个用户；Task 4、Task 5 加测试。
+4. **百万分之一元尾差与比例相同：** 使用最大余数法和 `actorId` 稳定排序，重复计算字节一致；Task 4 加边界测试。
+5. **并发确认或重复确认：** 只形成一个确认版本，重复同一请求幂等，冲突请求返回稳定错误码；Task 5 加真实数据库合同测试。
+
+---
+
+#### B1：抽取可复用的火山 OpenAPI 签名器
+
+**文件：**
+
+- 新建：`packages/backend/src/integrations/volcengine-signer.ts`
+- 新建：`packages/backend/src/integrations/volcengine-signer.spec.ts`
+- 修改：`packages/backend/src/assets/ark-asset-library.service.ts`
+- 修改：`packages/backend/src/assets/ark-asset-library.service.spec.ts`
+
+**接口：**
+
+```ts
+export type VolcengineCredentials = {
+  accessKeyId: string;
+  secretAccessKey: string;
+};
+
+export type VolcengineSignedRequestInput = {
+  credentials: VolcengineCredentials;
+  host: string;
+  region: string;
+  service: string;
+  action: string;
+  version: string;
+  body: Record<string, unknown>;
+  xDate: string;
+};
+
+export function buildVolcengineSignedRequest(
+  input: VolcengineSignedRequestInput,
+): { url: string; headers: Record<string, string>; payload: string };
+```
+
+- [ ] **B1.1 写签名失败测试。** 把 `ArkAssetLibraryService` 现有固定向量移到通用 signer spec，并增加 `host=billing.volcengineapi.com`、`region=cn-north-1`、`service=billing`、`Action=ListBillDetail`、`Version=2022-01-01` 的固定输入；先运行：
+
+```bash
+cd packages/backend
+npx jest src/integrations/volcengine-signer.spec.ts --runInBand
+```
+
+预期因模块不存在失败，不能用“只断言有 authorization 字段”的弱测试代替固定签名向量。
+
+- [ ] **B1.2 实现通用签名纯函数。** 从素材库服务迁移 RFC3986 编码、canonical query/header、payload SHA-256、日期/区域/服务派生密钥链；通用模块不读环境变量、不记录日志、不发 HTTP。
+- [ ] **B1.3 保留 Ark 兼容包装。** `ark-asset-library.service.ts::buildSignedRequest()` 继续导出原签名和返回结构，但内部调用：
+
+```ts
+return buildVolcengineSignedRequest({
+  credentials,
+  host: 'ark.cn-beijing.volcengineapi.com',
+  region: 'cn-beijing',
+  service: 'ark',
+  action,
+  version: '2024-01-01',
+  body,
+  xDate,
+});
+```
+
+- [ ] **B1.4 运行回归。** 执行：
+
+```bash
+npx jest src/integrations/volcengine-signer.spec.ts src/assets/ark-asset-library.service.spec.ts --runInBand
+npm run build
+```
+
+预期固定 Ark 签名向量不变，Billing 向量通过，Backend 构建通过。
+- [ ] **B1.5 单职责提交。** 只暂存 signer、Ark wrapper 和对应测试：
+
+```bash
+git add packages/backend/src/integrations/volcengine-signer.ts packages/backend/src/integrations/volcengine-signer.spec.ts packages/backend/src/assets/ark-asset-library.service.ts packages/backend/src/assets/ark-asset-library.service.spec.ts
+git commit -m "refactor: share volcengine request signing"
+```
+
+#### B2：实现账单只读客户端和 Provider 合同规范化
+
+**文件：**
+
+- 新建：`packages/backend/src/v1/admin/volcengine-billing.client.ts`
+- 新建：`packages/backend/src/v1/admin/volcengine-billing.client.spec.ts`
+- 新建：`packages/backend/src/v1/admin/fixtures/volcengine-list-bill-detail-page-1.json`
+- 新建：`packages/backend/src/v1/admin/fixtures/volcengine-list-bill-detail-page-2.json`
+- 新建：`packages/backend/src/v1/admin/fixtures/volcengine-list-bill.json`
+- 修改：`.env.example`
+
+**接口：**
+
+```ts
+export type BillingLine = {
+  billDetailId: string;
+  billPeriod: string;
+  product: string;
+  configuration: string;
+  instanceId: string;
+  billingUnit: string;
+  currency: 'CNY';
+  originalCny: string;
+  discountCny: string;
+  roundingCny: string;
+  payableCny: string;
+};
+
+export type BillingMonthSnapshot = {
+  provider: 'volcengine';
+  monthKey: string;
+  detailCount: number;
+  includedLines: BillingLine[];
+  detailPayableCny: string;
+  billPayableCny: string;
+  sourceDigest: string;
+};
+
+export interface BillingProviderClient {
+  fetchMonth(monthKey: string): Promise<BillingMonthSnapshot>;
+}
+```
+
+- [ ] **B2.1 先取得并净化真实合同样本。** 使用只读最小权限账号调用一次 `ListBillDetail` 和 `ListBill`；保存测试 fixture 前删除账号名称、账号 ID、AK/SK、签名头、请求 ID等身份字段，仅保留解析和分页必需字段。该调用不创建付费任务。若凭证尚未就绪，使用官方字段结构构造 fixture，但必须在真实联调前将“字段合同未验证”保持为阻断项。
+- [ ] **B2.2 写客户端失败测试。** 覆盖两页共 70 条、第二页请求 offset/limit、重复明细 ID、页数不足、HTTP 403、非 JSON、非 CNY、负金额、未知产品、明细合计与 `ListBill` 不一致，以及错误信息不包含 secret/authorization。运行：
+
+```bash
+cd packages/backend
+npx jest src/v1/admin/volcengine-billing.client.spec.ts --runInBand
+```
+
+预期因客户端不存在失败。
+- [ ] **B2.3 实现凭证门禁和分页。** 客户端从 `VOLCENGINE_BILLING_ACCESS_KEY_ID`、`VOLCENGINE_BILLING_SECRET_ACCESS_KEY`、可选 endpoint/region 读取配置；`VIDEO_FLOW_TEST_MODE=1` 且存在真实凭证时抛 `REAL_PROVIDER_CREDENTIAL_FORBIDDEN`。分页必须按 Provider 返回的 `Total/Limit/Offset` 结束，并用 `billDetailId` 检测重复。
+- [ ] **B2.4 实现规范化和范围过滤。** 只纳入已验证的豆包 Seedance 推理和对应 AI 节省计划；所有金额以 Decimal 校验后输出 6 位字符串。规范化快照按稳定字段排序后 SHA-256，原始账户身份字段不入库、不返回前端。
+- [ ] **B2.5 独立总账复核。** `ListBillDetail` 纳入合计和 `ListBill` 同范围应付金额必须相等；不相等返回 `BILL_TOTAL_MISMATCH`，结果不得带可确认状态。
+- [ ] **B2.6 补环境说明并验证。** 在 `.env.example` 写明四个 Billing 变量、只读权限、与 Ark API Key 分离、测试环境禁用真实凭证。执行定向 Jest、Backend build 和 `git diff --check`。
+- [ ] **B2.7 单职责提交。** 只提交账单客户端、净化 fixture、测试和环境变量说明：
+
+```bash
+git add packages/backend/src/v1/admin/volcengine-billing.client.ts packages/backend/src/v1/admin/volcengine-billing.client.spec.ts packages/backend/src/v1/admin/fixtures .env.example
+git commit -m "feat: fetch volcengine billing snapshots"
+```
+
+#### B3：增加月度账单和 Actor 分摊持久化
+
+**文件：**
+
+- 修改：`packages/backend/prisma/schema.prisma`
+- 新建：`packages/backend/prisma/migrations/20260921120000_add_monthly_bill_allocations/migration.sql`
+
+**模型：**
+
+```prisma
+model MonthlyProviderBill {
+  id                  String   @id @default(uuid()) @db.Uuid
+  provider            String
+  monthKey            String   @map("month_key")
+  status              String   @default("preview")
+  sourceDigest        String   @map("source_digest")
+  basisDigest         String   @map("basis_digest")
+  detailCount         Int      @map("detail_count")
+  providerBillCny     Decimal  @map("provider_bill_cny") @db.Decimal(18, 6)
+  systemUsageTotalCny Decimal  @map("system_usage_total_cny") @db.Decimal(18, 6)
+  allocatedTotalCny   Decimal  @map("allocated_total_cny") @db.Decimal(18, 6)
+  algorithmVersion    String   @map("algorithm_version")
+  pulledAt            DateTime @map("pulled_at")
+  confirmedAt         DateTime? @map("confirmed_at")
+  confirmedBy         String?  @map("confirmed_by")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+  allocations         MonthlyProviderBillAllocation[]
+
+  @@unique([provider, monthKey])
+  @@index([status, monthKey])
+  @@map("monthly_provider_bills")
+}
+
+model MonthlyProviderBillAllocation {
+  id               String   @id @default(uuid()) @db.Uuid
+  billId           String   @map("bill_id") @db.Uuid
+  bill             MonthlyProviderBill @relation(fields: [billId], references: [id], onDelete: Cascade)
+  actorId          String   @map("actor_id")
+  usageCostCny     Decimal  @map("usage_cost_cny") @db.Decimal(18, 6)
+  taskCount        Int      @map("task_count")
+  allocationRatio  Decimal  @map("allocation_ratio") @db.Decimal(24, 18)
+  allocatedCostCny Decimal  @map("allocated_cost_cny") @db.Decimal(18, 6)
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  @@unique([billId, actorId])
+  @@index([actorId, billId])
+  @@map("monthly_provider_bill_allocations")
+}
+```
+
+- [ ] **B3.1 写 migration SQL。** 创建两表、外键、唯一约束和索引；不修改、回填或删除现有 `cost_reconciliations`、`task_budget_reservations`、`execution_attempts`。
+- [ ] **B3.2 生成并检查 Prisma Client。** 执行：
+
+```bash
+cd packages/backend
+npx prisma format
+npm run prisma:generate
+npx prisma validate
+```
+
+- [ ] **B3.3 做迁移往返检查。** 对空测试库应用全部 migration，再通过 `prisma migrate diff` 确认 schema 与 migration 无漂移；迁移回滚说明是删除新增两表，生产已有确认数据时禁止直接回滚。
+- [ ] **B3.4 构建验证和提交。** 执行 `npm run build`、`git diff --check`，然后只提交 schema 和 migration：
+
+```bash
+git add packages/backend/prisma/schema.prisma packages/backend/prisma/migrations/20260921120000_add_monthly_bill_allocations/migration.sql
+git commit -m "feat: store monthly bill allocations"
+```
+
+#### B4：实现确定性比例分摊纯函数
+
+**文件：**
+
+- 新建：`packages/backend/src/v1/admin/billing-allocation.ts`
+- 新建：`packages/backend/src/v1/admin/billing-allocation.spec.ts`
+
+**接口：**
+
+```ts
+export type ActorUsageBasis = {
+  actorId: string;
+  usageCostCny: string;
+  taskCount: number;
+};
+
+export type ActorBillAllocation = ActorUsageBasis & {
+  allocationRatio: string;
+  allocatedCostCny: string;
+};
+
+export function allocateProviderBill(
+  providerBillCny: string,
+  basis: ActorUsageBasis[],
+): {
+  systemUsageTotalCny: string;
+  allocatedTotalCny: string;
+  allocations: ActorBillAllocation[];
+};
+```
+
+- [ ] **B4.1 写失败测试。** 覆盖 `519.350000` 的多用户样例、单用户、零账单、零基数正账单、负金额、重复 Actor、零或负个人基数、比例相同、余数相同和输入顺序改变。必须断言输出合计逐位相等且相同输入集合得到相同排序和金额。
+- [ ] **B4.2 运行测试确认红灯。** 执行 `npx jest src/v1/admin/billing-allocation.spec.ts --runInBand`，预期因函数不存在失败。
+- [ ] **B4.3 实现最大余数法。** 全程使用 `Prisma.Decimal`；未舍入份额保留高精度，先 `ROUND_FLOOR` 到 6 位，再把剩余的 `0.000001` 单位按余数降序、`actorId` 升序分配。输出按 `actorId` 升序，便于摘要哈希稳定。
+- [ ] **B4.4 验证边界。** 对 1、2、1000 个 Actor 的 fixture 重复运行，断言 `allocatedTotalCny === providerBillCny`；不得通过把全部尾差放进最后一个 Actor 来过测试。
+- [ ] **B4.5 定向提交。** 运行 Jest、Backend build、`git diff --check` 后提交：
+
+```bash
+git add packages/backend/src/v1/admin/billing-allocation.ts packages/backend/src/v1/admin/billing-allocation.spec.ts
+git commit -m "feat: allocate provider bills by actor usage"
+```
+
+#### B5：实现预览、确认和并发保护
+
+**文件：**
+
+- 新建：`packages/backend/src/v1/admin/monthly-billing.service.ts`
+- 新建：`packages/backend/src/v1/admin/monthly-billing.service.spec.ts`
+- 新建：`packages/backend/test/monthly-billing.contract-spec.ts`
+- 修改：`packages/backend/src/v1/admin/v1-admin.module.ts`
+- 修改：`packages/backend/src/v1/admin/v1-admin-consumption.controller.ts`
+
+**服务接口：**
+
+```ts
+export type BillingPreview = {
+  monthKey: string;
+  status: 'preview' | 'confirmed' | 'blocked';
+  sourceDigest: string;
+  basisDigest: string;
+  providerBillCny: string;
+  systemUsageTotalCny: string;
+  allocatedTotalCny: string;
+  participantCount: number;
+  taskCount: number;
+  blockers: string[];
+  allocations: Array<ActorBillAllocation & { name: string | null }>;
+};
+
+export class MonthlyBillingService {
+  preview(monthKey: string): Promise<BillingPreview>;
+  confirm(input: {
+    monthKey: string;
+    sourceDigest: string;
+    basisDigest: string;
+    confirmedBy: string;
+  }): Promise<BillingPreview & { confirmedAt: string; operatorIsDeclaredClaim: true }>;
+  getAdminMonth(monthKey: string): Promise<BillingPreview | null>;
+  getActorMonth(actorId: string, monthKey: string): Promise<{
+    monthKey: string;
+    status: 'unconfirmed' | 'confirmed';
+    usageCostCny: string;
+    allocatedCostCny: string | null;
+    confirmedAt: string | null;
+  }>;
+}
+```
+
+**新增接口：**
+
+```text
+POST /api/v1/admin/reconciliation/:monthKey/preview
+POST /api/v1/admin/reconciliation/:monthKey/confirm
+GET  /api/v1/admin/reconciliation/:monthKey/allocation
+```
+
+- [ ] **B5.1 写 Service 失败测试。** 手写 Prisma、Billing client 替身，覆盖只查询 `state=settled + monthKey`、Actor 汇总和名称、无基数、缺失 Actor、Provider 阻断、预览摘要、已确认月份拒绝刷新、旧 digest 拒绝确认、相同确认幂等。
+- [ ] **B5.2 实现预览。** 并行取得 Provider 快照和系统 Actor 基数；`basisDigest` 对按 Actor 排序的 `{actorId,usageCostCny,taskCount}` 做稳定 JSON SHA-256。Preview 只返回计算结果，不写正式分摊表。
+- [ ] **B5.3 实现事务确认。** 事务内按 Provider+monthKey 获取 advisory lock，再重新查询系统基数并核对 `sourceDigest/basisDigest`；创建 `MonthlyProviderBill` 和全部 allocations。确认失败不留下半张账单或部分用户记录。
+- [ ] **B5.4 增加 Controller 和 Module。** 三个新接口全部沿用 Controller 顶层 `AdminTokenGuard`；`confirmedBy` 是管理员声明值，响应明确 `operatorIsDeclaredClaim: true`，不冒充共享 Admin Token 能识别具体员工。
+- [ ] **B5.5 写真实数据库合同测试。** 两个并发 confirm 使用相同 digest，只允许一个创建，另一个幂等读回；不同 digest 返回 409。断言账单一行、Actor 分摊每人一行、合计严格相等。
+- [ ] **B5.6 运行验证。** 执行：
+
+```bash
+cd packages/backend
+npx jest src/v1/admin/monthly-billing.service.spec.ts src/v1/admin/billing-allocation.spec.ts src/v1/admin/volcengine-billing.client.spec.ts --runInBand
+npm run test:contract -- --runInBand
+npm run build
+```
+
+- [ ] **B5.7 单职责提交。** 只提交月度服务、Controller/Module 和测试：
+
+```bash
+git add packages/backend/src/v1/admin/monthly-billing.service.ts packages/backend/src/v1/admin/monthly-billing.service.spec.ts packages/backend/src/v1/admin/v1-admin.module.ts packages/backend/src/v1/admin/v1-admin-consumption.controller.ts packages/backend/test/monthly-billing.contract-spec.ts
+git commit -m "feat: preview and confirm monthly billing"
+```
+
+#### B6：向普通用户和管理员消费接口提供确认金额
+
+**文件：**
+
+- 修改：`packages/backend/src/v1/consumption/consumption.service.ts`
+- 修改：`packages/backend/src/v1/consumption/consumption.service.spec.ts`
+- 修改：`packages/backend/src/v1/consumption/v1-consumption.controller.ts`
+- 修改：`packages/backend/src/v1/consumption/v1-consumption.module.ts`
+- 修改：`packages/backend/src/v1/admin/v1-admin-consumption.controller.ts`
+
+**返回合同扩展：**
+
+```ts
+type BillAllocationStatus = {
+  status: 'unconfirmed' | 'confirmed';
+  monthKey: string;
+  allocatedCostCny: string | null;
+  confirmedAt: string | null;
+};
+```
+
+- [ ] **B6.1 先扩展失败测试。** 普通用户 `getOverview(actorId)` 只查询本人当前月分摊；管理员 summary 为每个 Actor 合并确认金额。覆盖无账单、预览账单、已确认账单、没有本人分摊和其他 Actor 数据不得泄露。
+- [ ] **B6.2 实现普通用户合同。** `ConsumptionOverview.monthly` 增加 `billAllocation`；未确认时 `allocatedCostCny=null`，保留 settled/reserved/额度原行为。
+- [ ] **B6.3 实现管理员合同。** `consumption/summary` 的每个 `byActor` 增加 `allocatedCostCny`，顶层增加账单状态和 Provider 总额；确认前这些金额为 `null`，不能回退为 settled 冒充账单金额。
+- [ ] **B6.4 验证旧接口兼容。** 原有 daily/monthly settled/reserved/total、趋势和预警测试必须继续通过；新增字段是加法，不改旧字段语义。
+- [ ] **B6.5 运行并提交。** 执行定向消费 Jest 和 Backend build，然后提交上述文件，提交信息：
+
+```text
+feat: expose confirmed bill allocations
+```
+
+#### B7：重做管理员对账页并更新消费展示
+
+**文件：**
+
+- 修改：`packages/frontend/app/(app)/reconciliation/page.tsx`
+- 修改：`packages/frontend/app/(app)/dashboard/page.tsx`
+- 修改：`packages/frontend/app/(app)/users/page.tsx`
+- 修改：`packages/frontend/types/api.ts`
+- 修改：`packages/frontend/lib/api-routes.ts`
+- 新建：`packages/frontend/tests/billing-reconciliation-ui.test.mjs`
+
+**前端路由合同：**
+
+```ts
+export const billingRoutes = {
+  preview: (monthKey: string) => `/v1/admin/reconciliation/${monthKey}/preview`,
+  confirm: (monthKey: string) => `/v1/admin/reconciliation/${monthKey}/confirm`,
+  allocation: (monthKey: string) => `/v1/admin/reconciliation/${monthKey}/allocation`,
+};
+```
+
+- [ ] **B7.1 写失败合同测试。** 断言对账页不再出现手填 `providerBillCny`/`actorId` 和旧 `/submit` 请求；必须使用账期选择、获取账单、分摊表、blockers、digest 确认参数和确认按钮。Dashboard/Users 必须区分“账单未确认”与确认金额。
+- [ ] **B7.2 实现类型和路由。** 在 `types/api.ts` 增加 `BillingPreview`、`ActorBillAllocation` 和 `BillAllocationStatus`；所有页面只从集中路由生成器取新 URL。
+- [ ] **B7.3 实现 `/reconciliation` 主流程。** 页面状态明确拆为 idle/loading/blocked/preview/confirming/confirmed/error；使用现有 Card、Table、Alert、Button、Input/Select 和 PageState。预览表显示用户、Actor ID、任务数、用量结算、比例、账单分摊消费。
+- [ ] **B7.4 实现确认防误点。** 只有 `blockers.length===0`、两个 digest 存在且分摊合计等于 Provider 总额时显示确认按钮；确认请求发送预览 digest 和管理员声明名称。成功后重新读取已确认快照，不用本地乐观金额冒充落库成功。
+- [ ] **B7.5 更新 Dashboard 和 Users。** 已确认显示“本月账单分摊消费”；未确认显示“账单未确认”和用量结算。金额文字保持普通字重，遵守现有 shadcn New York 单一视觉合同。
+- [ ] **B7.6 运行前端验证。** 执行：
+
+```bash
+cd packages/frontend
+npm test
+npx tsc --noEmit
+npm run build -- --webpack
+npx eslint "app/(app)/reconciliation/page.tsx" "app/(app)/dashboard/page.tsx" "app/(app)/users/page.tsx" types/api.ts lib/api-routes.ts
+```
+
+既有 ESLint 问题与本轮新增问题分开报告，不以构建通过代替页面实际验收。
+- [ ] **B7.7 单职责提交。** 只提交上述前端文件和测试，提交信息：
+
+```text
+feat: show allocated monthly billing costs
+```
+
+#### B8：真实只读联调、回归、文档和交付门禁
+
+**文件：**
+
+- 新建：`docs/runbooks/billing-reconciliation.md`
+- 修改：`docs/PROJECT_STATUS.md`（仅记录实际完成事实）
+- 修改：`docs/ROADMAP.md`（仅勾选实际完成项）
+
+- [ ] **B8.1 准备只读凭证。** 在火山 IAM 创建或确认账单只读身份，把 AK/SK 通过服务器受限环境变量或权限 600 的凭证文件注入 Backend；先确认 `VIDEO_FLOW_TEST_MODE` 不会让测试进程携带真实凭证。
+- [ ] **B8.2 对拍真实 2026-09 账单。** 管理页面选择 `2026-09`，真实 API 拉取结果应与既有导出资料对齐：70 条、Provider 总应付 `519.350000 CNY`。若字段、条数或金额不同，记录 Provider 当前返回和账单更新时间，不修改程序去迎合旧快照。
+- [ ] **B8.3 验证分摊事实。** 对每个 Actor 抽查数据库 `settledCny` 合计、页面用量结算、比例和分摊金额；所有 Actor 分摊合计必须为 `519.350000`，差额 `0.000000`。
+- [ ] **B8.4 验证权限和失败。** 普通用户访问 Admin 预览/确认返回拒绝；普通用户接口只返回本人。临时使用错误凭证验证稳定错误码后恢复正确配置，日志不得出现 AK/SK、authorization 或完整 Provider 原始正文。
+- [ ] **B8.5 做浏览器验收。** 在桌面与窄屏检查 `/reconciliation`、`/dashboard`、`/users`：长 Actor ID、不足一页/多页用户、加载、阻断、错误、确认和已确认状态均可读；保存必要截图证据。
+- [ ] **B8.6 跑三个包全量门禁。** 执行：
+
+```bash
+cd packages/backend
+npm run build
+npx jest --runInBand
+npm run test:contract -- --runInBand
+
+cd ../worker
+venv/bin/python -m pytest -q
+
+cd ../comfyui-video-flow-client
+.venv/bin/python -m pytest -q
+
+cd ../frontend
+npm test
+npx tsc --noEmit
+npm run build -- --webpack
+
+cd ../..
+git diff --check
+```
+
+Workflow JSON 缺失造成的 Worker 预期 skip 单独记录；任何新增失败不得以“既有问题”跳过。
+- [ ] **B8.7 写运行手册。** `billing-reconciliation.md` 必须包含凭证用途与最小权限、账期拉取、预览/确认、错误码、凭证轮换、确认后不可覆盖、真实账单核对和回滚边界；不得包含真实 AK/SK、账号 ID 或完整账单身份信息。
+- [ ] **B8.8 更新事实并提交。** 只把真实完成、测试输出、联调结果和未验证项写入 `PROJECT_STATUS.md`，勾选本节实际完成项；提交信息：
+
+```text
+docs: document monthly billing reconciliation
+```
+
+### 10.14 实施顺序、依赖与停止点
+
+```text
+B1 通用签名
+  ↓
+B2 账单客户端 ──────────┐
+  ↓                     │
+B3 数据库模型           │
+  ↓                     │
+B4 分摊纯函数           │
+  └──────────┬──────────┘
+             ↓
+B5 预览与确认
+             ↓
+B6 消费读取合同
+             ↓
+B7 管理和用户页面
+             ↓
+B8 真实只读联调与全量门禁
+```
+
+- B1–B4 不需要真实账单凭证即可用固定 fixture 完成；B2 的真实响应合同未验证时必须保留阻断标记。
+- B5 依赖 B2、B3、B4；B6 依赖 B3、B5；B7 依赖 B5、B6；B8 依赖全部实现。
+- 未取得账单只读 AK/SK 时可以完成 B1–B7 的离线实现和 fixture 验证，但不得声称接口已接通，也不得确认真实月份。
+- 真实 API 返回字段与公开文档/fixture 不一致时，停止 B8，保存脱敏证据，先修订 Provider 合同和测试；不得在页面层临时兼容未知字段。
+- `ListBillDetail` 与 `ListBill` 无法在同一口径复核 `519.350000` 时，停止确认流程，先明确节省计划等项目应落在哪个官方账单接口；不得通过硬编码加减 ¥200 使其对齐。
+
+### 10.15 计划自检记录
+
+- **规格覆盖：** B1–B8 覆盖签名、Provider 合同、持久化、分摊、确认并发、用户授权、页面、真实联调、三个包回归和文档。
+- **占位扫描：** 计划不包含 TBD/TODO、“以后补错误处理”或未定义接口；真实 Provider 字段差异被定义为联调停止条件，不是实现占位符。
+- **类型一致：** `BillingMonthSnapshot` → `MonthlyBillingService.preview` → `BillingPreview` → Frontend `BillingPreview`；`ActorBillAllocation` 在纯函数、持久化、接口和页面中保持同名字段。
+- **范围控制：** CSV 导入、自动定时、逐任务账单、冲正、多 Provider 和额度回写均明确排除；现有未跟踪 CSV DTO 不进入任何提交。
+- **重点失败覆盖：** 分页、币种/负值/未知产品、零基数/缺 Actor/基数变化、尾差、并发确认分别落到 B2、B4、B5 的明确测试步骤。
+
+### 10.16 实施计划修订记录
+
+- 2026-09-21：在用户确认书面规格后新增 B1–B8；选择 Backend 直连费用中心、全账单按 Actor `settledCny` 统一比例分摊、管理员手动确认的最小实现路径。
