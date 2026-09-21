@@ -1,0 +1,28 @@
+{
+  "ResponseMetadata": {
+    "RequestId": "test-request-id-list-bill",
+    "Action": "ListBill",
+    "Version": "2022-01-01",
+    "Service": "billing",
+    "Region": "cn-north-1"
+  },
+  "Result": {
+    "List": [
+      {
+        "BillPeriod": "2026-09",
+        "Product": "视频生成-豆包大模型平台",
+        "ProductZh": "视频生成-豆包大模型平台",
+        "ProductEn": "Video Generation - Doubao LLM",
+        "OriginalBillAmount": "519.350000",
+        "DiscountBillAmount": "519.350000",
+        "CouponAmount": "0.000000",
+        "PayableAmount": "519.350000",
+        "RoundBillAmount": "0.000000",
+        "Currency": "CNY"
+      }
+    ],
+    "Limit": 100,
+    "Offset": 0,
+    "Total": 1
+  }
+}
