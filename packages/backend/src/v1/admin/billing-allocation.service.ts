@@ -1,3 +1,4 @@
+import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service';
 import { Decimal } from '@prisma/client/runtime/library';
 
@@ -17,6 +18,7 @@ export interface TaskAllocation {
   proportionPercent: number;
 }
 
+@Injectable()
 export class BillingAllocationService {
   constructor(private readonly prisma: PrismaService) {}
 

@@ -13,6 +13,10 @@ import { V1ConsumptionModule } from '../consumption/v1-consumption.module';
 import { V1TasksModule } from '../tasks/v1-tasks.module';
 import { AssetsModule } from '../../assets/assets.module';
 import { V1AdminHistoryController } from './v1-admin-history.controller';
+import { BillingController } from './billing.controller';
+import { BillingImportService } from './billing-import.service';
+import { BillingAllocationService } from './billing-allocation.service';
+import { VolcengineBillingClient } from './volcengine-billing.client';
 
 @Module({
   // TasksModule 提供 TaskBudgetService 单例，账单复核与准入共用同一份预算状态。
@@ -23,7 +27,14 @@ import { V1AdminHistoryController } from './v1-admin-history.controller';
     V1OperationsController,
     V1AdminConsumptionController,
     V1AdminHistoryController,
+    BillingController,
   ],
-  providers: [PrismaService, ReconciliationService],
+  providers: [
+    PrismaService,
+    ReconciliationService,
+    VolcengineBillingClient,
+    BillingAllocationService,
+    BillingImportService,
+  ],
 })
 export class V1AdminModule {}

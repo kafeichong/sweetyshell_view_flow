@@ -1,3 +1,4 @@
+import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service';
 import { VolcengineBillingClient } from './volcengine-billing.client';
 import { BillingAllocationService, AllocationPreview } from './billing-allocation.service';
@@ -9,6 +10,7 @@ export interface ImportPreview extends AllocationPreview {
   isAlreadyImported: boolean;
 }
 
+@Injectable()
 export class BillingImportService {
   constructor(
     private readonly prisma: PrismaService,

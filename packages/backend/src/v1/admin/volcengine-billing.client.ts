@@ -1,3 +1,4 @@
+import { Injectable } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { buildVolcengineSignedRequest, VolcengineCredentials } from '../../integrations/volcengine-signer';
@@ -50,6 +51,7 @@ export interface BillingProviderClient {
  * 使用费用中心 OpenAPI 获取正式账单，不创建付费任务。
  * 只纳入已验证的豆包 Seedance 推理和对应 AI 节省计划费用。
  */
+@Injectable()
 export class VolcengineBillingClient implements BillingProviderClient {
   private readonly endpoint: string;
   private readonly region: string;
