@@ -9,6 +9,7 @@ import {
   ChevronsUpDown,
   CircleDollarSign,
   Clapperboard,
+  FileText,
   History,
   LayoutDashboard,
   LogOut,
@@ -64,6 +65,7 @@ export function AppSidebar({
     : [
         { href: '/users', label: '用户管理', icon: Users },
         { href: '/tokens', label: '用户 Token', icon: ShieldCheck },
+        { href: '/billing', label: '账单导入', icon: FileText },
         { href: '/reconciliation', label: '对账管理', icon: CircleDollarSign },
       ];
   const groups = [...navigation, { label: '管理', items: managementItems }];
