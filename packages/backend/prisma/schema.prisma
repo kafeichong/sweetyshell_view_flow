@@ -320,3 +320,40 @@ model Config {
 
   @@map("config")
 }
+
+// 月度 Provider 账单快照（B3）
+model MonthlyProviderBill {
+  id           String     @id @default(uuid()) @db.Uuid
+  provider     String // 'volcengine'
+  monthKey     String     @map("month_key") // 'YYYY-MM'
+  detailCount  Int        @map("detail_count")
+  totalCny     Decimal    @map("total_cny") @db.Decimal(18, 6)
+  sourceDigest String     @map("source_digest") // SHA256 of included lines
+  snapshotJson Json       @map("snapshot_json") // BillingMonthSnapshot
+  confirmedAt  DateTime?  @map("confirmed_at")
+  confirmedBy  String?    @map("confirmed_by")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  lines        BillLine[]
+
+  @@unique([provider, monthKey])
+  @@index([monthKey])
+  @@index([confirmedAt])
+  @@map("monthly_provider_bills")
+}
+
+// 账单明细行（B3）
+model BillLine {
+  id            String              @id @default(uuid()) @db.Uuid
+  billId        String              @map("bill_id") @db.Uuid
+  bill          MonthlyProviderBill @relation(fields: [billId], references: [id], onDelete: Cascade)
+  billDetailId  String              @map("bill_detail_id") // Provider 原始 ID
+  product       String
+  configuration String
+  instanceId    String              @map("instance_id")
+  billingUnit   String              @map("billing_unit")
+  payableCny    Decimal             @map("payable_cny") @db.Decimal(18, 6)
+
+  @@unique([billId, billDetailId])
+  @@index([billId])
+  @@map("bill_lines")
+}
