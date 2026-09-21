@@ -1,12 +1,18 @@
 # Video Flow 项目现状（权威）
 
-> 最后核验：2026-09-15
+> 最后核验：2026-09-21
 > 本轮核验方式：本地源码评审、三包回归、合同资源校验、隔离 PostgreSQL 全新/历史迁移、真实 Nest HTTP/数据库合同，Comfy Desktop + Fake Provider/Fake OSS 的实际 Queue、下载、落盘和播放，以及 R8 在生产环境、真实火山账号上的受控付费验收与收口（真实调用 Provider、真实产生费用，见下）。
 > 本文是**唯一**描述"系统现在是什么样"的文档。任何历史文档与本文冲突时，以本文为准；如果本文与代码冲突，以代码为准并立即更新本文。
 
 ---
 
 ## 0. 本轮交付判断
+
+### 2026-09-21：Backend 全量单测恢复通过（PR #8，未合并/未部署）
+
+PR #8 的 `backend / unit` CI 暴露并已修复 4 个既有测试阻塞：`ApiCredentialGuard` 引入 `Reflector` 后，三个旧 spec 未同步 mock Nest 12 的 `@nestjs/core`，其中任务控制器 spec 还缺少 `SetMetadata` 装饰器 mock；Token 使用日志已经返回游标所需的 `id`，旧断言未同步。修复仅涉及测试装配与断言，没有修改生产 Guard、控制器或服务行为。实现：`packages/backend/src/auth/api-credential.guard.spec.ts`、`packages/backend/src/v1/tasks/v1-tasks.controller.spec.ts`、`packages/backend/src/v1/assets/v1-assets.controller.spec.ts`、`packages/backend/src/v1/tokens/token-management.service.spec.ts`。
+
+本地验证：四个相关 spec 51/51 通过；`npm run build` 通过；Backend 全量 Jest 35 suites、377 tests 全部通过。PR 更新后的 GitHub Actions 仍需重新运行确认，本条不代表已合并或部署。
 
 ### 2026-09-21：管理员任务历史鉴权修复（本地 Docker 已更新）
 

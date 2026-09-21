@@ -200,6 +200,7 @@ describe('TokenManagementService', () => {
       expect(result.hasMore).toBe(false);
       expect(result.nextCursor).toBeNull();
       expect(result.logs[0]).toEqual({
+        id: 'log-1',
         endpoint: '/v1/consumption/overview',
         method: 'GET',
         statusCode: 200,

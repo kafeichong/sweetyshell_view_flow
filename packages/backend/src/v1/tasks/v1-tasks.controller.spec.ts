@@ -4,6 +4,7 @@ jest.mock('@nestjs/common', () => ({
   createParamDecorator: () => () => () => {},
   Controller: () => (target: unknown) => target,
   UseGuards: () => (target: unknown) => target,
+  SetMetadata: () => () => {},
   Post: () => () => {}, Get: () => () => {}, Body: () => () => {}, Headers: () => () => {}, Param: () => () => {},
   Query: () => () => {},
   ConflictException: class ConflictException extends Error { status = 409; },
@@ -14,6 +15,9 @@ jest.mock('@nestjs/common', () => ({
   NotFoundException: class NotFoundException extends Error { status = 404; },
   ServiceUnavailableException: class ServiceUnavailableException extends Error { status = 503; },
   Logger: class Logger { log() {} },
+}));
+jest.mock('@nestjs/core', () => ({
+  Reflector: class Reflector {},
 }));
 
 import { PreflightRecordError } from '../../tasks/preflight.service';
