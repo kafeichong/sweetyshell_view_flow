@@ -2,6 +2,7 @@ import os
 import re
 import stat
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -449,3 +450,44 @@ def test_preview_smoke_uses_existing_actor_token_without_admin_token(tmp_path):
 
     assert "mode=preview" in result.stdout
     assert "Bearer vf_existing_actor_token" in curl_log.read_text(encoding="utf-8")
+
+
+def test_api_proxy_that_cannot_load_does_not_take_down_the_extension(tmp_path):
+    """`api_proxy` 导不进来时必须降级，不能让整个节点包消失。
+
+    2026-09-18 实测：在**装了 aiohttp、但没在跑 ComfyUI** 的环境里（拿 ComfyUI 自己的 venv
+    跑安装自检）导入，崩在 `server.PromptServer.instance` 的 AttributeError 上；当时只兜
+    ImportError，它一路穿透 `__init__.py`——ComfyUI 那边看到的现象就是"Video Flow 的节点
+    全没了"，而且界面上看不出原因。两个环境件都用 stub 换掉，保证哪个环境跑都命中同一条
+    路径，然后断言：导入不抛、节点照常注册、原因留在 API_PROXY_ERROR 里。
+    """
+    import shutil
+
+    fakes = tmp_path / "fakes"
+    (fakes / "aiohttp").mkdir(parents=True)
+    # server 有 PromptServer、但没有 instance —— 就是"没在跑 ComfyUI"的样子。
+    (fakes / "server.py").write_text("class PromptServer:\n    pass\n", encoding="utf-8")
+    (fakes / "aiohttp" / "__init__.py").write_text("from . import web\n", encoding="utf-8")
+    (fakes / "aiohttp" / "web.py").write_text("", encoding="utf-8")
+
+    # 装进 ComfyUI 的目录名是 video_flow_client（没有连字符），照那个名字复制一份。
+    # `.venv` 必须排除：主工作目录里它就装在包目录下，复制它会拖进一整个虚拟环境。
+    pkg_root = tmp_path / "pkg"
+    shutil.copytree(
+        CLIENT_DIR,
+        pkg_root / "video_flow_client",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "tests", ".venv", ".pytest_cache"),
+    )
+
+    script = "\n".join([
+        "import sys",
+        f"sys.path[:0] = [{str(fakes)!r}, {str(pkg_root)!r}]",
+        "import video_flow_client as client",
+        "print('NODES', len(client.NODE_CLASS_MAPPINGS))",
+        "print('ERROR', client.API_PROXY_ERROR)",
+    ])
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
+
+    assert result.returncode == 0, result.stderr
+    assert "NODES" in result.stdout, result.stdout
+    assert "instance" in result.stdout, result.stdout
