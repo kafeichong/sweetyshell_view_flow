@@ -382,3 +382,18 @@ describe('WorkflowCatalogService', () => {
     expect(error.path).toBe('media[0].arkAssetId');
   });
 });
+
+
+describe('prompt length policy', () => {
+  const catalog = new WorkflowCatalogService();
+  it('preserves a long multilingual prompt beyond the former client and server limit', () => {
+    const request = textIntent();
+    request.prompt.positive = '镜头动作 Hello。\n'.repeat(1500);
+    expect(catalog.evaluate(request).effectiveRequest.prompt.positive).toBe(request.prompt.positive.trim());
+  });
+  it.each(['', '   ', '\n\t'])('rejects blank prompt %p', (positive) => {
+    const request = textIntent();
+    request.prompt.positive = positive;
+    expect(() => catalog.evaluate(request)).toThrow(WorkflowContractError);
+  });
+});

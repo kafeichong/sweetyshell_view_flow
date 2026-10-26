@@ -1,5 +1,23 @@
 # Video Flow 项目现状（权威）
 
+## 2026-10-26 安全修补与生产基线整理（已验证，待发布）
+
+用户已授权整理既有线上账单/提示词基线、修复发布门禁并发布安全补丁。隔离工作区 `/private/tmp/video-flow-security-20261026` 基线 7f6a44a，与线上账单版本一致；原开发工作区未提交成果保留。线上已执行全部17项迁移，包括账单模型，不需要新增生产 migration。
+
+- 前端 Next.js / eslint-config-next 16.4.1、sharp0.35.5；follow-redirects1.16.2、source-map-js1.2.2。删除未使用的直接 Zod 依赖，并将工具依赖的兼容 peer 更新到修复版。两份锁文件都基于实际生产 package-lock 生成并纳入 Git，CI 改用 npm ci。
+- 后端 Docker 固定 Node22.23.4-bookworm-slim，body-parser2.4.0、multer2.5.0；修复锁内 Handlebars/fast-uri。安装后的前后端全量 npm audit 均0告警（当次审计，不代表未来持续无漏洞）。
+- 2026-10-12 已上线的提示词限制修补纳入版本控制，后端和客户端源文件 SHA256 与服务器一致：07a0534486cb39d8e8589dd81fa437dba4bd47f1cb9fdcdd1404ceaef5236191 / 38e182b2a249e599d3485dada5b6c24f1c5c941dfeb40565bb26f11b30444125。
+- 发现并修复账单 import/confirm Controller 缺失管理员鉴权：复用 AdminTokenGuard，并修复 token 字符等长、UTF8字节不等长时 RangeError 问题。新增真实 Nest/Express HTTP 测试，匿名、错误、多字节 token 均401且不调用账单服务；合法管理员调用保留。
+- Jest29 测试专用 ESM 转换器支持 Nest12 与 import.meta.url，移除假的 Nest testing shim；保留原单测的 Swagger 元数据 stub。真实 HTTP 和合同测试补足框架装配验证。
+- 前端修复旧 catch any、Effect 声明顺序和状态更新、账单 Select、Tailwind import 等门禁；接口与权限保持不变。新增错误信息解析测试，只显示原有服务端 message，畸形值回退默认文案。
+- Node22.23.4 后端 build成功；43 suites / 425 tests通过。前端lint 0errors/11既有warnings、37tests通过、tsc通过；目标Node下Webpack生产构建通过。本机默认Turbopack受CSS worker端口权限限制，不能声称已通过默认构建；Linux CI及服务器候选构建将补验。
+- Worker214passed/26缺外部workflow而skip/23live_contract默认排除；客户端167passed；scripts Python74passed，Node脚本9passed。
+- 隔离合同脚本：空库/历史库迁移通过，后端8suites/51tests、Fake Provider8tests、跨包21passed/2预期skip；Docker Fake Provider服务名寻址通过。首次脚本因系统Python缺pytest失败，设置专用venv PATH后完整通过；没有真实Provider调用。
+- 独立审查未发现实质回归或提交阻塞。临时本地前端3407仅用于页面检查，不连接真实生成服务。
+- 截至本节更新尚未提交或发布；发布时核实CI、备份恢复、精确SHA、实际版本、401门禁与回退点，不执行付费生成验收。后续执行结果追加在本节。
+
+证据日志：`/tmp/video-flow-security-backend-final.log`、`/tmp/video-flow-security-contract-final.log`、`/tmp/video-flow-security-webpack-final.log`、`/tmp/video-flow-addressing-final.log`，以及 `/tmp/video-flow-{worker,client,scripts-python}-gate.log`。历史结果见下。
+
 > 最后核验：2026-09-21
 > 本轮核验方式：本地源码评审、三包回归、合同资源校验、隔离 PostgreSQL 全新/历史迁移、真实 Nest HTTP/数据库合同，Comfy Desktop + Fake Provider/Fake OSS 的实际 Queue、下载、落盘和播放，以及 R8 在生产环境、真实火山账号上的受控付费验收与收口（真实调用 Provider、真实产生费用，见下）。
 > 本文是**唯一**描述"系统现在是什么样"的文档。任何历史文档与本文冲突时，以本文为准；如果本文与代码冲突，以代码为准并立即更新本文。

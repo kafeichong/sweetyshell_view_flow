@@ -1,14 +1,24 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import api from '@/lib/api';
-import type { TokenInfo, TokenLogsResponse } from '@/types/api';
+import api, { getApiErrorMessage } from '@/lib/api';
+import type { Actor, TokenInfo, TokenLogsResponse } from '@/types/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Download, RefreshCw } from 'lucide-react';
+
+interface AdminToken extends Actor {
+  lastUsedAt?: string | null;
+  spending?: {
+    dailySettled?: string;
+    monthlySettled?: string;
+    reserved?: string;
+    review?: string;
+  };
+}
 
 export default function TokensPage() {
   const router = useRouter();
@@ -17,7 +27,7 @@ export default function TokensPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [allTokens, setAllTokens] = useState<any[]>([]);
+  const [allTokens, setAllTokens] = useState<AdminToken[]>([]);
   const [selectedActorId, setSelectedActorId] = useState<string>('');
 
   // 过滤和搜索状态
@@ -25,63 +35,53 @@ export default function TokensPage() {
   const [filterMethod, setFilterMethod] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
 
+  const loadData = useCallback(() => {
+    const mode = localStorage.getItem('auth_mode');
+    const request = mode === 'admin'
+      ? api.get('/v1/admin/tokens').then((response) => {
+          setAllTokens(response.data);
+          if (response.data.length > 0) setSelectedActorId(response.data[0].actorId);
+        })
+      : Promise.all([
+          api.get('/v1/tokens/current'),
+          api.get('/v1/tokens/usage-logs?limit=50'),
+        ]).then(([infoRes, logsRes]) => {
+          setInfo(infoRes.data);
+          setLogs(logsRes.data);
+        });
+    return request
+      .catch((err: unknown) => {
+        setError(getApiErrorMessage(err, '加载失败'));
+        console.error('Failed to fetch token data:', err);
+      })
+      .finally(() => {
+        setIsAdmin(mode === 'admin');
+        setLoading(false);
+      });
+  }, []);
+
+  const fetchData = () => {
+    setLoading(true);
+    setError(null);
+    return loadData();
+  };
+
   useEffect(() => {
     const mode = localStorage.getItem('auth_mode');
     if (mode !== 'admin') {
       router.replace('/dashboard');
       return;
     }
-    setIsAdmin(mode === 'admin');
-    fetchData();
-  }, [router]);
+    void loadData();
+  }, [router, loadData]);
 
   useEffect(() => {
     if (selectedActorId) {
-      fetchActorLogs(selectedActorId);
+      api.get<TokenLogsResponse>(`/v1/admin/tokens/${selectedActorId}/usage-logs?limit=50`)
+        .then((response) => setLogs(response.data))
+        .catch((err: unknown) => console.error('Failed to fetch actor logs:', err));
     }
   }, [selectedActorId]);
-
-  const fetchData = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      const mode = localStorage.getItem('auth_mode');
-
-      if (mode === 'admin') {
-        // 管理员模式：获取所有token列表
-        const tokensRes = await api.get('/v1/admin/tokens');
-        setAllTokens(tokensRes.data);
-
-        // 默认选择第一个用户
-        if (tokensRes.data.length > 0) {
-          setSelectedActorId(tokensRes.data[0].actorId);
-        }
-      } else {
-        // 用户模式：获取自己的token信息和日志
-        const [infoRes, logsRes] = await Promise.all([
-          api.get('/v1/tokens/current'),
-          api.get('/v1/tokens/usage-logs?limit=50'),
-        ]);
-        setInfo(infoRes.data);
-        setLogs(logsRes.data);
-      }
-    } catch (err: any) {
-      setError(err.response?.data?.message || '加载失败');
-      console.error('Failed to fetch token data:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchActorLogs = async (actorId: string) => {
-    try {
-      const logsRes = await api.get(`/v1/admin/tokens/${actorId}/usage-logs?limit=50`);
-      setLogs(logsRes.data);
-    } catch (err: any) {
-      console.error('Failed to fetch actor logs:', err);
-    }
-  };
 
   // 过滤日志
   const filteredLogs = logs?.logs.filter((log) => {

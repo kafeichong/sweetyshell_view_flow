@@ -1,7 +1,7 @@
 // API响应类型定义
 
 // 通用响应
-export interface ApiResponse<T = any> {
+export interface ApiResponse<T = unknown> {
   data?: T;
   error?: string;
   message?: string;

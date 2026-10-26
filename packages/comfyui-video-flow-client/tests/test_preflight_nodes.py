@@ -1251,3 +1251,20 @@ def test_confirmed_submission_publishes_the_upload_slot_and_binds_the_published_
 
 def test_ark_upload_passes_through_when_unused():
     assert n.ArkUploadInput().inspect(n.UNUSED_MEDIA_CHOICE, None) == ([],)
+
+
+@pytest.mark.parametrize('kind', ['text', 'omni'])
+def test_long_prompt_is_preserved_beyond_former_limit(kind):
+    prompt = '镜头动作 Hello。\n' * 1500
+    if kind == 'text':
+        request = n.TextRequest().build(prompt)[0]
+    else:
+        media = [{'descriptor': {'role': 'reference_image', 'sha256': 'a' * 64}}]
+        request = n.MultiReferenceRequest().build(media, prompt)[0]
+    assert request['intent']['prompt']['positive'] == prompt.strip()
+
+
+@pytest.mark.parametrize('prompt', ['', '   ', '\n\t'])
+def test_blank_prompt_remains_rejected(prompt):
+    with pytest.raises(ValueError, match='提示词不能为空'):
+        n.TextRequest().build(prompt)

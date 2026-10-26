@@ -68,6 +68,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     '/tokens': '用户 Token 管理',
     '/alerts': '预警管理',
     '/reconciliation': '对账管理',
+    '/billing': '账单导入',
   };
 
   const currentTitle = pageTitles[pathname] || '控制台';

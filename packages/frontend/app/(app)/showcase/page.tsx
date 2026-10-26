@@ -53,45 +53,44 @@ export default function ShowcasePage() {
   const [videoUrls, setVideoUrls] = useState<Map<string, string>>(new Map());
 
   useEffect(() => {
-    fetchShowcaseTasks();
-  }, [page]);
+    async function load() {
+      setLoading(true);
+      setError(null);
 
-  const fetchShowcaseTasks = async () => {
-    setLoading(true);
-    setError(null);
+      try {
+        const response = await api.get<ShowcaseResponse>(showcaseRoutes.list, {
+          params: { page, limit: 12 },
+        });
 
-    try {
-      const response = await api.get<ShowcaseResponse>(showcaseRoutes.list, {
-        params: { page, limit: 12 },
-      });
+        setTasks(response.data.tasks);
+        setTotalPages(response.data.pagination.totalPages);
+        setTotal(response.data.pagination.total);
 
-      setTasks(response.data.tasks);
-      setTotalPages(response.data.pagination.totalPages);
-      setTotal(response.data.pagination.total);
-
-      const urls = new Map<string, string>();
-      await Promise.all(
-        response.data.tasks
-          .filter(task => task.outputAssetId)
-          .map(async (task) => {
-            try {
-              const videoResponse = await api.get<VideoPreview>(
-                showcaseRoutes.video(task.outputAssetId!)
-              );
-              urls.set(task.outputAssetId!, videoResponse.data.downloadUrl);
-            } catch (err) {
-              console.error(`Failed to fetch video for asset ${task.outputAssetId}:`, err);
-            }
-          })
-      );
-      setVideoUrls(urls);
-    } catch (err: any) {
-      console.error('Failed to fetch showcase tasks:', err);
-      setError('案例广场功能暂未完全就绪，敬请期待');
-    } finally {
-      setLoading(false);
+        const urls = new Map<string, string>();
+        await Promise.all(
+          response.data.tasks
+            .filter(task => task.outputAssetId)
+            .map(async (task) => {
+              try {
+                const videoResponse = await api.get<VideoPreview>(
+                  showcaseRoutes.video(task.outputAssetId!)
+                );
+                urls.set(task.outputAssetId!, videoResponse.data.downloadUrl);
+              } catch (err) {
+                console.error(`Failed to fetch video for asset ${task.outputAssetId}:`, err);
+              }
+            })
+        );
+        setVideoUrls(urls);
+      } catch (err: unknown) {
+        console.error('Failed to fetch showcase tasks:', err);
+        setError('案例广场功能暂未完全就绪，敬请期待');
+      } finally {
+        setLoading(false);
+      }
     }
-  };
+    void load();
+  }, [page]);
 
   if (error) {
     return (

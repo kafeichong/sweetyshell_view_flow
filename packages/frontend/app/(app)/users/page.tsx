@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useReducer, useState } from 'react';
-import api from '@/lib/api';
+import { useCallback, useEffect, useReducer, useState } from 'react';
+import api, { getApiErrorMessage } from '@/lib/api';
 import { writeClipboardText } from '@/lib/clipboard';
 import { createInitialUserDialogState, userDialogReducer } from '@/lib/user-create-dialog';
 import { isActorIdConfirmed } from '@/lib/user-delete';
@@ -54,27 +54,34 @@ export default function UsersPage() {
   const [rotationCopied, setRotationCopied] = useState(false);
   const [rotatingToken, setRotatingToken] = useState(false);
 
+  const loadData = useCallback(() => {
+    return api.get('/v1/admin/tokens')
+      .then((response) => {
+        setUsers(response.data);
+        setError(null);
+      })
+      .catch((err: unknown) => {
+        setError(getApiErrorMessage(err, '加载失败'));
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, []);
+
+  const fetchUsers = () => {
+    setLoading(true);
+    setError(null);
+    return loadData();
+  };
+
   useEffect(() => {
     const mode = localStorage.getItem('auth_mode');
     if (mode !== 'admin') {
       window.location.href = '/login';
       return;
     }
-    fetchUsers();
-  }, []);
-
-  const fetchUsers = async () => {
-    try {
-      setLoading(true);
-      const response = await api.get('/v1/admin/tokens');
-      setUsers(response.data);
-      setError(null);
-    } catch (err: any) {
-      setError(err.response?.data?.message || '加载失败');
-    } finally {
-      setLoading(false);
-    }
-  };
+    void loadData();
+  }, [loadData]);
 
   const handleCreateUser = async () => {
     if (!createDialog.draft.actorId.trim() || !createDialog.draft.name.trim()) {
@@ -87,8 +94,8 @@ export default function UsersPage() {
       const response = await api.post('/v1/admin/credentials', createDialog.draft);
       dispatchCreateDialog({ type: 'created', token: response.data.token });
       await fetchUsers();
-    } catch (err: any) {
-      alert(err.response?.data?.message || '创建失败');
+    } catch (err: unknown) {
+      alert(getApiErrorMessage(err, '创建失败'));
     } finally {
       setCreatingUser(false);
     }
@@ -130,8 +137,8 @@ export default function UsersPage() {
       });
       closeDeleteDialog();
       await fetchUsers();
-    } catch (err: any) {
-      alert(err.response?.data?.message || '删除失败');
+    } catch (err: unknown) {
+      alert(getApiErrorMessage(err, '删除失败'));
       await fetchUsers();
     } finally {
       setDeletingUser(false);
@@ -166,8 +173,8 @@ export default function UsersPage() {
       setRotatedToken(response.data.token);
       setRotateConfirmation('');
       await fetchUsers();
-    } catch (err: any) {
-      alert(err.response?.data?.message || '轮换失败');
+    } catch (err: unknown) {
+      alert(getApiErrorMessage(err, '轮换失败'));
     } finally {
       setRotatingToken(false);
     }
@@ -194,8 +201,8 @@ export default function UsersPage() {
       setUpdatingActorId(actorId);
       await api.patch(`/v1/admin/credentials/${actorId}/${enabled ? 'activate' : 'revoke'}`);
       await fetchUsers();
-    } catch (err: any) {
-      alert(err.response?.data?.message || `${enabled ? '启用' : '停用'}失败`);
+    } catch (err: unknown) {
+      alert(getApiErrorMessage(err, `${enabled ? '启用' : '停用'}失败`));
     } finally {
       setUpdatingActorId(null);
     }

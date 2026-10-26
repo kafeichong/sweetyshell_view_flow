@@ -39,3 +39,14 @@ api.interceptors.response.use(
 );
 
 export default api;
+
+/** Extract a safe API error message while retaining the caller's fallback. */
+export function getApiErrorMessage(error: unknown, fallback: string): string {
+  if (!axios.isAxiosError<{ message?: unknown }>(error)) return fallback;
+  const message = error.response?.data?.message;
+  if (typeof message === 'string' && message) return message;
+  if (Array.isArray(message) && message.every((item) => typeof item === 'string')) {
+    return message.join(', ') || fallback;
+  }
+  return fallback;
+}

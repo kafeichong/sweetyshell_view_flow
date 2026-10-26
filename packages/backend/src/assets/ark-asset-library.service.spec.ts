@@ -23,6 +23,8 @@ describe('ArkAssetLibraryService request signing', () => {
     // 期望值由一份**已在真实账号上验证通过**的 Python 实现算出（同一组固定输入）。
     // 两边只要有一处不一致——派生密钥链的顺序、签了哪些头、查询串怎么排序编码——
     // 这个断言就会红。真去踩的话，症状是线上 403 SignatureDoesNotMatch。
+    //
+    // 注意：这个测试验证 Ark 包装器仍然产生与之前完全相同的签名。
     const request = buildSignedRequest(CREDENTIALS, 'GetAsset', { Id: 'asset-1', ProjectName: 'default' }, X_DATE);
 
     expect(request.url).toBe('https://ark.cn-beijing.volcengineapi.com/?Action=GetAsset&Version=2024-01-01');
