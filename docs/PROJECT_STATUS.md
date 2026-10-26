@@ -1,6 +1,6 @@
 # Video Flow 项目现状（权威）
 
-## 2026-10-26 安全修补与生产基线整理（已验证，待发布）
+## 2026-10-26 安全修补与生产基线整理（已发布并验证）
 
 用户已授权整理既有线上账单/提示词基线、修复发布门禁并发布安全补丁。隔离工作区 `/private/tmp/video-flow-security-20261026` 基线 7f6a44a，与线上账单版本一致；原开发工作区未提交成果保留。线上已执行全部17项迁移，包括账单模型，不需要新增生产 migration。
 
@@ -10,11 +10,17 @@
 - 发现并修复账单 import/confirm Controller 缺失管理员鉴权：复用 AdminTokenGuard，并修复 token 字符等长、UTF8字节不等长时 RangeError 问题。新增真实 Nest/Express HTTP 测试，匿名、错误、多字节 token 均401且不调用账单服务；合法管理员调用保留。
 - Jest29 测试专用 ESM 转换器支持 Nest12 与 import.meta.url，移除假的 Nest testing shim；保留原单测的 Swagger 元数据 stub。真实 HTTP 和合同测试补足框架装配验证。
 - 前端修复旧 catch any、Effect 声明顺序和状态更新、账单 Select、Tailwind import 等门禁；接口与权限保持不变。新增错误信息解析测试，只显示原有服务端 message，畸形值回退默认文案。
-- Node22.23.4 后端 build成功；43 suites / 425 tests通过。前端lint 0errors/11既有warnings、37tests通过、tsc通过；目标Node下Webpack生产构建通过。本机默认Turbopack受CSS worker端口权限限制，不能声称已通过默认构建；Linux CI及服务器候选构建将补验。
+- Node22.23.4 后端 build成功；43 suites / 425 tests通过。前端lint 0errors/11既有warnings、37tests通过、tsc通过；目标Node下Webpack生产构建通过。本机默认Turbopack受CSS worker端口权限限制，不能声称已通过默认构建；Linux PR/main CI 及服务器候选默认 Turbopack 构建均已补验通过。
 - Worker214passed/26缺外部workflow而skip/23live_contract默认排除；客户端167passed；scripts Python74passed，Node脚本9passed。
 - 隔离合同脚本：空库/历史库迁移通过，后端8suites/51tests、Fake Provider8tests、跨包21passed/2预期skip；Docker Fake Provider服务名寻址通过。首次脚本因系统Python缺pytest失败，设置专用venv PATH后完整通过；没有真实Provider调用。
 - 独立审查未发现实质回归或提交阻塞。临时本地前端3407仅用于页面检查，不连接真实生成服务。
-- 截至本节更新尚未提交或发布；发布时核实CI、备份恢复、精确SHA、实际版本、401门禁与回退点，不执行付费生成验收。后续执行结果追加在本节。
+- PR #9 已合入 main；2026-10-26 18:13 发布 `c2a176f31be7f5b66417f14e8b87fd09c023610e`。[主线 CI 六项通过](https://github.com/kafeichong/sweetyshell_view_flow/actions/runs/40301977823)。后端镜像 `video-flow-backend:security-c2a176f31be7`，ID `sha256:68aa62e31642c1e92945f70da70b76f0b3963fec7037cdfec493ba7cfc6a393f`，amd64、revision 一致；因服务器 Debian 下载慢，使用同提交本地 AMD64 构建后导入。
+- 加密备份 `/data/video-flow-backups/security-c2a176f31be7/predeploy.dump.enc`，SHA256 `b2e9ea33000905ba25a86ba9045c1778b9bacd4e15bf4694d40e97521a995d38`。隔离 PostgreSQL 恢复后14张表行数/内容指纹与源库一致，临时容器已清理。
+- 候选 `prisma migrate status` 确认17项迁移全部完成，未执行 migration。服务器无网络候选容器 body-parser 压缩请求回归通过。
+- 发布目录 `/data/video-flow-security-releases/c2a176f31be7f5b66417f14e8b87fd09c023610e`，前端 systemd drop-in `30-security-20261026.conf` 使用专用 `/opt/video-flow-node/22.23.4/bin/node`，未升级全局 Node。现场 backend Node22.23.4/body-parser2.4.0/Multer2.5.0，frontend Next16.4.1/sharp0.35.5。
+- 有效管理员 GET operations/health 为200且DB ok/pending0；匿名任务/运维/账单 import/confirm、错误多字节 token 均401；登录及实际JS资源200，隐藏 `.env` 404。其他9个容器ID不变。未修改生产 `.env`、Nginx、Worker、数据库结构，未发起付费生成或实际账单导入。
+- 回退脚本保存在 `/data/video-flow-backups/security-c2a176f31be7/video-flow-security-rollback.sh`，参数为发布完整SHA；恢复保留的旧后端镜像并撤下本次前端drop-in，不恢复数据库。旧前端目录 `7f6a44a-api-20260921` 保留。脚本静态校验通过，未实际执行回退；回退将撤掉安全补丁。
+- 验证脚本同目录 `video-flow-security-verify.sh`；执行端 `/tmp/video-flow-verification.log` 保存现场输出。真实账号完整业务与付费生成未验收。
 
 证据日志：`/tmp/video-flow-security-backend-final.log`、`/tmp/video-flow-security-contract-final.log`、`/tmp/video-flow-security-webpack-final.log`、`/tmp/video-flow-addressing-final.log`，以及 `/tmp/video-flow-{worker,client,scripts-python}-gate.log`。历史结果见下。
 
