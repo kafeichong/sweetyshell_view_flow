@@ -1,8 +1,10 @@
-import { Controller, Post, Body } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards } from '@nestjs/common';
+import { AdminTokenGuard } from '../../auth/admin-token.guard';
 import { BillingImportService, ImportPreview } from './billing-import.service';
 import { ImportBillingDto, ConfirmBillingDto } from './billing.dto';
 
 @Controller('v1/admin/billing')
+@UseGuards(AdminTokenGuard)
 export class BillingController {
   constructor(private readonly importService: BillingImportService) {}
 

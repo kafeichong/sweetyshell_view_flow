@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import api from '@/lib/api';
+import api, { getApiErrorMessage } from '@/lib/api';
 import type { AdminConsumptionSummary, ConsumptionOverview, ConsumptionTrendsResponse } from '@/types/api';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -22,7 +22,6 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const admin = localStorage.getItem('auth_mode') === 'admin';
-    setIsAdmin(admin);
 
     const fetchData = async () => {
       try {
@@ -46,9 +45,10 @@ export default function DashboardPage() {
           setTrends(trendsRes.data);
           setAdminSummary(null);
         }
-      } catch (err: any) {
-        setError(err.response?.data?.message || '加载失败');
+      } catch (err: unknown) {
+        setError(getApiErrorMessage(err, '加载失败'));
       } finally {
+        setIsAdmin(admin);
         setLoading(false);
       }
     };

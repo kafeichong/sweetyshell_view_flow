@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import api from '@/lib/api';
+import { useCallback, useEffect, useState } from 'react';
+import api, { getApiErrorMessage } from '@/lib/api';
 import type { AlertsConfig } from '@/types/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -25,31 +25,37 @@ export default function AlertsPage() {
     monthlyThreshold: '',
   });
 
-  useEffect(() => {
-    fetchConfig();
+  const loadData = useCallback(() => {
+    return api.get('/v1/consumption/alerts')
+      .then((response) => {
+        const data = response.data;
+
+        setConfig(data);
+        setFormData({
+          dailyEnabled: data.daily?.enabled || false,
+          dailyThreshold: data.daily?.thresholdCny || '',
+          monthlyEnabled: data.monthly?.enabled || false,
+          monthlyThreshold: data.monthly?.thresholdCny || '',
+        });
+      })
+      .catch((err: unknown) => {
+        setError(getApiErrorMessage(err, '加载失败'));
+        console.error('Failed to fetch alerts config:', err);
+      })
+      .finally(() => {
+        setLoading(false);
+      });
   }, []);
 
-  const fetchConfig = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const response = await api.get('/v1/consumption/alerts');
-      const data = response.data;
-
-      setConfig(data);
-      setFormData({
-        dailyEnabled: data.daily?.enabled || false,
-        dailyThreshold: data.daily?.thresholdCny || '',
-        monthlyEnabled: data.monthly?.enabled || false,
-        monthlyThreshold: data.monthly?.thresholdCny || '',
-      });
-    } catch (err: any) {
-      setError(err.response?.data?.message || '加载失败');
-      console.error('Failed to fetch alerts config:', err);
-    } finally {
-      setLoading(false);
-    }
+  const fetchConfig = () => {
+    setLoading(true);
+    setError(null);
+    return loadData();
   };
+
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
 
   const handleSave = async () => {
     try {
@@ -71,8 +77,8 @@ export default function AlertsPage() {
 
       alert('保存成功');
       fetchConfig();
-    } catch (err: any) {
-      alert(err.response?.data?.message || '保存失败');
+    } catch (err: unknown) {
+      alert(getApiErrorMessage(err, '保存失败'));
     } finally {
       setSaving(false);
     }

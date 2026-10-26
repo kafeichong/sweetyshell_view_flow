@@ -1,17 +1,20 @@
 module.exports = {
   testEnvironment: 'node',
   testMatch: ['<rootDir>/src/**/*.{spec,test}.ts'],
-  moduleFileExtensions: ['ts', 'js', 'json'],
+  moduleFileExtensions: ['ts', 'js', 'cjs', 'json'],
   transform: {
-    '^.+\\.(t|j)s$': 'ts-jest',
+    '^.+\\.ts$': 'ts-jest',
+    '^.+\\.js$': '<rootDir>/test/transform-esm.cjs',
   },
-  // @nestjs/swagger@12 ships pure ESM with deep imports that bypass @nestjs/common's
-  // CJS build, which ts-jest can't transpile cleanly. Its decorators only attach
-  // OpenAPI metadata (inert for unit tests), so swap in a no-op stub for Jest runs.
-  // @nestjs/testing@12 has the same issue.
+  // Nest 12 and file-type's dependency chain ship ESM. Load their real code so
+  // dependency injection, decorators and guards remain testable under Jest 29.
+  transformIgnorePatterns: [
+    '/node_modules/(?!(@nestjs/|file-type/|strtok3/|token-types/|uint8array-extras/|@tokenizer/|@borewit/|peek-readable/))',
+  ],
+  // Legacy isolated controller suites mock @nestjs/common incompletely; Swagger
+  // metadata is outside their scope. Nest testing itself must remain real.
   moduleNameMapper: {
     '^@nestjs/swagger$': '<rootDir>/test/mocks/nestjs-swagger.ts',
-    '^@nestjs/testing$': '<rootDir>/test/mocks/nestjs-testing.ts',
   },
   collectCoverageFrom: ['src/**/*.ts'],
   coveragePathIgnorePatterns: ['/node_modules/', '/dist/'],

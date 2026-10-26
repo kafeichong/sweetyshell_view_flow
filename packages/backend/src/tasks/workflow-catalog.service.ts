@@ -125,7 +125,7 @@ export class WorkflowCatalogService {
 
     const prompt = objectAt(raw.prompt, 'prompt');
     exactKeys(prompt, ['positive'], 'prompt');
-    if (typeof prompt.positive !== 'string' || !prompt.positive.trim() || prompt.positive.length > 4000) {
+    if (typeof prompt.positive !== 'string' || !prompt.positive.trim()) {
       throw new WorkflowContractError('WORKFLOW_PROMPT_INVALID', 'prompt.positive');
     }
 

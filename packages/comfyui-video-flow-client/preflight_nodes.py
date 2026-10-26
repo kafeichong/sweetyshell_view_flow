@@ -211,8 +211,8 @@ class ProductRequest:
     FUNCTION = "build"
     CATEGORY = "Video Flow/Seedance"
     def build(self, media, prompt, duration=5, ratio="16:9", resolution="720p"):
-        if not prompt.strip() or len(prompt.strip()) > 4000:
-            raise ValueError("提示词不能为空，且不超过 4000 字符")
+        if not prompt.strip():
+            raise ValueError("提示词不能为空")
         intent = {"contractVersion": 2, "workflowKey": "seedance.reference-image-to-video.v1", "prompt": {"positive": prompt.strip()},
             "generation": generation_request(duration, ratio, resolution), "media": [media["descriptor"]]}
         return ({"intent": intent, "media": media},)
@@ -249,8 +249,8 @@ class TextRequest:
     FUNCTION = "build"
     CATEGORY = "Video Flow/Seedance"
     def build(self, prompt, duration=5, ratio="16:9", resolution="720p"):
-        if not prompt.strip() or len(prompt.strip()) > 4000:
-            raise ValueError("提示词不能为空，且不超过 4000 字符")
+        if not prompt.strip():
+            raise ValueError("提示词不能为空")
         return ({"intent": {"contractVersion": 2, "workflowKey": "seedance.text-to-video.v1", "prompt": {"positive": prompt.strip()},
             "generation": generation_request(duration, ratio, resolution), "media": []}},)
 
@@ -670,7 +670,7 @@ class MultiReferenceRequest:
     FUNCTION = "build"
     CATEGORY = "Video Flow/Seedance"
     def build(self, reference_media, prompt, duration=5, ratio="16:9", resolution="720p"):
-        if not prompt.strip() or len(prompt.strip()) > 4000: raise ValueError("提示词不能为空，且不超过 4000 字符")
+        if not prompt.strip(): raise ValueError("提示词不能为空")
         if not reference_media:
             raise ValueError("至少需要一个参考素材：在参考图片 / 视频 / 音频节点的下拉里选一个文件"
                              "（其余槽位可以留在「不给素材」，不用删连线）")
@@ -705,8 +705,8 @@ class VideoEditRequest:
     FUNCTION = "build"
     CATEGORY = "Video Flow/Seedance"
     def build(self, reference_media, prompt, resolution="720p"):
-        if not prompt.strip() or len(prompt.strip()) > 4000:
-            raise ValueError("提示词不能为空，且不超过 4000 字符")
+        if not prompt.strip():
+            raise ValueError("提示词不能为空")
         reference_media = _validated_reference_media(reference_media)
         videos = [
             item for item in reference_media
@@ -756,8 +756,8 @@ class VideoExtendRequest:
     FUNCTION = "build"
     CATEGORY = "Video Flow/Seedance"
     def build(self, reference_media, prompt, duration=5, resolution="720p"):
-        if not prompt.strip() or len(prompt.strip()) > 4000:
-            raise ValueError("提示词不能为空，且不超过 4000 字符")
+        if not prompt.strip():
+            raise ValueError("提示词不能为空")
         if not isinstance(duration, int) or isinstance(duration, bool) or not 4 <= duration <= 30:
             raise ValueError("延长输出时长必须为 4–30 秒整数")
         reference_media = _validated_reference_media(reference_media)
@@ -796,8 +796,8 @@ class AudioReferenceRequest:
     FUNCTION = "build"
     CATEGORY = "Video Flow/Seedance"
     def build(self, reference_media, prompt, duration=5, ratio="16:9", resolution="720p"):
-        if not prompt.strip() or len(prompt.strip()) > 4000:
-            raise ValueError("提示词不能为空，且不超过 4000 字符")
+        if not prompt.strip():
+            raise ValueError("提示词不能为空")
         reference_media = _validated_reference_media(reference_media)
         if not reference_media:
             raise ValueError("音频参考至少需要一段参考音频")
@@ -849,7 +849,7 @@ class FirstFrameRequest:
     FUNCTION = "build"
     CATEGORY = "Video Flow/Seedance"
     def build(self, media, prompt, duration=5, ratio="adaptive", resolution="720p"):
-        if not prompt.strip() or len(prompt.strip()) > 4000: raise ValueError("提示词不能为空，且不超过 4000 字符")
+        if not prompt.strip(): raise ValueError("提示词不能为空")
         return ({"intent": {"contractVersion": 2, "workflowKey": "seedance.first-frame-to-video.v1", "prompt": {"positive": prompt.strip()},
             "generation": generation_request(duration, ratio, resolution), "media": [media["descriptor"]]},
             "media": [media]},)
@@ -865,7 +865,7 @@ class FirstLastFrameRequest:
     FUNCTION = "build"
     CATEGORY = "Video Flow/Seedance"
     def build(self, first_frame, last_frame, prompt, duration=5, ratio="adaptive", resolution="720p"):
-        if not prompt.strip() or len(prompt.strip()) > 4000: raise ValueError("提示词不能为空，且不超过 4000 字符")
+        if not prompt.strip(): raise ValueError("提示词不能为空")
         return ({"intent": {"contractVersion": 2, "workflowKey": "seedance.first-last-frame-to-video.v1", "prompt": {"positive": prompt.strip()},
             "generation": generation_request(duration, ratio, resolution),
             "media": [first_frame["descriptor"], last_frame["descriptor"]]},

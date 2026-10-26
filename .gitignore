@@ -6,6 +6,8 @@ dist/
 *.log
 pnpm-lock.yaml
 package-lock.json
+!packages/frontend/package-lock.json
+!packages/backend/package-lock.json
 
 # Python
 __pycache__/

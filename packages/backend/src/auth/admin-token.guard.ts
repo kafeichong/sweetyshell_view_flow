@@ -7,8 +7,13 @@ export class AdminTokenGuard implements CanActivate {
     const request = context.switchToHttp().getRequest();
     const actual = request.headers?.['x-admin-token'] ?? '';
     const expected = process.env.VIDEO_FLOW_ADMIN_TOKEN ?? '';
-    const valid = Boolean(expected && actual && actual.length === expected.length) &&
-      timingSafeEqual(Buffer.from(actual), Buffer.from(expected));
+    if (!expected || typeof actual !== 'string' || !actual) {
+      throw new UnauthorizedException('Admin token required');
+    }
+    const actualBytes = Buffer.from(actual);
+    const expectedBytes = Buffer.from(expected);
+    const valid = actualBytes.length === expectedBytes.length &&
+      timingSafeEqual(actualBytes, expectedBytes);
     if (!valid) throw new UnauthorizedException('Admin token required');
     return true;
   }

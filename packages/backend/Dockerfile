@@ -1,4 +1,4 @@
-FROM node:20-slim
+FROM node:22.23.4-bookworm-slim
 
 WORKDIR /app
 
@@ -10,10 +10,10 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # 复制依赖文件
-COPY package.json ./
+COPY package.json package-lock.json ./
 
 # 安装依赖
-RUN npm install
+RUN npm ci
 
 # 复制代码
 COPY . .

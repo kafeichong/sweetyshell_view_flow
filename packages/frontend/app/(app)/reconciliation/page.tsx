@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import api from '@/lib/api';
+import { useCallback, useEffect, useState } from 'react';
+import api, { getApiErrorMessage } from '@/lib/api';
 import type { ReconciliationRecord } from '@/types/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -28,23 +28,29 @@ export default function ReconciliationPage() {
   });
   const [submitting, setSubmitting] = useState(false);
 
-  useEffect(() => {
-    fetchRecords();
+  const loadData = useCallback(() => {
+    return api.get('/v1/admin/reconciliation/records')
+      .then((response) => {
+        setRecords(response.data.records || []);
+      })
+      .catch((err: unknown) => {
+        setError(getApiErrorMessage(err, '加载失败'));
+        console.error('Failed to fetch reconciliation records:', err);
+      })
+      .finally(() => {
+        setLoading(false);
+      });
   }, []);
 
-  const fetchRecords = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const response = await api.get('/v1/admin/reconciliation/records');
-      setRecords(response.data.records || []);
-    } catch (err: any) {
-      setError(err.response?.data?.message || '加载失败');
-      console.error('Failed to fetch reconciliation records:', err);
-    } finally {
-      setLoading(false);
-    }
+  const fetchRecords = () => {
+    setLoading(true);
+    setError(null);
+    return loadData();
   };
+
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,8 +68,8 @@ export default function ReconciliationPage() {
       setFormData({ monthKey: '', actorId: '', providerBillCny: '', notes: '' });
       setShowForm(false);
       fetchRecords();
-    } catch (err: any) {
-      alert(err.response?.data?.message || '提交失败');
+    } catch (err: unknown) {
+      alert(getApiErrorMessage(err, '提交失败'));
     } finally {
       setSubmitting(false);
     }

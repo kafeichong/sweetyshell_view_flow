@@ -6,7 +6,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
-import api from '@/lib/api';
+import api, { getApiErrorMessage } from '@/lib/api';
 import { showcaseRoutes } from '@/lib/api-routes';
 import { writeClipboardText } from '@/lib/clipboard';
 import { ImageLightbox } from '@/components/image-lightbox';
@@ -78,23 +78,22 @@ export default function ShowcaseDetailPage() {
   }));
 
   useEffect(() => {
-    fetchTaskDetail();
-  }, [taskId]);
+    async function load() {
+      setLoading(true);
+      setError(null);
 
-  const fetchTaskDetail = async () => {
-    setLoading(true);
-    setError(null);
-
-    try {
-      const response = await api.get<TaskDetail>(showcaseRoutes.detail(taskId));
-      setTask({ ...response.data, inputAssets: response.data.inputAssets ?? [] });
-    } catch (err: any) {
-      console.error('Failed to fetch task detail:', err);
-      setError(err.response?.data?.message || '加载失败');
-    } finally {
-      setLoading(false);
+      try {
+        const response = await api.get<TaskDetail>(showcaseRoutes.detail(taskId));
+        setTask({ ...response.data, inputAssets: response.data.inputAssets ?? [] });
+      } catch (err: unknown) {
+        console.error('Failed to fetch task detail:', err);
+        setError(getApiErrorMessage(err, '加载失败'));
+      } finally {
+        setLoading(false);
+      }
     }
-  };
+    void load();
+  }, [taskId]);
 
   const copyPrompt = async () => {
     if (!task) return;

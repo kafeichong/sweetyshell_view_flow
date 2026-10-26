@@ -1,9 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import api from '@/lib/api';
+import api, { getApiErrorMessage } from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Select } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 
 interface TaskAllocation {
@@ -47,8 +48,8 @@ export default function BillingImportPage() {
       });
 
       setPreview(response.data);
-    } catch (err: any) {
-      setError(err.response?.data?.message || '导入失败');
+    } catch (err: unknown) {
+      setError(getApiErrorMessage(err, '导入失败'));
       console.error('Failed to import billing:', err);
     } finally {
       setLoading(false);
@@ -72,8 +73,8 @@ export default function BillingImportPage() {
 
       setConfirmed(true);
       alert('账单分配已确认');
-    } catch (err: any) {
-      setError(err.response?.data?.message || '确认失败');
+    } catch (err: unknown) {
+      setError(getApiErrorMessage(err, '确认失败'));
       console.error('Failed to confirm billing:', err);
     } finally {
       setConfirming(false);
@@ -128,13 +129,13 @@ export default function BillingImportPage() {
                 <label className="block text-sm font-normal text-foreground mb-2">
                   Provider *
                 </label>
-                <select
+                <Select
                   value={provider}
                   onChange={(e) => setProvider(e.target.value)}
                   className="w-full px-4 py-2 border border-border rounded-md focus:ring-2 focus:ring-ring focus:border-transparent"
                 >
                   <option value="volcengine">火山引擎</option>
-                </select>
+                </Select>
               </div>
             </div>
 

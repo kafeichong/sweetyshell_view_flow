@@ -1,9 +1,19 @@
 {
   "testEnvironment": "node",
-  "testMatch": ["<rootDir>/**/*.contract-spec.ts"],
-  "moduleFileExtensions": ["ts", "js", "json"],
+  "testMatch": [
+    "<rootDir>/**/*.contract-spec.ts"
+  ],
+  "moduleFileExtensions": [
+    "ts",
+    "js",
+    "json"
+  ],
   "transform": {
-    "^.+\\.(t|j)s$": "ts-jest"
+    "^.+\\.ts$": "ts-jest",
+    "^.+\\.js$": "<rootDir>/transform-esm.cjs"
   },
-  "maxWorkers": 1
+  "maxWorkers": 1,
+  "transformIgnorePatterns": [
+    "/node_modules/(?!(@nestjs/|file-type/|strtok3/|token-types/|uint8array-extras/|@tokenizer/|@borewit/|peek-readable/))"
+  ]
 }
